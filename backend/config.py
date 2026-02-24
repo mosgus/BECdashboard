@@ -1,19 +1,21 @@
 """Application configuration via pydantic-settings.
 
-All required vars are validated on import — the app will not start
-if CLASS_PASSWORD, JWT_SECRET, or DATABASE_URL are missing.
+DATABASE_URL is the only required variable.
+
+Identity is actor-header based (X-Actor-Name) — no JWT or class password needed.
+The optional CLASS_WRITE_KEY provides basic mutation protection for public deployments:
+if set, all POST/PUT/PATCH/DELETE requests must include X-Class-Key: <value>.
 """
 from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    # Auth
-    class_password: str
-    jwt_secret: str
-    jwt_expiry_hours: int = 8
-
-    # Database
+    # Database — required
     database_url: str
+
+    # Optional write-key gate — if set, mutations require X-Class-Key header.
+    # Leave unset for open cohort access.
+    class_write_key: str | None = None
 
     # CORS — comma-separated origins, "*" allows all (dev default)
     cors_origins: str = "*"

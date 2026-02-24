@@ -8,8 +8,6 @@ cachetools>=5.3.3
 pydantic>=2.7.0
 pydantic-settings>=2.0.0
 python-multipart>=0.0.9
-# Auth
-python-jose[cryptography]>=3.3.0
 # Database
 sqlalchemy>=2.0.0
 alembic>=1.13.0

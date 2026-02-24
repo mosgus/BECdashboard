@@ -1,4 +1,4 @@
-"""Blue Eagle API — v2.0.0 (auth + audit + persistence)."""
+"""Blue Eagle API — v2.1.0 (actor-header identity + audit + persistence)."""
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -8,7 +8,6 @@ from config import settings
 from db.base import Base, engine
 from middleware.audit import AuditMiddleware
 from routers import alerts, optimize, portfolio, technicals
-from routers.auth import router as auth_router
 
 
 @asynccontextmanager
@@ -18,20 +17,19 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="Blue Eagle API", version="2.0.0", lifespan=lifespan)
+app = FastAPI(title="Blue Eagle API", version="2.1.0", lifespan=lifespan)
 
 # Middleware — added in reverse order (last added = outermost wrapper)
-# AuditMiddleware must be inner so it sees final status codes from CORS/auth
+# AuditMiddleware must be inner so it sees final status codes from CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins.split(","),
     allow_methods=["*"],
-    allow_headers=["*"],
+    allow_headers=["Content-Type", "X-Actor-Name", "X-Class-Key"],
     allow_credentials=True,
 )
 app.add_middleware(AuditMiddleware)
 
-app.include_router(auth_router,         prefix="/api/auth",      tags=["auth"])
 app.include_router(portfolio.router,    prefix="/api/portfolio", tags=["portfolio"])
 app.include_router(optimize.router,     prefix="/api",           tags=["optimize"])
 app.include_router(technicals.router,   prefix="/api",           tags=["technicals"])
@@ -48,4 +46,4 @@ def health() -> dict:
         db_status = "ok"
     except Exception:
         db_status = "error"
-    return {"status": "ok", "db": db_status, "version": "2.0.0"}
+    return {"status": "ok", "db": db_status, "version": "2.1.0"}

@@ -1,52 +1,41 @@
-"""JWT utilities and FastAPI auth dependency."""
+"""Identity helpers — actor-header based identity (no JWT).
+
+Design:
+- Actor identity comes from the X-Actor-Name request header (user-supplied display name).
+- If the header is missing or blank, actor defaults to "unknown".
+- The optional CLASS_WRITE_KEY gate (X-Class-Key header) can protect mutations
+  when the app is deployed publicly. It is NOT an identity mechanism.
+
+Why no JWT:
+- Professor guidance: "don't worry too much about security" — reliability matters more.
+- JWT adds moving parts (secret rotation, expiry, auth bugs) not required for the course.
+- Audit logging is retained for full accountability — actor source changes, not the log.
+"""
 from __future__ import annotations
 
-import secrets
-from datetime import datetime, timedelta, timezone
-
-from fastapi import Header, HTTPException
-from jose import JWTError, jwt
+from fastapi import HTTPException, Request
 
 from config import settings
 
-_ALGORITHM = "HS256"
 
+def get_actor_name(request: Request) -> str:
+    """Extract and sanitize the actor name from X-Actor-Name header.
 
-def create_token(display_name: str) -> str:
-    now = datetime.now(timezone.utc)
-    exp = now + timedelta(hours=settings.jwt_expiry_hours)
-    return jwt.encode(
-        {"sub": display_name, "iat": now, "exp": exp},
-        settings.jwt_secret,
-        algorithm=_ALGORITHM,
-    )
-
-
-def decode_token(token: str) -> str:
-    """Decode and validate a JWT. Returns display_name (sub) or raises JWTError."""
-    payload = jwt.decode(token, settings.jwt_secret, algorithms=[_ALGORITHM])
-    sub = payload.get("sub")
-    if not sub:
-        raise JWTError("Missing sub claim")
-    return str(sub)
-
-
-def verify_password(plain: str) -> bool:
-    """Constant-time comparison against CLASS_PASSWORD."""
-    return secrets.compare_digest(plain.encode(), settings.class_password.encode())
-
-
-async def get_current_actor(
-    authorization: str | None = Header(default=None),
-) -> str:
-    """FastAPI dependency — extracts and validates Bearer token.
-
-    Raises 401 if token is missing, malformed, or expired.
+    Trims whitespace, caps at 64 chars, defaults to 'unknown'.
+    Never raises — always returns a safe non-empty string.
     """
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    token = authorization.removeprefix("Bearer ")
-    try:
-        return decode_token(token)
-    except JWTError:
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    raw = request.headers.get("x-actor-name", "")
+    return raw.strip()[:64] or "unknown"
+
+
+def require_write_key(request: Request) -> None:
+    """FastAPI dependency for optional write-key protection.
+
+    No-op when CLASS_WRITE_KEY is not set (open access mode, suitable for course use).
+    When CLASS_WRITE_KEY is set, rejects mutations whose X-Class-Key header does not match.
+    Returns 403 — not 401 — because this is not identity authentication.
+    """
+    if settings.class_write_key:
+        provided = request.headers.get("x-class-key", "")
+        if provided != settings.class_write_key:
+            raise HTTPException(status_code=403, detail="Missing or invalid write key")

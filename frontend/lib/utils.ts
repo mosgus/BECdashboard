@@ -22,31 +22,29 @@ export const colorForValue = (v: number, neutral = 0): string => {
 };
 
 /**
- * Typed POST wrapper. Attaches Authorization header from localStorage
- * and redirects to /login on 401.
+ * Typed POST wrapper. Attaches X-Actor-Name header from localStorage.
+ * If NEXT_PUBLIC_CLASS_WRITE_KEY is set, also sends X-Class-Key header.
  */
 export async function apiPost<T>(path: string, body: unknown): Promise<T> {
   const base = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
-  const token =
-    typeof window !== "undefined" ? localStorage.getItem("be_token") : null;
+  const actorName =
+    typeof window !== "undefined"
+      ? (localStorage.getItem("be_actor") ?? "unknown")
+      : "unknown";
+
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    "X-Actor-Name": actorName,
+  };
+
+  const writeKey = process.env.NEXT_PUBLIC_CLASS_WRITE_KEY;
+  if (writeKey) headers["X-Class-Key"] = writeKey;
 
   const res = await fetch(`${base}${path}`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
+    headers,
     body: JSON.stringify(body),
   });
-
-  if (res.status === 401) {
-    if (typeof window !== "undefined") {
-      localStorage.removeItem("be_token");
-      localStorage.removeItem("be_actor");
-      window.location.href = "/login";
-    }
-    throw new Error("Session expired. Please log in again.");
-  }
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));

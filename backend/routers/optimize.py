@@ -10,7 +10,7 @@ import pandas as pd
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, field_validator
 
-from auth import get_current_actor
+from auth import require_write_key
 
 from core.cache import fetch_prices
 from core.portfolio import (
@@ -72,7 +72,7 @@ def _df_to_records(df: pd.DataFrame) -> list[dict]:
 
 
 @router.post("/optimize")
-def optimize_portfolio(req: OptimizeRequest, _actor: str = Depends(get_current_actor)) -> dict:
+def optimize_portfolio(req: OptimizeRequest, _: None = Depends(require_write_key)) -> dict:
     if len(req.tickers) < 2:
         raise HTTPException(status_code=422, detail="Need at least 2 tickers to optimize.")
 

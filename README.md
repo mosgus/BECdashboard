@@ -3,7 +3,7 @@
 Production-grade portfolio analytics web app for the Emory Practicum cohort.
 
 **Stack**: Next.js 16 (App Router, TypeScript, Tailwind v4) + FastAPI (Python 3.11) + PostgreSQL
-**Charts**: Recharts | **Optimizer**: CAPM + Analyst Views (scipy SLSQP) | **Auth**: JWT (HS256)
+**Charts**: Recharts | **Optimizer**: CAPM + Analyst Views (scipy SLSQP) | **Identity**: Actor-header (X-Actor-Name)
 
 ## Features
 
@@ -13,7 +13,7 @@ Production-grade portfolio analytics web app for the Emory Practicum cohort.
 | **Optimization** | Min-Variance · Max-Sharpe (historical) · Max-Sharpe CAPM with analyst views + per-asset bounds |
 | **Technicals** | SMA(20/50), RSI(14), MACD(12,26,9) for any ticker |
 | **Alerts** | SMA crossover, RSI threshold, price threshold — with email stub (SendGrid-ready) |
-| **Auth** | Class-wide shared password → 8-hour JWT; all API calls audited to Postgres |
+| **Identity** | Display name entered once at `/login`; stored in localStorage; sent as `X-Actor-Name` header on every request; logged to Postgres `audit_log` |
 
 ---
 
@@ -21,17 +21,12 @@ Production-grade portfolio analytics web app for the Emory Practicum cohort.
 
 ```bash
 cp .env.example .env
-# Edit .env: set CLASS_PASSWORD and JWT_SECRET
+# Edit .env: set NEXT_PUBLIC_API_URL if not using localhost
 docker compose up --build
 ```
 
 - Frontend: `http://localhost:3000`
 - Backend docs: `http://localhost:8000/docs`
-
-Generate a strong JWT secret:
-```bash
-python3 -c "import secrets; print(secrets.token_hex(32))"
-```
 
 ---
 
@@ -39,16 +34,13 @@ python3 -c "import secrets; print(secrets.token_hex(32))"
 
 ### 1. Backend
 
-Requires Python 3.11 and a running Postgres instance (or skip Postgres — SQLite fallback not included; easiest is `docker compose up db` for just the DB).
+Requires Python 3.11 and a running Postgres instance (easiest: `docker compose up db` for just the DB).
 
 ```bash
 cd backend
 python3.11 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
-# Set env vars (or create a .env in backend/ — pydantic-settings reads it)
-export CLASS_PASSWORD=yourpassword
-export JWT_SECRET=$(python3 -c "import secrets; print(secrets.token_hex(32))")
 export DATABASE_URL=postgresql://blueeagle:blueeagle@localhost:5432/blueeagle
 
 alembic upgrade head          # run migrations
@@ -69,22 +61,27 @@ App: `http://localhost:3000` → redirects to `/login`
 
 ---
 
-## Authentication
+## Authentication / Identity
 
-All pages require a JWT. Login at `/login` with the class password (`CLASS_PASSWORD` from `.env`).
-Enter any display name — it's used for audit logging, not identity verification.
-Tokens expire after 8 hours (configurable via `JWT_EXPIRY_HOURS`).
+No passwords, no JWT. Anyone can use the app:
+
+1. Visit `/login`
+2. Enter your display name (e.g. "Alice Chen") → stored in `localStorage`
+3. Every API request sends `X-Actor-Name: <name>` → logged to `audit_log.actor`
+
+**Optional write-key gate** (for public deployments): set `CLASS_WRITE_KEY` in `.env`. When set, all mutation requests must include a matching `X-Class-Key` header — the frontend reads `NEXT_PUBLIC_CLASS_WRITE_KEY` and adds it automatically.
 
 ---
 
 ## iPad / LAN Access
 
-The frontend dev server binds to `0.0.0.0` so any device on the same Wi-Fi network can access it.
+Set `NEXT_PUBLIC_API_URL` in `.env` to your machine's IP (or Tailscale address) before building:
 
-1. Run backend + frontend as above
-2. On iPad, open: `http://<mac-local-ip>:3000`
+```
+NEXT_PUBLIC_API_URL=http://100.108.230.75:8000
+```
 
-Find your Mac's IP: `ipconfig getifaddr en0`
+Then rebuild the frontend image and restart. The value is baked into the JS bundle at build time.
 
 ---
 
@@ -94,18 +91,18 @@ Find your Mac's IP: `ipconfig getifaddr en0`
 blue-eagle/
 ├── backend/
 │   ├── main.py              # FastAPI app factory, CORS, AuditMiddleware, lifespan
-│   ├── config.py            # pydantic-settings (CLASS_PASSWORD, JWT_SECRET, DATABASE_URL)
-│   ├── auth.py              # JWT create/decode, get_current_actor dependency
+│   ├── config.py            # pydantic-settings (CLASS_WRITE_KEY optional, DATABASE_URL required)
+│   ├── auth.py              # get_actor_name(), require_write_key() dependency
 │   ├── middleware/audit.py  # AuditMiddleware — writes every POST/PUT/PATCH/DELETE to DB
-│   ├── db/                  # SQLAlchemy engine, Base, models (AuditLog, Universe)
-│   ├── alembic/             # Migrations (0001_baseline creates audit_log + universe)
-│   ├── routers/             # auth, portfolio, optimize, technicals, alerts
+│   ├── db/                  # SQLAlchemy engine, Base, models (Sprint 1 + Sprint 2 scaffolding)
+│   ├── alembic/             # 0001_baseline (audit_log, universe), 0002_sprint2_schema (7 tables)
+│   ├── routers/             # portfolio, optimize, technicals, alerts
 │   └── core/                # portfolio analytics, indicators, cache (TTLCache)
 └── frontend/
     ├── app/                 # Next.js App Router pages + layout
     ├── components/          # Charts, AuthNav, Providers
-    ├── hooks/useAuth.ts     # Auth guard — redirects to /login if no valid token
-    └── lib/                 # api.ts (typed fetch), auth.ts (token helpers), utils.ts
+    ├── hooks/useAuth.ts     # Auth guard — redirects to /login if no actor name set
+    └── lib/                 # api.ts (typed fetch), auth.ts (actor helpers), utils.ts
 ```
 
 ---
@@ -114,11 +111,10 @@ blue-eagle/
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `CLASS_PASSWORD` | ✅ | — | Shared class login password |
-| `JWT_SECRET` | ✅ | — | HS256 signing secret (min 32 chars) |
 | `DATABASE_URL` | ✅ | — | PostgreSQL connection string |
-| `JWT_EXPIRY_HOURS` | | `8` | Token lifetime |
 | `NEXT_PUBLIC_API_URL` | | `http://localhost:8000` | Backend URL baked into JS bundle |
+| `CLASS_WRITE_KEY` | | unset | If set, mutations require matching `X-Class-Key` header |
+| `NEXT_PUBLIC_CLASS_WRITE_KEY` | | unset | Frontend counterpart — sent as `X-Class-Key` header |
 | `CORS_ORIGINS` | | `*` | Comma-separated allowed origins (production) |
 | `DATA_PROVIDER` | | `yfinance` | Data source stub |
 
@@ -130,7 +126,7 @@ blue-eagle/
 1. Connect GitHub repo, root directory: `backend`
 2. Build command: `pip install -r requirements.txt && alembic upgrade head`
 3. Start command: `uvicorn main:app --host 0.0.0.0 --port $PORT`
-4. Add env vars: `CLASS_PASSWORD`, `JWT_SECRET`, `DATABASE_URL` (from Render's Postgres addon)
+4. Add env vars: `DATABASE_URL` (from Render's Postgres addon)
 
 ### Frontend → Vercel
 1. Connect GitHub repo, root directory: `frontend`
@@ -165,7 +161,7 @@ E[R_i] = rf + β_i × MRP + MRP × view_i
 
 ## 3-Minute Demo Script
 
-1. **Login** — enter any display name + class password → 8h token issued
+1. **Login** — enter your name (no password) → lands on Overview
 2. **Overview** — default tickers (AAPL, MSFT, GOOGL, AMZN, NVDA) + SPY benchmark → Run Analysis
 3. Walk equity curve, drawdown, correlation heatmap
 4. **Optimization** — mode: "Max Sharpe (CAPM + Views)", set NVDA view = 0.5, click Run → show CAPM table + weight shift

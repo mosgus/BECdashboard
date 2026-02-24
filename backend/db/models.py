@@ -1,13 +1,41 @@
-"""SQLAlchemy ORM models — Sprint 1 tables: audit_log, universe."""
+"""SQLAlchemy ORM models.
+
+Sprint 1 tables (keep untouched):
+  audit_log  — request audit trail
+  universe   — legacy seed ticker list
+
+Sprint 2 tables (scaffolding only — no UI/CRUD yet):
+  universe_tickers  — managed ticker universe
+  watchlists        — named watchlists
+  watchlist_items   — watchlist ↔ ticker join
+  portfolios        — named portfolios
+  positions         — portfolio ↔ ticker positions
+  alerts            — alert rule definitions
+  alert_events      — alert trigger history
+"""
 from __future__ import annotations
 
-from datetime import datetime
+import uuid
+from datetime import date, datetime
 
-from sqlalchemy import DateTime, Integer, String, Text, func
+from sqlalchemy import (
+    Boolean,
+    Date,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    func,
+)
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from db.base import Base
 
+
+# ── Sprint 1 (unchanged) ──────────────────────────────────────────────────────
 
 class AuditLog(Base):
     __tablename__ = "audit_log"
@@ -29,3 +57,75 @@ class Universe(Base):
     ticker:   Mapped[str]      = mapped_column(Text, primary_key=True)
     added_by: Mapped[str]      = mapped_column(Text, nullable=False, default="seed")
     added_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+# ── Sprint 2 (scaffolding — migrations in 0002) ───────────────────────────────
+
+class UniverseTicker(Base):
+    """Managed ticker universe — replaces the legacy universe table for Sprint 2+ features."""
+    __tablename__ = "universe_tickers"
+
+    ticker:     Mapped[str]           = mapped_column(Text, primary_key=True)
+    name:       Mapped[str | None]    = mapped_column(Text, nullable=True)
+    active:     Mapped[bool]          = mapped_column(Boolean, nullable=False, default=True, index=True)
+    created_at: Mapped[datetime]      = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class Watchlist(Base):
+    __tablename__ = "watchlists"
+
+    id:         Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name:       Mapped[str]       = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime]  = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class WatchlistItem(Base):
+    __tablename__ = "watchlist_items"
+
+    watchlist_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("watchlists.id", ondelete="CASCADE"), primary_key=True)
+    ticker:       Mapped[str]       = mapped_column(Text, ForeignKey("universe_tickers.ticker", ondelete="CASCADE"), primary_key=True)
+    created_at:   Mapped[datetime]  = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class Portfolio(Base):
+    __tablename__ = "portfolios"
+
+    id:         Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name:       Mapped[str]       = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime]  = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class Position(Base):
+    __tablename__ = "positions"
+
+    portfolio_id: Mapped[uuid.UUID]    = mapped_column(UUID(as_uuid=True), ForeignKey("portfolios.id", ondelete="CASCADE"), primary_key=True)
+    ticker:       Mapped[str]          = mapped_column(Text, ForeignKey("universe_tickers.ticker", ondelete="CASCADE"), primary_key=True)
+    weight:       Mapped[float | None] = mapped_column(Float, nullable=True)
+    shares:       Mapped[float | None] = mapped_column(Float, nullable=True)
+    cost_basis:   Mapped[float | None] = mapped_column(Float, nullable=True)
+    updated_at:   Mapped[datetime]     = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+
+class AlertRule(Base):
+    """Alert rule definition. Table name 'alerts' matches Sprint 2 spec."""
+    __tablename__ = "alerts"
+
+    id:           Mapped[uuid.UUID]    = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    scope:        Mapped[str]          = mapped_column(Text, nullable=False)          # 'watchlist' | 'portfolio' | 'ticker'
+    scope_id:     Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    ticker:       Mapped[str | None]   = mapped_column(Text, nullable=True)
+    rule_type:    Mapped[str]          = mapped_column(Text, nullable=False)          # 'sma_cross' | 'rsi_threshold' | etc.
+    params_json:  Mapped[dict | None]  = mapped_column(JSONB, nullable=True)
+    enabled:      Mapped[bool]         = mapped_column(Boolean, nullable=False, default=True)
+    cooldown_days: Mapped[int]         = mapped_column(Integer, nullable=False, default=1)
+    created_at:   Mapped[datetime]     = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class AlertEvent(Base):
+    __tablename__ = "alert_events"
+
+    id:           Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    alert_id:     Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("alerts.id", ondelete="CASCADE"), nullable=False)
+    triggered_at: Mapped[datetime]  = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    asof_date:    Mapped[date]      = mapped_column(Date, nullable=False)
+    payload_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)

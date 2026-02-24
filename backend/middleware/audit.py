@@ -3,7 +3,7 @@
 Design rules:
 - Never let a DB write failure kill the request (try/except around all DB ops).
 - Read body bytes once; Starlette caches them in request._body for route handlers.
-- Extract actor from JWT best-effort; NULL actor on unauthenticated/invalid tokens.
+- Extract actor from X-Actor-Name header (no JWT decoding required).
 """
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
 
-from auth import decode_token
+from auth import get_actor_name
 from db.base import SessionLocal
 from db.models import AuditLog
 
@@ -33,14 +33,8 @@ class AuditMiddleware(BaseHTTPMiddleware):
         body_bytes = await request.body()
         body_hash = hashlib.sha256(body_bytes).hexdigest()[:16] if body_bytes else None
 
-        # Extract actor from Authorization header (best-effort)
-        actor: str | None = None
-        auth_header = request.headers.get("authorization", "")
-        if auth_header.startswith("Bearer "):
-            try:
-                actor = decode_token(auth_header.removeprefix("Bearer "))
-            except Exception:
-                pass
+        # Actor from X-Actor-Name header — always a safe string, never raises.
+        actor = get_actor_name(request)
 
         response = await call_next(request)
 

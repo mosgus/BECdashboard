@@ -8,7 +8,7 @@ import pandas as pd
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, field_validator
 
-from auth import get_current_actor
+from auth import require_write_key
 from core.cache import fetch_prices
 from core.portfolio import (
     compute_drawdown,
@@ -54,7 +54,7 @@ def _df_to_records(df: pd.DataFrame) -> list[dict]:
 
 
 @router.post("/metrics")
-def portfolio_metrics(req: PortfolioRequest, _actor: str = Depends(get_current_actor)) -> dict:
+def portfolio_metrics(req: PortfolioRequest, _: None = Depends(require_write_key)) -> dict:
     all_tickers = tuple(sorted(set(req.tickers + [req.benchmark])))
     prices = fetch_prices(all_tickers, req.start, req.end)
     if prices is None or prices.empty:
