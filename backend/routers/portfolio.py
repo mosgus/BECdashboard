@@ -5,9 +5,10 @@ from typing import Optional
 
 import numpy as np
 import pandas as pd
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, field_validator
 
+from auth import get_current_actor
 from core.cache import fetch_prices
 from core.portfolio import (
     compute_drawdown,
@@ -53,7 +54,7 @@ def _df_to_records(df: pd.DataFrame) -> list[dict]:
 
 
 @router.post("/metrics")
-def portfolio_metrics(req: PortfolioRequest) -> dict:
+def portfolio_metrics(req: PortfolioRequest, _actor: str = Depends(get_current_actor)) -> dict:
     all_tickers = tuple(sorted(set(req.tickers + [req.benchmark])))
     prices = fetch_prices(all_tickers, req.start, req.end)
     if prices is None or prices.empty:
@@ -125,7 +126,11 @@ def portfolio_metrics(req: PortfolioRequest) -> dict:
         "rolling_vol": _series_to_records(roll_vol.dropna(), "vol"),
         "drawdown": _series_to_records(dd, "dd"),
         "normalized_prices": _df_to_records(norm),
-        "correlation": corr.round(4).to_dict(),
+        "correlation": {
+            row: {col: (None if (isinstance(v, float) and np.isnan(v)) else round(float(v), 4))
+                  for col, v in vals.items()}
+            for row, vals in corr.to_dict().items()
+        },
         "assets": assets,
         "port_tickers": port_tickers,
         "weights": weights.tolist(),

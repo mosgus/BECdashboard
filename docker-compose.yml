@@ -1,22 +1,48 @@
 services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER:     blueeagle
+      POSTGRES_PASSWORD: blueeagle
+      POSTGRES_DB:       blueeagle
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U blueeagle"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
   backend:
     build: ./backend
     ports:
       - "8000:8000"
+    env_file: .env                    # CLASS_PASSWORD, JWT_SECRET, etc.
     environment:
-      - PYTHONDONTWRITEBYTECODE=1
+      # Override DATABASE_URL so the backend always finds the compose db service
+      DATABASE_URL: postgresql://blueeagle:blueeagle@db:5432/blueeagle
+    depends_on:
+      db:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 10s
       timeout: 5s
-      retries: 3
+      retries: 5
 
   frontend:
-    build: ./frontend
+    build:
+      context: ./frontend
+      args:
+        # NEXT_PUBLIC_API_URL is baked into the JS bundle at build time.
+        # For local Docker: http://localhost:8000 (browser calls backend directly).
+        # For production deploy: set NEXT_PUBLIC_API_URL in .env to your backend URL.
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
     ports:
       - "3000:3000"
-    environment:
-      - NEXT_PUBLIC_API_URL=http://backend:8000
     depends_on:
       backend:
         condition: service_healthy
+
+volumes:
+  pgdata:

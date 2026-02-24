@@ -1,7 +1,9 @@
 "use client";
 import { useState } from "react";
+import { useMutation } from "@tanstack/react-query";
 import { fetchPortfolioMetrics } from "@/lib/api";
 import { PortfolioResponse } from "@/types/portfolio";
+import { useAuth } from "@/hooks/useAuth";
 import MetricsBar from "@/components/MetricsBar";
 import EquityCurve from "@/components/EquityCurve";
 import DrawdownChart from "@/components/DrawdownChart";
@@ -12,83 +14,79 @@ const DEFAULT_TICKERS = "AAPL, MSFT, GOOGL, AMZN, NVDA";
 const TODAY = new Date().toISOString().slice(0, 10);
 
 export default function OverviewPage() {
+  const { checked } = useAuth();
+
   const [rawTickers, setRawTickers] = useState(DEFAULT_TICKERS);
   const [weightMode, setWeightMode] = useState<"equal" | "custom">("equal");
   const [customWeights, setCustomWeights] = useState<Record<string, string>>({});
   const [benchmark, setBenchmark] = useState("SPY");
   const [start, setStart] = useState("2020-01-01");
   const [end, setEnd] = useState(TODAY);
-  const [result, setResult] = useState<PortfolioResponse | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   const tickers = rawTickers
     .split(",")
     .map((t) => t.trim().toUpperCase())
     .filter(Boolean);
 
-  const run = async () => {
-    setLoading(true);
-    setError(null);
-    try {
+  const mutation = useMutation({
+    mutationFn: () => {
       let weights: number[] | undefined;
       if (weightMode === "custom") {
         const raw = tickers.map((t) => parseFloat(customWeights[t] ?? "1"));
         const sum = raw.reduce((a, b) => a + b, 0);
         weights = raw.map((w) => w / sum);
       }
-      const r = await fetchPortfolioMetrics({ tickers, weights, benchmark, start, end });
-      setResult(r);
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Unknown error");
-    } finally {
-      setLoading(false);
-    }
-  };
+      return fetchPortfolioMetrics({ tickers, weights, benchmark, start, end });
+    },
+  });
+
+  const result: PortfolioResponse | undefined = mutation.data;
+
+  if (!checked) return null;
 
   return (
     <div className="space-y-6">
       {/* Inputs */}
-      <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-        <h2 className="mb-4 text-base font-semibold text-gray-800">Portfolio Configuration</h2>
+      <div className="rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] p-5 shadow-sm">
+        <h2 className="mb-4 text-base font-semibold text-[var(--color-text)]">Portfolio Configuration</h2>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <div className="lg:col-span-2">
-            <label className="block text-xs font-medium text-gray-500 mb-1">Tickers (comma-separated)</label>
+            <label className="mb-1 block text-xs font-medium text-[var(--color-muted)]">Tickers (comma-separated)</label>
             <input
               value={rawTickers}
               onChange={(e) => setRawTickers(e.target.value)}
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full rounded-[var(--radius-btn)] border border-[var(--color-border)] px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]"
               placeholder="AAPL, MSFT, GOOGL"
             />
           </div>
           <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">Benchmark</label>
+            <label className="mb-1 block text-xs font-medium text-[var(--color-muted)]">Benchmark</label>
             <input
               value={benchmark}
               onChange={(e) => setBenchmark(e.target.value.toUpperCase())}
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full rounded-[var(--radius-btn)] border border-[var(--color-border)] px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]"
             />
           </div>
           <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">Weight Mode</label>
+            <label className="mb-1 block text-xs font-medium text-[var(--color-muted)]">Weight Mode</label>
             <select
               value={weightMode}
               onChange={(e) => setWeightMode(e.target.value as "equal" | "custom")}
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full rounded-[var(--radius-btn)] border border-[var(--color-border)] px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]"
             >
               <option value="equal">Equal Weight</option>
               <option value="custom">Custom Weights</option>
             </select>
           </div>
           <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">Start Date</label>
+            <label className="mb-1 block text-xs font-medium text-[var(--color-muted)]">Start Date</label>
             <input type="date" value={start} onChange={(e) => setStart(e.target.value)}
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+              className="w-full rounded-[var(--radius-btn)] border border-[var(--color-border)] px-3 py-2 text-sm" />
           </div>
           <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">End Date</label>
+            <label className="mb-1 block text-xs font-medium text-[var(--color-muted)]">End Date</label>
             <input type="date" value={end} onChange={(e) => setEnd(e.target.value)}
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+              className="w-full rounded-[var(--radius-btn)] border border-[var(--color-border)] px-3 py-2 text-sm" />
           </div>
         </div>
 
@@ -96,12 +94,12 @@ export default function OverviewPage() {
           <div className="mt-4 grid gap-3 sm:grid-cols-3 lg:grid-cols-5">
             {tickers.map((t) => (
               <label key={t} className="block">
-                <span className="text-xs font-medium text-gray-500">{t} weight</span>
+                <span className="text-xs font-medium text-[var(--color-muted)]">{t} weight</span>
                 <input
                   type="number"
                   value={customWeights[t] ?? "1"}
                   onChange={(e) => setCustomWeights((prev) => ({ ...prev, [t]: e.target.value }))}
-                  className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-1.5 text-sm"
+                  className="mt-1 w-full rounded-[var(--radius-btn)] border border-[var(--color-border)] px-3 py-1.5 text-sm"
                   min={0}
                   step={0.01}
                 />
@@ -111,16 +109,20 @@ export default function OverviewPage() {
         )}
 
         <button
-          onClick={run}
-          disabled={loading}
-          className="mt-4 rounded-lg bg-blue-600 px-6 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
+          onClick={() => mutation.mutate()}
+          disabled={mutation.isPending}
+          className="mt-4 rounded-[var(--radius-btn)] bg-[var(--color-primary)] px-6 py-2.5 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50 transition-opacity"
         >
-          {loading ? "Fetching…" : "Run Analysis"}
+          {mutation.isPending ? "Fetching…" : "Run Analysis"}
         </button>
 
-        {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
+        {mutation.error && (
+          <p className="mt-2 text-sm text-[var(--color-negative)]">
+            {(mutation.error as Error).message}
+          </p>
+        )}
         {(result?.missing?.length ?? 0) > 0 && (
-          <p className="mt-2 text-xs text-amber-600">
+          <p className="mt-2 text-xs text-[var(--color-accent)]">
             No data for: {result!.missing.join(", ")}
           </p>
         )}
@@ -150,10 +152,12 @@ export default function OverviewPage() {
         </>
       )}
 
-      {!result && !loading && (
-        <div className="rounded-xl border border-dashed border-gray-300 bg-white p-12 text-center text-gray-400">
-          <p className="text-4xl mb-2">🦅</p>
-          <p className="text-sm">Enter tickers above and click <strong>Run Analysis</strong> to load your portfolio.</p>
+      {!result && !mutation.isPending && (
+        <div className="rounded-[var(--radius-card)] border border-dashed border-[var(--color-border)] bg-[var(--color-surface)] p-12 text-center text-[var(--color-muted)]">
+          <p className="mb-2 text-4xl">🦅</p>
+          <p className="text-sm">
+            Enter tickers above and click <strong>Run Analysis</strong> to load your portfolio.
+          </p>
         </div>
       )}
     </div>

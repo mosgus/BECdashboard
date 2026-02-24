@@ -1,68 +1,70 @@
 "use client";
 import { useState } from "react";
+import { useMutation } from "@tanstack/react-query";
 import { fetchTechnicals } from "@/lib/api";
-import { TechnicalsResponse } from "@/types/portfolio";
+import { useAuth } from "@/hooks/useAuth";
 import TechnicalsChart from "@/components/TechnicalsChart";
 
 const TODAY = new Date().toISOString().slice(0, 10);
 
 export default function TechnicalsPage() {
+  const { checked } = useAuth();
+
   const [ticker, setTicker] = useState("NVDA");
   const [start, setStart] = useState("2022-01-01");
   const [end, setEnd] = useState(TODAY);
-  const [result, setResult] = useState<TechnicalsResponse | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
-  const run = async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const r = await fetchTechnicals({ ticker: ticker.toUpperCase(), start, end });
-      setResult(r);
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Unknown error");
-    } finally {
-      setLoading(false);
-    }
-  };
+  const mutation = useMutation({
+    mutationFn: () => fetchTechnicals({ ticker: ticker.toUpperCase(), start, end }),
+  });
+
+  if (!checked) return null;
 
   return (
     <div className="space-y-6">
-      <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-        <h2 className="mb-4 text-base font-semibold text-gray-800">Technical Analysis</h2>
-        <div className="flex flex-wrap gap-4 items-end">
+      <div className="rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] p-5 shadow-sm">
+        <h2 className="mb-4 text-base font-semibold text-[var(--color-text)]">Technical Analysis</h2>
+        <div className="flex flex-wrap items-end gap-4">
           <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">Ticker</label>
+            <label className="mb-1 block text-xs font-medium text-[var(--color-muted)]">Ticker</label>
             <input
               value={ticker}
               onChange={(e) => setTicker(e.target.value.toUpperCase())}
-              className="w-32 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-32 rounded-[var(--radius-btn)] border border-[var(--color-border)] px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]"
             />
           </div>
           <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">Start Date</label>
+            <label className="mb-1 block text-xs font-medium text-[var(--color-muted)]">Start Date</label>
             <input type="date" value={start} onChange={(e) => setStart(e.target.value)}
-              className="rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+              className="rounded-[var(--radius-btn)] border border-[var(--color-border)] px-3 py-2 text-sm" />
           </div>
           <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">End Date</label>
+            <label className="mb-1 block text-xs font-medium text-[var(--color-muted)]">End Date</label>
             <input type="date" value={end} onChange={(e) => setEnd(e.target.value)}
-              className="rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+              className="rounded-[var(--radius-btn)] border border-[var(--color-border)] px-3 py-2 text-sm" />
           </div>
-          <button onClick={run} disabled={loading}
-            className="rounded-lg bg-blue-600 px-6 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50 transition-colors">
-            {loading ? "Loading…" : "Load Chart"}
+          <button
+            onClick={() => mutation.mutate()}
+            disabled={mutation.isPending}
+            className="rounded-[var(--radius-btn)] bg-[var(--color-primary)] px-6 py-2.5 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50 transition-opacity"
+          >
+            {mutation.isPending ? "Loading…" : "Load Chart"}
           </button>
         </div>
-        {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
+        {mutation.error && (
+          <p className="mt-2 text-sm text-[var(--color-negative)]">
+            {(mutation.error as Error).message}
+          </p>
+        )}
       </div>
 
-      {result && <TechnicalsChart data={result} />}
+      {mutation.data && <TechnicalsChart data={mutation.data} />}
 
-      {!result && !loading && (
-        <div className="rounded-xl border border-dashed border-gray-300 bg-white p-12 text-center text-gray-400">
-          <p className="text-sm">Enter a ticker and click <strong>Load Chart</strong> to see SMA, RSI, and MACD.</p>
+      {!mutation.data && !mutation.isPending && (
+        <div className="rounded-[var(--radius-card)] border border-dashed border-[var(--color-border)] bg-[var(--color-surface)] p-12 text-center text-[var(--color-muted)]">
+          <p className="text-sm">
+            Enter a ticker and click <strong>Load Chart</strong> to see SMA, RSI, and MACD.
+          </p>
         </div>
       )}
     </div>

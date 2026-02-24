@@ -3,8 +3,10 @@ from __future__ import annotations
 
 from typing import Any, Literal, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, field_validator
+
+from auth import get_current_actor
 
 from core.cache import fetch_prices
 from core.indicators import (
@@ -31,7 +33,7 @@ class AlertRequest(BaseModel):
 
 
 @router.post("/alerts/check")
-def check_alert(req: AlertRequest) -> dict:
+def check_alert(req: AlertRequest, _actor: str = Depends(get_current_actor)) -> dict:
     prices = fetch_prices((req.ticker,), req.start, req.end)
     if prices is None or prices.empty or req.ticker not in prices.columns:
         raise HTTPException(status_code=422, detail=f"No data for ticker {req.ticker}.")

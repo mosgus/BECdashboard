@@ -3,8 +3,10 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, field_validator
+
+from auth import get_current_actor
 
 from core.cache import fetch_prices
 from core.indicators import compute_macd, compute_rsi, compute_sma
@@ -28,7 +30,7 @@ def _clean(v: float) -> float | None:
 
 
 @router.post("/technicals")
-def technicals(req: TechnicalsRequest) -> dict:
+def technicals(req: TechnicalsRequest, _actor: str = Depends(get_current_actor)) -> dict:
     prices = fetch_prices((req.ticker,), req.start, req.end)
     if prices is None or prices.empty or req.ticker not in prices.columns:
         raise HTTPException(status_code=422, detail=f"No data for ticker {req.ticker}.")
