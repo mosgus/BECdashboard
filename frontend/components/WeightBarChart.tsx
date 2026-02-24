@@ -34,7 +34,7 @@ export default function WeightBarChart({ tickers, current, optimized }: Props) {
           <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
           <XAxis dataKey="ticker" tick={{ fontSize: 11 }} />
           <YAxis tickFormatter={fmtPct} tick={{ fontSize: 11 }} width={44} />
-          <Tooltip formatter={(v: number) => `${v.toFixed(2)}%`} />
+          <Tooltip formatter={(v: number | undefined) => `${(v ?? 0).toFixed(2)}%`} />
           <Legend />
           <Bar dataKey="current" name="Current" fill="#93c5fd" radius={[3, 3, 0, 0]} />
           <Bar dataKey="optimized" name="Optimized" fill="#22c55e" radius={[3, 3, 0, 0]} />

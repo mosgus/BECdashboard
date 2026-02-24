@@ -42,7 +42,7 @@ export default function DrawdownChart({
           <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
           <XAxis dataKey="date" tick={{ fontSize: 11 }} minTickGap={60} tickFormatter={(d) => d.slice(0, 7)} />
           <YAxis tickFormatter={fmtPct} tick={{ fontSize: 11 }} width={52} />
-          <Tooltip formatter={(v: number) => fmtPct(v)} labelFormatter={(l) => `Date: ${l}`} />
+          <Tooltip formatter={(v: number | undefined) => fmtPct(v ?? 0)} labelFormatter={(l) => `Date: ${l}`} />
           <Area
             type="monotone"
             dataKey={dataKey}

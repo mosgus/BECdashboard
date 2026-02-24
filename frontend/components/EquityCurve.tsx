@@ -41,7 +41,7 @@ export default function EquityCurve({
           <XAxis dataKey="date" tickFormatter={fmtDate} tick={{ fontSize: 11 }} minTickGap={60} />
           <YAxis tickFormatter={fmtVal} tick={{ fontSize: 11 }} width={52} />
           <Tooltip
-            formatter={(v: number) => `${((v - 1) * 100).toFixed(2)}%`}
+            formatter={(v: number | undefined) => `${(((v ?? 1) - 1) * 100).toFixed(2)}%`}
             labelFormatter={(l) => `Date: ${l}`}
           />
           <Legend />

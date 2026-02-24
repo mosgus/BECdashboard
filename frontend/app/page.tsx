@@ -119,9 +119,9 @@ export default function OverviewPage() {
         </button>
 
         {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
-        {result?.missing?.length > 0 && (
+        {(result?.missing?.length ?? 0) > 0 && (
           <p className="mt-2 text-xs text-amber-600">
-            No data for: {result.missing.join(", ")}
+            No data for: {result!.missing.join(", ")}
           </p>
         )}
       </div>
