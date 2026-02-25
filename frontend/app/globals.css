@@ -1,40 +1,29 @@
 @import "tailwindcss";
 
 /*
- * ── Blue Eagle design tokens ────────────────────────────────────────────────
- * Edit ONLY the values in :root to rebrand the entire app.
- * Swap the emoji logo in layout.tsx for <img src="/logo.svg" /> when the
- * branding doc arrives.
+ * ── Blue Eagle Capital design tokens ─────────────────────────────────────────
+ * Brand colors from the Blue Eagle Capital / Emory Goizueta brand doc.
+ *   Primary navy  #012169  — Emory blue, buttons, links, active states
+ *   Gold          #F2A900  — Emory gold, accents, badges, highlights
+ *   Deep navy     #0C2340  — body text, headings
  *
- * Token reference:
- *   --color-primary   nav brand text, buttons, focus rings, link accents
- *   --color-accent    badges, highlights, secondary actions
- *   --color-bg        page background
- *   --color-surface   cards, panels, header
- *   --color-border    dividers, input borders
- *   --color-text      body copy
- *   --color-muted     labels, captions, placeholders
- *   --color-positive  gains, success states (green)
- *   --color-negative  losses, error states (red)
- *   --radius-card     card corner radius
- *   --radius-btn      button / input corner radius
- *   --font-heading    heading typeface
- *   --font-body       body typeface
+ * Fonts: Outfit (headings, ~Area Normal Bold) · DM Sans (body, ~Avenir Light)
+ * Both loaded via next/font/google in layout.tsx.
  */
 
 :root {
   /* Brand palette */
-  --color-primary:  #1d4ed8;
-  --color-accent:   #f59e0b;
+  --color-primary:  #012169;
+  --color-accent:   #F2A900;
 
   /* Surface */
-  --color-bg:       #f8fafc;
+  --color-bg:       #f4f6fb;
   --color-surface:  #ffffff;
-  --color-border:   #e2e8f0;
+  --color-border:   #dde3f0;
 
   /* Text */
-  --color-text:     #0f172a;
-  --color-muted:    #64748b;
+  --color-text:     #0C2340;
+  --color-muted:    #4a5d7a;
 
   /* Semantic */
   --color-positive: #16a34a;
@@ -44,9 +33,9 @@
   --radius-card: 0.75rem;
   --radius-btn:  0.5rem;
 
-  /* Typography — set to your preferred font stack */
-  --font-heading: "Inter", system-ui, sans-serif;
-  --font-body:    "Inter", system-ui, sans-serif;
+  /* Typography */
+  --font-heading: "Outfit", system-ui, sans-serif;
+  --font-body:    "DM Sans", system-ui, sans-serif;
 }
 
 @theme inline {
@@ -64,4 +53,8 @@ body {
   background: var(--color-bg);
   color: var(--color-text);
   font-family: var(--font-body);
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-heading);
 }

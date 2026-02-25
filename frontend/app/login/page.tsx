@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import Image from "next/image";
 import { actor } from "@/lib/auth";
 
 export default function LoginPage() {
@@ -25,9 +26,18 @@ export default function LoginPage() {
       <div className="w-full max-w-sm rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] p-8 shadow-sm">
         {/* Logo / branding */}
         <div className="mb-6 text-center">
-          <div className="text-5xl">🦅</div>
-          <h1 className="mt-2 text-xl font-bold text-[var(--color-primary)]">Welcome to Blue Eagle</h1>
-          <p className="text-sm text-[var(--color-muted)]">Portfolio Dashboard</p>
+          <Image
+            src="/logo-login.png"
+            alt="Blue Eagle Capital"
+            width={80}
+            height={80}
+            className="mx-auto rounded-full"
+            priority
+          />
+          <h1 className="mt-3 text-xl font-bold text-[var(--color-primary)]">Blue Eagle Capital</h1>
+          <p className="text-xs font-medium tracking-widest text-[var(--color-muted)] uppercase mt-0.5">
+            Emory Goizueta · Portfolio Dashboard
+          </p>
         </div>
 
         <div className="space-y-4">
