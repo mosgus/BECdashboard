@@ -35,6 +35,31 @@ docker compose up --build
 
 ---
 
+## Dev Mode (No Rebuild Loop)
+
+Use `docker-compose.dev.yml` for local iteration. Source files are bind-mounted into the containers, so editing a `.py` or `.tsx` file hot-reloads instantly — no image rebuild required.
+
+```bash
+# First run (or after changing requirements.txt, package.json, or a Dockerfile)
+docker-compose -f docker-compose.dev.yml up --build
+
+# Normal iteration — source edits hot-reload automatically
+docker-compose -f docker-compose.dev.yml up
+
+# Rebuild only one service (e.g. after adding a new npm package)
+docker-compose -f docker-compose.dev.yml up --build frontend
+docker-compose -f docker-compose.dev.yml up --build backend
+```
+
+**How it works:**
+- **Backend**: bind-mounts `./backend` into `/app`; `uvicorn --reload` watches for `.py` changes. `alembic upgrade head` runs on every start (idempotent). Uses system Python — no venv needed.
+- **Frontend**: builds only the `deps` stage (runs `npm ci`; skips the full Next.js production build). Named volumes shadow `node_modules` and `.next` to prevent macOS↔Linux binary conflicts. On first `up --build`, Docker copies `node_modules` from the image layer into the empty named volume; subsequent starts skip the copy.
+- **Volumes**: `dev-pgdata`, `dev-frontend-modules`, `dev-frontend-next` — distinct from production volume names, so both can coexist on the same host.
+
+**Rebuild required when**: `requirements.txt`, `package.json`, or a `Dockerfile` changes. Not needed for source file edits.
+
+---
+
 ## Quick Start (Local Dev)
 
 ### 1. Backend
@@ -103,7 +128,8 @@ blue-eagle/
 │   ├── alembic/             # 0001_baseline (audit_log, universe), 0002_sprint2_schema (7 tables)
 │   ├── routers/             # portfolio, portfolios, optimize, technicals, alerts, alert_rules,
 │   │                        #   universe, watchlists, ticker
-│   ├── core/                # portfolio, indicators, cache (TTLCache), signals, provider (YFinance)
+│   ├── core/                # portfolio, indicators, cache (TTLCache), signals, provider (YFinance),
+│   │                        #   alert_evaluation (extracted from alert_rules router)
 │   └── tests/               # test_signals.py (34 tests), test_universe_import.py
 └── frontend/
     ├── app/                 # Next.js App Router pages: overview, optimize, technicals, alerts,
@@ -232,7 +258,7 @@ curl -X POST http://localhost:8000/api/alert_rules \
 
 # Evaluate all enabled rules synchronously
 curl -X POST http://localhost:8000/api/alert_rules/evaluate_now -H "X-Actor-Name: demo"
-# → {evaluated: N, triggered: N, skipped: N, asof_date, events}
+# → {evaluated: N, triggered: N, skipped: N, as_of_date, events}
 
 # Events inbox
 curl http://localhost:8000/api/alert_rules/events
@@ -240,18 +266,55 @@ curl http://localhost:8000/api/alert_rules/events
 
 ---
 
+## Sprint 3.5 Verification
+
+```bash
+# 1. Version
+curl http://localhost:8000/health
+# → {"status":"ok","db":"ok","version":"3.5.0"}
+
+# 2. as_of_date on technicals
+curl -X POST http://localhost:8000/api/technicals \
+  -H "Content-Type: application/json" -H "X-Actor-Name: test" \
+  -d '{"ticker":"AAPL","start":"2024-01-01","end":"2024-12-31"}' \
+  | python3 -m json.tool | grep -E "as_of|data_source"
+# → "as_of_date": "2024-12-31", "data_source": "Yahoo Finance"
+
+# 3. evaluate_now uses as_of_date (not asof_date)
+curl -X POST http://localhost:8000/api/alert_rules/evaluate_now \
+  -H "X-Actor-Name: test" | python3 -m json.tool | grep as_of_date
+# → "as_of_date": "YYYY-MM-DD"
+
+# 4. Nav order + login redirect (UI)
+# Login → lands on /portfolios
+# Nav: Universe | Portfolios | Optimization | Watchlists | Technicals | Alerts
+
+# 5. UniverseTickerPicker enforcement
+# /portfolios/{id} → Holdings tab → type "AA" in Add Holding → dropdown shows AAPL
+# /watchlists/{id} → Add ticker → same filtered dropdown
+# /alerts → Rules tab → scope=ticker → picker instead of raw input
+
+# 6. Dev compose hot reload
+docker-compose -f docker-compose.dev.yml up --build
+# Edit frontend/app/portfolios/page.tsx → browser updates without rebuild
+# Edit backend/routers/portfolios.py → uvicorn logs "Detected change in..."
+# Edit frontend/package.json → must rebuild: docker-compose -f docker-compose.dev.yml up --build frontend
+```
+
+---
+
 ## 5-Minute Demo Script
 
-1. **Login** — enter your name → lands on Overview
-2. **Overview** — default tickers (AAPL, MSFT, GOOGL, AMZN, NVDA) + SPY → Run Analysis → equity curve + drawdown
-3. **Universe** — 15 seeded tickers; toggle TSLA inactive to see it blocked in Portfolios
-4. **Portfolios** — Create "Core Holdings" → add AAPL 40%, MSFT 35%, NVDA 25%
+1. **Login** — enter your name → lands on **Portfolios**
+2. **Universe** — 15 seeded tickers; toggle TSLA inactive to see it blocked by the ticker picker
+3. **Portfolios** — Create "Core Holdings" → add AAPL 40%, MSFT 35%, NVDA 25% (picker enforces Universe)
    - **Holdings tab** → click AAPL row ▶ to expand Quick Technicals (SMA/RSI/MACD badges + ATR14)
-   - **Analytics tab** → equity curve vs SPY + per-holding exit signals
-   - **Optimize tab** → Max Sharpe, max weight 60% → Run → see Sharpe jump + rebalance plan
-5. **Alert Rules** — create SMA Cross Up on AAPL, cooldown 3 days → **Evaluate Now** → check Inbox tab
-6. **Watchlists** — Create "Tech Picks" → add tickers → Refresh → signal badges appear
-7. **Technicals** — look up any ticker → OHLCV bars + signals
-8. **Optimization** — Max Sharpe CAPM, analyst view NVDA = 0.5 → Run
+   - **Analytics tab** → Load Analytics → equity curve vs SPY + per-holding exit signals (Simulated badge with tooltip; ? opens Help & Glossary)
+   - **Optimize tab** → Max Sharpe (tooltip explains mode), max weight 60% → Run → Sharpe jump + rebalance plan
+4. **Alerts** — create SMA Cross Up rule, scope=ticker, pick AAPL from picker, cooldown 3 days → **Evaluate Now** → check Inbox tab
+5. **Watchlists** — Create "Tech Picks" → add tickers via picker → Refresh → signal badges appear
+6. **Technicals** — look up any ticker → OHLCV bars + signals
+7. **Optimization** — Max Sharpe CAPM, analyst view NVDA = 0.5 → Run
+8. **Help & Glossary** — ? button in Analytics tab → sidebar with all indicator and metric definitions
 
 Total: ~7 minutes

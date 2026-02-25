@@ -333,6 +333,7 @@ def get_analytics(
         "equity_curves": eq_data,
         "signals_by_ticker": signals_by_ticker,
         "warnings": warnings,
+        "data_source": "Yahoo Finance",
     }
 
 
@@ -430,6 +431,7 @@ def optimize_portfolio(
             row["benchmark"] = round(float(bench_equity.loc[d]), 6)
         eq_data.append(row)
 
+    as_of_date = str(returns.index[-1].date()) if len(returns) > 0 else end_str
     return {
         "tickers": valid_tickers,
         "current_weights": {t: round(float(curr_w[i]), 4) for i, t in enumerate(valid_tickers)},
@@ -444,4 +446,6 @@ def optimize_portfolio(
         "mode": body.mode,
         "warnings": warnings,
         "simulated": True,
+        "as_of_date": as_of_date,
+        "data_source": "Yahoo Finance",
     }

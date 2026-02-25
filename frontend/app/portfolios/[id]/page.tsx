@@ -16,6 +16,8 @@ import {
 import { fmtNum, fmtPct, colorForValue, downsample } from "@/lib/utils";
 import SignalBadge from "@/components/SignalBadge";
 import InfoTooltip from "@/components/InfoTooltip";
+import HelpSidebar from "@/components/HelpSidebar";
+import UniverseTickerPicker from "@/components/UniverseTickerPicker";
 import { PortfolioAnalytics, PortfolioOptimizeResult, Position } from "@/types/sprint3";
 import { SignalResult } from "@/types/sprint2";
 import {
@@ -115,11 +117,11 @@ function HoldingsTab({
           <InfoTooltip text="Tickers must be in the active Universe. Weight is relative (e.g. 1, 2, 3…) and normalised to 100%." />
         </h3>
         <div className="flex flex-wrap gap-3">
-          <input
+          <UniverseTickerPicker
             value={newTicker}
-            onChange={(e) => setNewTicker(e.target.value.toUpperCase())}
+            onChange={setNewTicker}
             placeholder="Ticker (e.g. AAPL)"
-            className="w-28 rounded-[var(--radius-btn)] border border-[var(--color-border)] px-3 py-2 text-sm uppercase focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]"
+            className="w-44"
           />
           <input
             value={newWeight}
@@ -291,7 +293,17 @@ function AnalyticsTab({ portfolioId }: { portfolioId: string }) {
         >
           Load Analytics
         </button>
+        <span className="flex items-center gap-1 rounded-full bg-amber-50 border border-amber-200 px-2 py-1 text-xs text-amber-700">
+          Simulated
+          <InfoTooltip text="Analytics assume current weights held constant over the lookback period. No trade history is required." />
+        </span>
+        <HelpSidebar />
       </div>
+      {analytics?.as_of_date && (
+        <p className="text-xs text-[var(--color-muted)]">
+          Data as of {analytics.as_of_date}{analytics.data_source ? ` · ${analytics.data_source}` : ""}
+        </p>
+      )}
 
       {isLoading && <p className="text-sm text-[var(--color-muted)]">Computing analytics…</p>}
       {error && <p className="text-sm text-[var(--color-negative)]">{(error as Error).message}</p>}
@@ -372,7 +384,10 @@ function OptimizeTab({ portfolioId }: { portfolioId: string }) {
         </h3>
         <div className="grid gap-4 sm:grid-cols-3">
           <div>
-            <label className="mb-1 block text-xs font-medium text-[var(--color-muted)]">Mode</label>
+            <label className="mb-1 flex items-center gap-1 text-xs font-medium text-[var(--color-muted)]">
+              Mode
+              <InfoTooltip text="Min Variance: minimize portfolio volatility. Max Sharpe: maximize risk-adjusted return (Sharpe ratio). Both use 2-year history." />
+            </label>
             <select
               value={mode}
               onChange={(e) => setMode(e.target.value as "min_variance" | "max_sharpe")}
@@ -408,6 +423,11 @@ function OptimizeTab({ portfolioId }: { portfolioId: string }) {
 
       {result && (
         <>
+          {result.as_of_date && (
+            <p className="text-xs text-[var(--color-muted)]">
+              Data as of {result.as_of_date}
+            </p>
+          )}
           {result.warnings.map((w, i) => (
             <p key={i} className="rounded bg-amber-50 px-3 py-1.5 text-xs text-amber-700 border border-amber-200">{w}</p>
           ))}

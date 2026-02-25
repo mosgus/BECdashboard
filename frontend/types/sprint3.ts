@@ -48,6 +48,7 @@ export interface PortfolioAnalytics {
     signals: SignalResult[];
   }>;
   warnings: string[];
+  data_source?: string;
 }
 
 export interface PortfolioOptimizeResult {
@@ -69,6 +70,8 @@ export interface PortfolioOptimizeResult {
   mode: string;
   warnings: string[];
   simulated: true;
+  as_of_date?: string;
+  data_source?: string;
 }
 
 // ── Alert Rules ────────────────────────────────────────────────────────────────
@@ -101,7 +104,7 @@ export interface AlertEvent {
   id: string;
   alert_id: string;
   triggered_at: string;
-  asof_date: string;
+  as_of_date: string;
   payload_json: Record<string, unknown> | null;
 }
 
@@ -109,6 +112,7 @@ export interface EvaluateResult {
   evaluated: number;
   triggered: number;
   skipped: number;
-  asof_date: string;
+  as_of_date: string;
+  data_source?: string;
   events: Array<Record<string, unknown>>;
 }

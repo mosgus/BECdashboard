@@ -15,6 +15,7 @@ import {
   updateAlertRule,
 } from "@/lib/api";
 import { AlertRule, AlertRuleType, EvaluateResult } from "@/types/sprint3";
+import UniverseTickerPicker from "@/components/UniverseTickerPicker";
 
 type Tab = "rules" | "inbox" | "quick";
 
@@ -86,7 +87,10 @@ function RuleForm({ onCreated }: { onCreated: () => void }) {
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {/* Scope */}
         <div>
-          <label className="mb-1 block text-xs font-medium text-[var(--color-muted)]">Scope</label>
+          <label className="mb-1 flex items-center gap-1 text-xs font-medium text-[var(--color-muted)]">
+            Scope
+            <InfoTooltip text="Ticker: evaluates one symbol. Watchlist / Portfolio: evaluates every holding in the list on each sweep." />
+          </label>
           <select
             value={scope}
             onChange={(e) => { setScope(e.target.value as typeof scope); setScopeId(""); }}
@@ -102,11 +106,10 @@ function RuleForm({ onCreated }: { onCreated: () => void }) {
         {scope === "ticker" && (
           <div>
             <label className="mb-1 block text-xs font-medium text-[var(--color-muted)]">Ticker</label>
-            <input
+            <UniverseTickerPicker
               value={ticker}
-              onChange={(e) => setTicker(e.target.value.toUpperCase())}
-              placeholder="e.g. AAPL"
-              className="w-full rounded-[var(--radius-btn)] border border-[var(--color-border)] px-3 py-2 text-sm uppercase focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]"
+              onChange={setTicker}
+              placeholder="Ticker (from Universe)"
             />
           </div>
         )}
@@ -160,9 +163,9 @@ function RuleForm({ onCreated }: { onCreated: () => void }) {
 
         {/* Cooldown */}
         <div>
-          <label className="mb-1 block text-xs font-medium text-[var(--color-muted)]">
+          <label className="mb-1 flex items-center gap-1 text-xs font-medium text-[var(--color-muted)]">
             Cooldown (days)
-            <InfoTooltip text="Minimum days between successive events for the same rule. Prevents alert spam." />
+            <InfoTooltip text="Minimum days between repeated triggers for the same rule + ticker combination. Prevents alert storms after a single sharp move." />
           </label>
           <input
             type="number" min={0} max={30} value={cooldown}
@@ -377,7 +380,7 @@ function InboxTab() {
                       )}
                     </div>
                     <p className="text-xs text-[var(--color-muted)]">
-                      as-of {e.asof_date} · triggered {new Date(e.triggered_at).toLocaleString()}
+                      as-of {e.as_of_date} · triggered {new Date(e.triggered_at).toLocaleString()}
                     </p>
                     {/* Evidence */}
                     <div className="text-xs text-[var(--color-muted)] font-mono">

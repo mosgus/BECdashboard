@@ -62,9 +62,12 @@ def technicals(req: TechnicalsRequest, _: None = Depends(require_write_key)) -> 
             "histogram": _clean(histogram[d]),
         })
 
+    as_of_date = str(series.index[-1].date()) if len(series) > 0 else req.end
     return {
         "ticker": req.ticker,
         "price_sma": price_sma,
         "rsi": rsi_records,
         "macd": macd_records,
+        "as_of_date": as_of_date,
+        "data_source": "Yahoo Finance",
     }

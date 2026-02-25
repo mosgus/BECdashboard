@@ -40,6 +40,8 @@ export interface PortfolioResponse {
   weights: number[];
   missing: string[];
   benchmark: string;
+  as_of_date?: string;
+  data_source?: string;
 }
 
 // ── Optimization ─────────────────────────────────────────────────────────────
@@ -87,6 +89,8 @@ export interface OptimizeResponse {
   mode: OptimizeMode;
   capm_info: CAPMInfo;
   reserved_cash_pct: number;
+  as_of_date?: string;
+  data_source?: string;
 }
 
 // ── Technicals ────────────────────────────────────────────────────────────────
@@ -121,6 +125,8 @@ export interface TechnicalsResponse {
   price_sma: PriceSMAPoint[];
   rsi: RSIPoint[];
   macd: MACDPoint[];
+  as_of_date?: string | null;
+  data_source?: string;
 }
 
 // ── Alerts ────────────────────────────────────────────────────────────────────
@@ -150,4 +156,6 @@ export interface AlertResponse {
   };
   ticker: string;
   alert_type: AlertType;
+  as_of_date?: string;
+  data_source?: string;
 }

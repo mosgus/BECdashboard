@@ -191,6 +191,7 @@ def optimize_portfolio(req: OptimizeRequest, _: None = Depends(require_write_key
     opt_metrics = compute_metrics(opt_ret, bench_ret_aligned, rf=req.rf)
     curr_metrics = compute_metrics(curr_ret, bench_ret_aligned, rf=req.rf)
 
+    as_of_date = str(returns.index[-1].date()) if len(returns) > 0 else req.end
     return {
         "opt_weights": {t: round(float(opt_weights_dict.get(t, 0.0)), 4) for t in port_tickers},
         "curr_weights": {t: round(float(curr_w[i]), 4) for i, t in enumerate(port_tickers)},
@@ -201,4 +202,6 @@ def optimize_portfolio(req: OptimizeRequest, _: None = Depends(require_write_key
         "mode": req.mode,
         "capm_info": capm_info,
         "reserved_cash_pct": req.reserved_cash_pct,
+        "as_of_date": as_of_date,
+        "data_source": "Yahoo Finance",
     }

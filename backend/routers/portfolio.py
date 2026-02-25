@@ -119,6 +119,7 @@ def portfolio_metrics(req: PortfolioRequest, _: None = Depends(require_write_key
             **m,
         })
 
+    as_of_date = str(port_prices.index[-1].date()) if len(port_prices) > 0 else req.end
     return {
         "metrics": metrics,
         "bench_metrics": bench_metrics,
@@ -136,4 +137,6 @@ def portfolio_metrics(req: PortfolioRequest, _: None = Depends(require_write_key
         "weights": weights.tolist(),
         "missing": missing,
         "benchmark": req.benchmark,
+        "as_of_date": as_of_date,
+        "data_source": "Yahoo Finance",
     }

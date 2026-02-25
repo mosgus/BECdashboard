@@ -31,6 +31,30 @@ const GLOSSARY = [
     term: "Data caveat",
     def: "All prices are sourced from Yahoo Finance (adjusted close). Data may be delayed by 15–20 minutes during market hours. Signals are computed on historical closes — not real-time.",
   },
+  {
+    term: "Simulated Analytics",
+    def: "Portfolio analytics assume the current weights have been held constant over the entire lookback period. No trade history is required. The result is illustrative — actual returns would differ due to rebalancing, transaction costs, and weight drift.",
+  },
+  {
+    term: "Sharpe Ratio",
+    def: "Risk-adjusted return: (CAGR − risk-free rate) ÷ annualised volatility. Higher is better. Above 1.0 is generally considered strong; above 2.0 is exceptional. Assumes a 3.64% risk-free rate.",
+  },
+  {
+    term: "Max Drawdown",
+    def: "The largest peak-to-trough percentage decline over the period. Negative by convention (e.g. −0.25 = 25% drop). Smaller magnitude is better.",
+  },
+  {
+    term: "Beta / Alpha",
+    def: "Beta measures sensitivity to the benchmark (SPY): 1.0 = moves with the market, >1 = amplified swings. Alpha is the annualised excess return above what beta would predict — positive alpha is favourable.",
+  },
+  {
+    term: "Alert Cooldown",
+    def: "The minimum number of days that must pass before the same rule+ticker combination can fire again. Prevents alert storms after a single sharp move.",
+  },
+  {
+    term: "Optimize Modes",
+    def: "Min Variance: finds the weight combination with the lowest historical volatility. Max Sharpe: maximises the Sharpe ratio using 2-year historical returns. Implied trades = target weight − current weight.",
+  },
 ];
 
 export default function HelpSidebar() {
@@ -57,7 +81,7 @@ export default function HelpSidebar() {
           {/* Panel */}
           <aside className="relative z-10 flex h-full w-80 flex-col overflow-y-auto border-l border-[var(--color-border)] bg-[var(--color-surface)] shadow-xl">
             <div className="flex items-center justify-between border-b border-[var(--color-border)] px-4 py-3">
-              <h2 className="text-sm font-semibold text-[var(--color-text)]">Indicator Glossary</h2>
+              <h2 className="text-sm font-semibold text-[var(--color-text)]">Help &amp; Glossary</h2>
               <button
                 onClick={() => setOpen(false)}
                 className="rounded p-1 text-[var(--color-muted)] hover:text-[var(--color-text)] transition-colors"

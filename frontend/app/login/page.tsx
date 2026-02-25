@@ -7,9 +7,9 @@ export default function LoginPage() {
   const router = useRouter();
   const [displayName, setDisplayName] = useState("");
 
-  // If name already set, skip straight to the app
+  // If name already set, skip straight to portfolios
   useEffect(() => {
-    if (actor.hasActor()) router.replace("/");
+    if (actor.hasActor()) router.replace("/portfolios");
   }, [router]);
 
   const canSubmit = displayName.trim().length > 0;
@@ -17,7 +17,7 @@ export default function LoginPage() {
   const handleSubmit = () => {
     if (!canSubmit) return;
     actor.set(displayName);
-    router.replace("/");
+    router.replace("/portfolios");
   };
 
   return (

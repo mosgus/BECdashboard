@@ -12,6 +12,7 @@ import {
 import { useAuth } from "@/hooks/useAuth";
 import SignalBadge from "@/components/SignalBadge";
 import InfoTooltip from "@/components/InfoTooltip";
+import UniverseTickerPicker from "@/components/UniverseTickerPicker";
 import type { SignalResult, WatchlistRefreshResponse } from "@/types/sprint2";
 
 export default function WatchlistDetailPage({
@@ -108,12 +109,11 @@ export default function WatchlistDetailPage({
 
       {/* Add ticker */}
       <div className="flex gap-3">
-        <input
+        <UniverseTickerPicker
           value={newTicker}
-          onChange={(e) => setNewTicker(e.target.value.toUpperCase())}
-          onKeyDown={(e) => e.key === "Enter" && newTicker.trim() && addMutation.mutate()}
-          placeholder="Add ticker (must be in Universe)…"
-          className="flex-1 rounded-[var(--radius-btn)] border border-[var(--color-border)] px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]"
+          onChange={setNewTicker}
+          placeholder="Add ticker from Universe…"
+          className="flex-1"
         />
         <button
           onClick={() => addMutation.mutate()}

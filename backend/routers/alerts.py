@@ -52,5 +52,13 @@ def check_alert(req: AlertRequest, _: None = Depends(require_write_key)) -> dict
     else:
         raise HTTPException(status_code=422, detail="Unknown alert_type")
 
+    as_of_date = str(series.index[-1].date()) if len(series) > 0 else req.end
     email_payload = simulate_email_alert(req.ticker, result)
-    return {**result, "email_payload": email_payload, "ticker": req.ticker, "alert_type": req.alert_type}
+    return {
+        **result,
+        "email_payload": email_payload,
+        "ticker": req.ticker,
+        "alert_type": req.alert_type,
+        "as_of_date": as_of_date,
+        "data_source": "Yahoo Finance",
+    }
