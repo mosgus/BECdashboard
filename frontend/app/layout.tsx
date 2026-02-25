@@ -14,6 +14,8 @@ const NAV = [
   { href: "/optimize", label: "Optimization" },
   { href: "/technicals", label: "Technicals" },
   { href: "/alerts", label: "Alerts" },
+  { href: "/universe", label: "Universe" },
+  { href: "/watchlists", label: "Watchlists" },
 ];
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

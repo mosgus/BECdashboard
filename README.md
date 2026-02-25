@@ -13,6 +13,9 @@ Production-grade portfolio analytics web app for the Emory Practicum cohort.
 | **Optimization** | Min-Variance · Max-Sharpe (historical) · Max-Sharpe CAPM with analyst views + per-asset bounds |
 | **Technicals** | SMA(20/50), RSI(14), MACD(12,26,9) for any ticker |
 | **Alerts** | SMA crossover, RSI threshold, price threshold — with email stub (SendGrid-ready) |
+| **Universe** | 15 pre-seeded tickers; CSV import (header or headerless); active/inactive toggle |
+| **Watchlists** | Full CRUD watchlists; add/remove tickers; one-click refresh populates SMA/RSI/MACD signal badges |
+| **Ticker Detail** | OHLCV bar chart, ATR14, signal panel (no look-ahead), help glossary |
 | **Identity** | Display name entered once at `/login`; stored in localStorage; sent as `X-Actor-Name` header on every request; logged to Postgres `audit_log` |
 
 ---
@@ -94,13 +97,16 @@ blue-eagle/
 │   ├── config.py            # pydantic-settings (CLASS_WRITE_KEY optional, DATABASE_URL required)
 │   ├── auth.py              # get_actor_name(), require_write_key() dependency
 │   ├── middleware/audit.py  # AuditMiddleware — writes every POST/PUT/PATCH/DELETE to DB
-│   ├── db/                  # SQLAlchemy engine, Base, models (Sprint 1 + Sprint 2 scaffolding)
+│   ├── db/                  # SQLAlchemy engine, Base, models (all Sprint 2 tables)
 │   ├── alembic/             # 0001_baseline (audit_log, universe), 0002_sprint2_schema (7 tables)
-│   ├── routers/             # portfolio, optimize, technicals, alerts
-│   └── core/                # portfolio analytics, indicators, cache (TTLCache)
+│   ├── routers/             # portfolio, optimize, technicals, alerts, universe, watchlists, ticker
+│   ├── core/                # portfolio, indicators, cache (TTLCache), signals, provider (YFinance)
+│   └── tests/               # test_signals.py (34 tests), test_universe_import.py
 └── frontend/
-    ├── app/                 # Next.js App Router pages + layout
-    ├── components/          # Charts, AuthNav, Providers
+    ├── app/                 # Next.js App Router pages: overview, optimize, technicals, alerts,
+    │                        #   universe, watchlists/[id], ticker/[symbol], login
+    ├── components/          # Charts, AuthNav, Providers, SignalBadge, InfoTooltip, HelpSidebar
+    ├── types/               # sprint2.ts — all Sprint 2 TypeScript interfaces
     ├── hooks/useAuth.ts     # Auth guard — redirects to /login if no actor name set
     └── lib/                 # api.ts (typed fetch), auth.ts (actor helpers), utils.ts
 ```
@@ -159,13 +165,43 @@ E[R_i] = rf + β_i × MRP + MRP × view_i
 
 ---
 
-## 3-Minute Demo Script
+## Sprint 2 Verification
 
-1. **Login** — enter your name (no password) → lands on Overview
-2. **Overview** — default tickers (AAPL, MSFT, GOOGL, AMZN, NVDA) + SPY benchmark → Run Analysis
-3. Walk equity curve, drawdown, correlation heatmap
-4. **Optimization** — mode: "Max Sharpe (CAPM + Views)", set NVDA view = 0.5, click Run → show CAPM table + weight shift
-5. **Technicals** — ticker: NVDA, Load Chart → walk SMA crossover + RSI + MACD
-6. **Alerts** — NVDA, RSI Overbought/Oversold → Check Alert → Simulate Email Payload
+```bash
+# All 34 unit tests pass
+docker exec blue-eagle-backend-1 python -m pytest tests/ -v
 
-Total: ~3 minutes
+# Universe endpoint (15 seeded tickers)
+curl http://localhost:8000/api/universe | python3 -m json.tool
+
+# Create watchlist
+curl -X POST http://localhost:8000/api/watchlists \
+  -H "Content-Type: application/json" -H "X-Actor-Name: demo" \
+  -d '{"name": "Tech Picks"}'
+
+# Ticker technicals + signals (no look-ahead)
+curl "http://localhost:8000/api/ticker/AAPL/technicals?signals=1" \
+  -H "X-Actor-Name: demo"
+
+# Sprint 2 tables in DB
+docker exec blue-eagle-db-1 psql -U blueeagle -c \
+  "\dt" | grep -E "universe_tickers|watchlists|portfolios|alerts|positions"
+
+# Actor captured in audit_log
+docker exec blue-eagle-db-1 psql -U blueeagle -c \
+  "SELECT actor, method, path FROM audit_log ORDER BY ts DESC LIMIT 5;"
+```
+
+---
+
+## 5-Minute Demo Script
+
+1. **Login** — enter your name → lands on Overview
+2. **Overview** — default tickers (AAPL, MSFT, GOOGL, AMZN, NVDA) + SPY → Run Analysis → walk equity curve + drawdown
+3. **Universe** — Upload a CSV or see the 15 seeded tickers; toggle TSLA inactive
+4. **Watchlists** — Create "Tech Picks" → add AAPL, MSFT, NVDA → Refresh prices → SMA/RSI/MACD badges appear
+5. **Ticker Detail** — click AAPL → OHLCV bars + ATR14 + signal panel + Help glossary
+6. **Optimization** — Max Sharpe CAPM, NVDA view = 0.5 → Run → CAPM table + weight bar chart
+7. **Alerts** — NVDA, RSI OB/OS → Check Alert → Simulate Email
+
+Total: ~5 minutes

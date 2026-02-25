@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from config import settings
 from db.base import Base, engine
 from middleware.audit import AuditMiddleware
-from routers import alerts, optimize, portfolio, technicals
+from routers import alerts, optimize, portfolio, technicals, ticker, universe, watchlists
 
 
 @asynccontextmanager
@@ -34,6 +34,9 @@ app.include_router(portfolio.router,    prefix="/api/portfolio", tags=["portfoli
 app.include_router(optimize.router,     prefix="/api",           tags=["optimize"])
 app.include_router(technicals.router,   prefix="/api",           tags=["technicals"])
 app.include_router(alerts.router,       prefix="/api",           tags=["alerts"])
+app.include_router(universe.router,     prefix="/api",           tags=["universe"])
+app.include_router(watchlists.router,   prefix="/api",           tags=["watchlists"])
+app.include_router(ticker.router,       prefix="/api",           tags=["ticker"])
 
 
 @app.get("/health", tags=["ops"])

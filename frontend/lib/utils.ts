@@ -54,6 +54,101 @@ export async function apiPost<T>(path: string, body: unknown): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+function _sharedHeaders(): Record<string, string> {
+  const actorName =
+    typeof window !== "undefined"
+      ? (localStorage.getItem("be_actor") ?? "unknown")
+      : "unknown";
+  const headers: Record<string, string> = { "X-Actor-Name": actorName };
+  const writeKey = process.env.NEXT_PUBLIC_CLASS_WRITE_KEY;
+  if (writeKey) headers["X-Class-Key"] = writeKey;
+  return headers;
+}
+
+/** Typed GET wrapper with X-Actor-Name header and optional query params. */
+export async function apiGet<T>(
+  path: string,
+  params?: Record<string, string | number | boolean | null | undefined>,
+): Promise<T> {
+  const base = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+  const url = new URL(`${base}${path}`);
+  if (params) {
+    Object.entries(params).forEach(([k, v]) => {
+      if (v != null) url.searchParams.set(k, String(v));
+    });
+  }
+  const res = await fetch(url.toString(), {
+    method: "GET",
+    headers: _sharedHeaders(),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail ?? res.statusText);
+  }
+  return res.json() as Promise<T>;
+}
+
+/** Typed multipart upload wrapper (POST with FormData). */
+export async function apiUpload<T>(path: string, formData: FormData): Promise<T> {
+  const base = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+  // Do NOT set Content-Type manually — browser sets multipart boundary automatically
+  const res = await fetch(`${base}${path}`, {
+    method: "POST",
+    headers: _sharedHeaders(),
+    body: formData,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail ?? res.statusText);
+  }
+  return res.json() as Promise<T>;
+}
+
+/** Typed DELETE wrapper. */
+export async function apiDelete(path: string): Promise<void> {
+  const base = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+  const res = await fetch(`${base}${path}`, {
+    method: "DELETE",
+    headers: _sharedHeaders(),
+  });
+  if (!res.ok && res.status !== 204) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail ?? res.statusText);
+  }
+}
+
+/** Typed PATCH wrapper. */
+export async function apiPatch<T>(path: string, body: unknown): Promise<T> {
+  const base = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+  const headers = { ..._sharedHeaders(), "Content-Type": "application/json" };
+  const res = await fetch(`${base}${path}`, {
+    method: "PATCH",
+    headers,
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail ?? res.statusText);
+  }
+  return res.json() as Promise<T>;
+}
+
+/** Typed PUT wrapper. */
+export async function apiPut<T>(path: string, body: unknown): Promise<T> {
+  const base = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+  const headers = { ..._sharedHeaders(), "Content-Type": "application/json" };
+  const res = await fetch(`${base}${path}`, {
+    method: "PUT",
+    headers,
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail ?? res.statusText);
+  }
+  return res.json() as Promise<T>;
+}
+
 /** Downsample a time-series to at most maxPoints for chart performance. */
 export function downsample<T>(data: T[], maxPoints = 500): T[] {
   if (data.length <= maxPoints) return data;

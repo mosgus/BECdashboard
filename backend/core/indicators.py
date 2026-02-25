@@ -18,7 +18,10 @@ def compute_rsi(series: pd.Series, window: int = 14) -> pd.Series:
     avg_gain = gain.ewm(com=window - 1, min_periods=window).mean()
     avg_loss = loss.ewm(com=window - 1, min_periods=window).mean()
     rs = avg_gain / avg_loss.replace(0.0, np.nan)
-    return 100.0 - (100.0 / (1.0 + rs))
+    rsi = 100.0 - (100.0 / (1.0 + rs))
+    # Pure uptrend: avg_loss=0 means RSI=100 (no losses at all)
+    rsi = rsi.where(avg_loss != 0, other=100.0)
+    return rsi
 
 
 def compute_macd(
@@ -81,6 +84,25 @@ def check_price_threshold(prices: pd.Series, threshold: float, direction: str = 
         else f"Price ${latest:.2f} has not crossed ${threshold:.2f} ({side})."
     )
     return {"triggered": triggered, "price": latest, "message": msg}
+
+
+def compute_atr(
+    high: pd.Series,
+    low: pd.Series,
+    close: pd.Series,
+    window: int = 14,
+) -> pd.Series:
+    """Average True Range using Wilder EWM smoothing."""
+    prev_close = close.shift(1)
+    tr = pd.concat(
+        [
+            high - low,
+            (high - prev_close).abs(),
+            (low - prev_close).abs(),
+        ],
+        axis=1,
+    ).max(axis=1)
+    return tr.ewm(com=window - 1, min_periods=window).mean()
 
 
 def simulate_email_alert(ticker: str, alert: dict) -> dict:
