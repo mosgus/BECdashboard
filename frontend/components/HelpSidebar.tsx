@@ -53,7 +53,7 @@ const GLOSSARY = [
   },
   {
     term: "Optimize Modes",
-    def: "Min Variance: finds the weight combination with the lowest historical volatility. Max Sharpe: maximises the Sharpe ratio using 2-year historical returns. Implied trades = target weight − current weight.",
+    def: "Nine modes available. Equal Weight (1/N): naive baseline. Min Variance: lowest portfolio vol. Max Sharpe: best historical risk-adjusted return. Max Sharpe — CAPM: CAPM beta-driven expected returns. Risk Parity: equal risk contribution per asset. Max Sortino: maximise return per unit of downside vol. Min CVaR (95%): minimise expected tail loss. Max Diversification: maximise correlation-adjusted diversification. Target Volatility: best return within a hard vol ceiling. Click 'Optimizer Guide →' in the Optimize tab for full details. Implied trades = target weight − current weight.",
   },
 ];
 

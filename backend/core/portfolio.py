@@ -1,10 +1,16 @@
 """Portfolio analytics: returns, metrics, equity curve, optimizers.
 
-Three optimization modes:
-  - min_variance      : minimize portfolio variance (long-only, fully invested)
-  - max_sharpe        : historical returns-based max Sharpe (SLSQP)
-  - max_sharpe_capm   : CAPM expected returns + analyst views, per-asset bounds
-                        (implements the notebook logic in production form)
+Nine optimization modes:
+  - equal_weight        : 1/N — simplest baseline
+  - min_variance        : minimize portfolio variance (long-only, fully invested)
+  - max_sharpe          : historical returns-based max Sharpe (SLSQP)
+  - max_sharpe_capm     : CAPM expected returns + analyst views, per-asset bounds
+                          (implements the notebook logic in production form)
+  - risk_parity         : equal risk contribution (ERC) portfolio
+  - max_sortino         : maximise Sortino ratio (return / downside vol)
+  - min_cvar            : minimise CVaR at 95% confidence (Expected Shortfall)
+  - max_diversification : maximise diversification ratio (w·σ_i / σ_p)
+  - target_volatility   : maximise return subject to portfolio vol ≤ vol_target
 """
 from __future__ import annotations
 
@@ -232,4 +238,159 @@ def optimize_max_sharpe_capm(
     if not result.success:
         raise RuntimeError(f"CAPM optimizer did not converge: {result.message}")
 
+    return dict(zip(tickers, result.x.tolist()))
+
+
+def optimize_equal_weight(returns: pd.DataFrame) -> dict[str, float]:
+    """1/N equal-weight portfolio — simplest possible baseline."""
+    tickers = returns.columns.tolist()
+    n = len(tickers)
+    return {t: 1.0 / n for t in tickers}
+
+
+def optimize_risk_parity(
+    returns: pd.DataFrame,
+    max_weight: float = 1.0,
+) -> dict[str, float]:
+    """Equal Risk Contribution (Risk Parity) portfolio.
+
+    Minimises the sum of squared deviations from equal risk contribution.
+    Requires w > 0 so lower bound is 1e-6 (ERC is undefined at zero weight).
+    Result is renormalised to sum exactly to 1.
+    """
+    cov = returns.cov().values * 252
+    tickers = returns.columns.tolist()
+    n = len(tickers)
+
+    def erc_objective(w: np.ndarray) -> float:
+        port_var = float(w @ cov @ w)
+        port_vol = np.sqrt(max(port_var, 1e-12))
+        mrc = cov @ w          # marginal risk contributions
+        rc = w * mrc            # individual risk contributions
+        target = port_vol / n
+        return float(np.sum((rc - target) ** 2))
+
+    bounds = tuple((1e-6, max_weight) for _ in tickers)
+    x0 = np.ones(n) / n
+    constraints = [{"type": "eq", "fun": lambda w: w.sum() - 1.0}]
+    result = minimize(
+        erc_objective,
+        x0,
+        method="SLSQP",
+        bounds=bounds,
+        constraints=constraints,
+        options={"ftol": 1e-12, "maxiter": 3000},
+    )
+    if not result.success:
+        raise RuntimeError(f"Risk parity optimizer did not converge: {result.message}")
+    w = result.x / result.x.sum()
+    return dict(zip(tickers, w.tolist()))
+
+
+def optimize_max_sortino(
+    returns: pd.DataFrame,
+    rf: float = 0.0,
+    max_weight: float = 1.0,
+) -> dict[str, float]:
+    """Maximise the Sortino ratio (annualised return / annualised downside vol)."""
+    tickers = returns.columns.tolist()
+    n = len(tickers)
+    mean_ret = returns.mean().values
+    ret_matrix = returns.values
+
+    def neg_sortino(w: np.ndarray) -> float:
+        port_ann_ret = float(np.dot(w, mean_ret)) * 252
+        port_daily = ret_matrix @ w
+        downside = port_daily[port_daily < 0]
+        if len(downside) < 2:
+            return 0.0
+        dv = float(np.std(downside, ddof=1)) * np.sqrt(252)
+        return -(port_ann_ret - rf) / dv if dv > 0 else 0.0
+
+    bounds = tuple((0.0, max_weight) for _ in tickers)
+    w = _run_optimizer(neg_sortino, n, bounds)
+    return dict(zip(tickers, w.tolist()))
+
+
+def optimize_min_cvar(
+    returns: pd.DataFrame,
+    alpha: float = 0.05,
+    max_weight: float = 1.0,
+) -> dict[str, float]:
+    """Minimise CVaR (Expected Shortfall) at the (1-alpha) confidence level.
+
+    Minimises the expected loss in the worst alpha-fraction of days.
+    At alpha=0.05 this is the 95% CVaR (ES).
+    """
+    tickers = returns.columns.tolist()
+    n = len(tickers)
+    ret_matrix = returns.values
+
+    def cvar_objective(w: np.ndarray) -> float:
+        port_rets = ret_matrix @ w
+        threshold = float(np.percentile(port_rets, alpha * 100))
+        tail = port_rets[port_rets <= threshold]
+        if len(tail) == 0:
+            return 0.0
+        return -float(np.mean(tail))  # minimise → worst expected loss
+
+    bounds = tuple((0.0, max_weight) for _ in tickers)
+    w = _run_optimizer(cvar_objective, n, bounds)
+    return dict(zip(tickers, w.tolist()))
+
+
+def optimize_max_diversification(
+    returns: pd.DataFrame,
+    max_weight: float = 1.0,
+) -> dict[str, float]:
+    """Maximise the diversification ratio = (w · σ_i) / σ_p.
+
+    Rewards low intra-asset correlation by maximising weighted-average
+    individual vol relative to portfolio vol.
+    """
+    cov = returns.cov().values * 252
+    asset_vols = np.sqrt(np.diag(cov))
+    tickers = returns.columns.tolist()
+    n = len(tickers)
+
+    def neg_dr(w: np.ndarray) -> float:
+        weighted_vol = float(np.dot(w, asset_vols))
+        port_vol = float(np.sqrt(max(w @ cov @ w, 1e-12)))
+        return -weighted_vol / port_vol
+
+    bounds = tuple((0.0, max_weight) for _ in tickers)
+    w = _run_optimizer(neg_dr, n, bounds)
+    return dict(zip(tickers, w.tolist()))
+
+
+def optimize_target_volatility(
+    returns: pd.DataFrame,
+    vol_target: float = 0.10,
+    max_weight: float = 1.0,
+) -> dict[str, float]:
+    """Maximise expected return subject to annualised portfolio vol ≤ vol_target."""
+    cov = returns.cov().values * 252
+    mean_ret_ann = returns.mean().values * 252
+    tickers = returns.columns.tolist()
+    n = len(tickers)
+
+    def neg_ret(w: np.ndarray) -> float:
+        return -float(np.dot(w, mean_ret_ann))
+
+    bounds = tuple((0.0, max_weight) for _ in tickers)
+    x0 = np.ones(n) / n
+    constraints = [
+        {"type": "eq",   "fun": lambda w: w.sum() - 1.0},
+        {"type": "ineq", "fun": lambda w: vol_target - np.sqrt(max(float(w @ cov @ w), 0.0))},
+    ]
+    result = minimize(
+        neg_ret,
+        x0,
+        method="SLSQP",
+        bounds=bounds,
+        constraints=constraints,
+        options={"ftol": 1e-10, "maxiter": 2000},
+    )
+    if not result.success:
+        raise RuntimeError(f"Target-vol optimizer did not converge: {result.message}")
     return dict(zip(tickers, result.x.tolist()))

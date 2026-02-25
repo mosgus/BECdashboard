@@ -156,16 +156,18 @@ export const fetchPortfolioAnalytics = (
 
 export const optimizePortfolio = (
   id: string,
-  mode: "min_variance" | "max_sharpe",
+  mode: string,
   maxWeight: number,
   start?: string,
   end?: string,
+  volTarget?: number,
 ): Promise<PortfolioOptimizeResult> =>
   apiPost<PortfolioOptimizeResult>(`/api/portfolios/${id}/optimize`, {
     mode,
     max_weight: maxWeight,
     start,
     end,
+    ...(volTarget !== undefined ? { vol_target: volTarget } : {}),
   });
 
 // ── Candidates ────────────────────────────────────────────────────────────────

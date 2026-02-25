@@ -14,11 +14,20 @@ from sqlalchemy.orm import Session
 from auth import require_write_key
 from core.cache import fetch_prices
 from core.portfolio import (
+    compute_betas,
+    compute_capm_expected_returns,
     compute_equity_curve,
     compute_metrics,
     compute_returns,
+    optimize_equal_weight,
+    optimize_max_diversification,
     optimize_max_sharpe,
+    optimize_max_sharpe_capm,
+    optimize_max_sortino,
+    optimize_min_cvar,
     optimize_min_variance,
+    optimize_risk_parity,
+    optimize_target_volatility,
 )
 from core.signals import compute_all_signals
 from db.base import get_db
@@ -51,8 +60,19 @@ class PositionUpsert(BaseModel):
 
 
 class PortfolioOptimizeRequest(BaseModel):
-    mode: Literal["min_variance", "max_sharpe"] = "min_variance"
+    mode: Literal[
+        "equal_weight",
+        "min_variance",
+        "max_sharpe",
+        "max_sharpe_capm",
+        "risk_parity",
+        "max_sortino",
+        "min_cvar",
+        "max_diversification",
+        "target_volatility",
+    ] = "min_variance"
     max_weight: float = 1.0
+    vol_target: float = 0.10
     start: Optional[str] = None
     end: Optional[str] = None
 
@@ -413,10 +433,32 @@ def optimize_portfolio(
 
     feasible = True
     try:
-        if body.mode == "min_variance":
+        if body.mode == "equal_weight":
+            target_dict = optimize_equal_weight(returns)
+        elif body.mode == "min_variance":
             target_dict = optimize_min_variance(returns, max_weight=body.max_weight)
-        else:
+        elif body.mode == "max_sharpe":
             target_dict = optimize_max_sharpe(returns, max_weight=body.max_weight)
+        elif body.mode == "max_sharpe_capm":
+            # Reuse the already-fetched prices (includes BENCHMARK from line 414)
+            capm_returns = compute_returns(prices)
+            betas = compute_betas(capm_returns, BENCHMARK)
+            exp_ret = compute_capm_expected_returns(betas, rf=0.0364, mrp=0.05)
+            target_dict = optimize_max_sharpe_capm(
+                returns, exp_ret, rf=0.0364, max_weight=body.max_weight
+            )
+        elif body.mode == "risk_parity":
+            target_dict = optimize_risk_parity(returns, max_weight=body.max_weight)
+        elif body.mode == "max_sortino":
+            target_dict = optimize_max_sortino(returns, max_weight=body.max_weight)
+        elif body.mode == "min_cvar":
+            target_dict = optimize_min_cvar(returns, max_weight=body.max_weight)
+        elif body.mode == "max_diversification":
+            target_dict = optimize_max_diversification(returns, max_weight=body.max_weight)
+        else:  # target_volatility
+            target_dict = optimize_target_volatility(
+                returns, vol_target=body.vol_target, max_weight=body.max_weight
+            )
     except RuntimeError as exc:
         warnings.append(f"Optimizer did not converge: {exc}")
         target_dict = dict(zip(valid_tickers, curr_w.tolist()))

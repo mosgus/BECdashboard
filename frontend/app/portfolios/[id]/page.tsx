@@ -3,7 +3,7 @@ import { use, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ChevronDown, ChevronRight, Trash2 } from "lucide-react";
+import { BookOpen, ChevronDown, ChevronRight, Trash2 } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import {
   addCandidate,
@@ -27,6 +27,7 @@ import InfoTooltip from "@/components/InfoTooltip";
 import HelpSidebar from "@/components/HelpSidebar";
 import UniverseTickerPicker from "@/components/UniverseTickerPicker";
 import TechnicalsChart from "@/components/TechnicalsChart";
+import OptimizerGuide from "@/components/OptimizerGuide";
 import { PortfolioAnalytics, PortfolioOptimizeResult, Position } from "@/types/sprint3";
 import { SignalResult } from "@/types/sprint2";
 import type { CandidateRefreshResponse, IndicatorType, PortfolioIndicatorConfig } from "@/types/sprint4";
@@ -373,13 +374,23 @@ function AnalyticsTab({ portfolioId }: { portfolioId: string }) {
 // ── Optimize tab ──────────────────────────────────────────────────────────────
 
 function OptimizeTab({ portfolioId }: { portfolioId: string }) {
-  const [mode, setMode] = useState<"min_variance" | "max_sharpe">("min_variance");
+  const [mode, setMode] = useState("min_variance");
   const [maxWeight, setMaxWeight] = useState(1.0);
+  const [volTarget, setVolTarget] = useState(0.10);
+  const [guideOpen, setGuideOpen] = useState(false);
   const [result, setResult] = useState<PortfolioOptimizeResult | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const optMut = useMutation({
-    mutationFn: () => optimizePortfolio(portfolioId, mode, maxWeight),
+    mutationFn: () =>
+      optimizePortfolio(
+        portfolioId,
+        mode,
+        maxWeight,
+        undefined,
+        undefined,
+        mode === "target_volatility" ? volTarget : undefined,
+      ),
     onSuccess: (data) => { setResult(data); setError(null); },
     onError: (e: Error) => setError(e.message),
   });
@@ -390,21 +401,28 @@ function OptimizeTab({ portfolioId }: { portfolioId: string }) {
       <div className="rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] p-5 shadow-sm">
         <h3 className="mb-4 text-sm font-semibold text-[var(--color-text)]">
           Optimization Settings
-          <InfoTooltip text="Uses the portfolio's current holdings and weights as the baseline. Optimized weights minimise variance or maximise Sharpe ratio." />
+          <InfoTooltip text="Uses the portfolio's current holdings and weights as the baseline. Select a mode and run the optimizer to see rebalancing targets." />
         </h3>
         <div className="grid gap-4 sm:grid-cols-3">
           <div>
             <label className="mb-1 flex items-center gap-1 text-xs font-medium text-[var(--color-muted)]">
               Mode
-              <InfoTooltip text="Min Variance: minimize portfolio volatility. Max Sharpe: maximize risk-adjusted return (Sharpe ratio). Both use 2-year history." />
+              <InfoTooltip text="Choose an optimization objective. Click 'Optimizer Guide' below for a full description of each mode." />
             </label>
             <select
               value={mode}
-              onChange={(e) => setMode(e.target.value as "min_variance" | "max_sharpe")}
+              onChange={(e) => setMode(e.target.value)}
               className="w-full rounded-[var(--radius-btn)] border border-[var(--color-border)] px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]"
             >
-              <option value="min_variance">Min Variance — lowest risk</option>
-              <option value="max_sharpe">Max Sharpe — best risk-adjusted return</option>
+              <option value="equal_weight">Equal Weight (1/N)</option>
+              <option value="min_variance">Min Variance</option>
+              <option value="max_sharpe">Max Sharpe (Historical)</option>
+              <option value="max_sharpe_capm">Max Sharpe — CAPM</option>
+              <option value="risk_parity">Risk Parity</option>
+              <option value="max_sortino">Max Sortino</option>
+              <option value="min_cvar">Min CVaR (95%)</option>
+              <option value="max_diversification">Max Diversification</option>
+              <option value="target_volatility">Target Volatility</option>
             </select>
           </div>
           <div>
@@ -417,6 +435,19 @@ function OptimizeTab({ portfolioId }: { portfolioId: string }) {
               onChange={(e) => setMaxWeight(+e.target.value / 100)}
               className="w-full accent-[var(--color-primary)]"
             />
+            {mode === "target_volatility" && (
+              <div className="mt-3">
+                <label className="mb-1 block text-xs font-medium text-[var(--color-muted)]">
+                  Vol target: {(volTarget * 100).toFixed(0)}% / yr
+                </label>
+                <input
+                  type="range" min={5} max={50} step={1}
+                  value={volTarget * 100}
+                  onChange={(e) => setVolTarget(+e.target.value / 100)}
+                  className="w-full accent-[var(--color-primary)]"
+                />
+              </div>
+            )}
           </div>
           <div className="flex items-end">
             <button
@@ -429,7 +460,17 @@ function OptimizeTab({ portfolioId }: { portfolioId: string }) {
           </div>
         </div>
         {error && <p className="mt-3 text-xs text-[var(--color-negative)]">{error}</p>}
+        <div className="mt-3 flex justify-end">
+          <button
+            onClick={() => setGuideOpen(true)}
+            className="flex items-center gap-1.5 text-xs text-[var(--color-primary)] hover:underline"
+          >
+            <BookOpen size={13} />
+            Optimizer Guide →
+          </button>
+        </div>
       </div>
+      {guideOpen && <OptimizerGuide onClose={() => setGuideOpen(false)} />}
 
       {result && (
         <>
