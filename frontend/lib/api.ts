@@ -53,6 +53,9 @@ export const importUniverseCSV = (file: File): Promise<ImportResult> => {
   return apiUpload<ImportResult>("/api/universe/import_csv", fd);
 };
 
+export const addUniverseTicker = (ticker: string, name?: string): Promise<{ ticker: string; name: string | null; active: boolean }> =>
+  apiPost("/api/universe", { ticker, name: name || null });
+
 export const patchUniverseTicker = (ticker: string, active: boolean): Promise<{ ticker: string; active: boolean }> =>
   apiPatch(`/api/universe/${ticker}`, { active });
 

@@ -24,6 +24,11 @@ class TickerActiveUpdate(BaseModel):
     active: bool
 
 
+class TickerAdd(BaseModel):
+    ticker: str
+    name: str | None = None
+
+
 def _parse_csv(content: str) -> list[dict]:
     """Parse CSV content into list of {ticker, name} dicts.
 
@@ -53,6 +58,24 @@ def _parse_csv(content: str) -> list[dict]:
             "name": line[1].strip() or None if len(line) > 1 else None,
         })
     return rows
+
+
+@router.post("/universe")
+def add_universe_ticker(
+    body: TickerAdd,
+    db: Session = Depends(get_db),
+    _: None = Depends(require_write_key),
+) -> dict:
+    """Add a single ticker to the universe."""
+    ticker = body.ticker.strip().upper()
+    if not _TICKER_RE.match(ticker):
+        raise HTTPException(status_code=422, detail=f"Invalid ticker format: {ticker}")
+    existing = db.get(UniverseTicker, ticker)
+    if existing:
+        raise HTTPException(status_code=409, detail=f"{ticker} is already in the universe.")
+    db.add(UniverseTicker(ticker=ticker, name=body.name or None, active=True))
+    db.commit()
+    return {"ticker": ticker, "name": body.name or None, "active": True}
 
 
 @router.post("/universe/import_csv")

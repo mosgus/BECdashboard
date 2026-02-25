@@ -2,7 +2,7 @@
 import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Upload, Search, ToggleLeft, ToggleRight } from "lucide-react";
-import { fetchUniverse, importUniverseCSV, patchUniverseTicker } from "@/lib/api";
+import { addUniverseTicker, fetchUniverse, importUniverseCSV, patchUniverseTicker } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
 import type { UniverseTicker } from "@/types/sprint2";
 import InfoTooltip from "@/components/InfoTooltip";
@@ -15,12 +15,23 @@ export default function UniversePage() {
   const [search, setSearch] = useState("");
   const [activeFilter, setActiveFilter] = useState<"all" | "active" | "inactive">("all");
   const [importResult, setImportResult] = useState<{ added: number; skipped: number; warnings: string[] } | null>(null);
+  const [newTicker, setNewTicker] = useState("");
+  const [newName, setNewName] = useState("");
 
   const active = activeFilter === "all" ? undefined : activeFilter === "active";
 
   const { data, isLoading } = useQuery({
     queryKey: ["universe", search, activeFilter],
     queryFn: () => fetchUniverse(search || undefined, active),
+  });
+
+  const addMutation = useMutation({
+    mutationFn: () => addUniverseTicker(newTicker.trim().toUpperCase(), newName.trim() || undefined),
+    onSuccess: () => {
+      setNewTicker("");
+      setNewName("");
+      qc.invalidateQueries({ queryKey: ["universe"] });
+    },
   });
 
   const importMutation = useMutation({
@@ -97,6 +108,39 @@ export default function UniversePage() {
           {(importMutation.error as Error).message}
         </p>
       )}
+
+      {/* Add single ticker */}
+      <div className="rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-sm">
+        <h2 className="mb-3 text-sm font-semibold text-[var(--color-text)]">Add Ticker</h2>
+        <div className="flex flex-wrap gap-3">
+          <input
+            value={newTicker}
+            onChange={(e) => setNewTicker(e.target.value.toUpperCase())}
+            onKeyDown={(e) => { if (e.key === "Enter" && newTicker.trim()) addMutation.mutate(); }}
+            placeholder="Ticker (e.g. AAPL)"
+            className="w-32 rounded-[var(--radius-btn)] border border-[var(--color-border)] px-3 py-2 text-sm uppercase focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]"
+          />
+          <input
+            value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter" && newTicker.trim()) addMutation.mutate(); }}
+            placeholder="Company name (optional)"
+            className="flex-1 min-w-48 rounded-[var(--radius-btn)] border border-[var(--color-border)] px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]"
+          />
+          <button
+            onClick={() => addMutation.mutate()}
+            disabled={!newTicker.trim() || addMutation.isPending}
+            className="rounded-[var(--radius-btn)] bg-[var(--color-primary)] px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50 transition-opacity"
+          >
+            {addMutation.isPending ? "Adding…" : "Add"}
+          </button>
+        </div>
+        {addMutation.error && (
+          <p className="mt-2 text-xs text-[var(--color-negative)]">
+            {(addMutation.error as Error).message}
+          </p>
+        )}
+      </div>
 
       {/* Stats + filters */}
       <div className="flex flex-wrap items-center gap-4">
