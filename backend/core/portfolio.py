@@ -154,13 +154,14 @@ def _run_optimizer(objective, n: int, bounds: tuple, *args) -> np.ndarray:
 def optimize_min_variance(
     returns: pd.DataFrame,
     max_weight: float = 1.0,
+    min_weight: float = 0.0,
     asset_bounds: Optional[dict[str, tuple[float, float]]] = None,
 ) -> dict[str, float]:
-    """Long-only minimum-variance portfolio."""
+    """Minimum-variance portfolio. min_weight < 0 enables short positions."""
     cov = returns.cov().values * 252
     tickers = returns.columns.tolist()
     bounds = tuple(
-        asset_bounds.get(t, (0.0, max_weight)) if asset_bounds else (0.0, max_weight)
+        asset_bounds.get(t, (min_weight, max_weight)) if asset_bounds else (min_weight, max_weight)
         for t in tickers
     )
     w = _run_optimizer(_port_vol, len(tickers), bounds, cov)
@@ -171,14 +172,15 @@ def optimize_max_sharpe(
     returns: pd.DataFrame,
     rf: float = 0.0,
     max_weight: float = 1.0,
+    min_weight: float = 0.0,
     asset_bounds: Optional[dict[str, tuple[float, float]]] = None,
 ) -> dict[str, float]:
-    """Max-Sharpe using historical mean returns (annualised)."""
+    """Max-Sharpe using historical mean returns (annualised). min_weight < 0 enables shorts."""
     mean_ret = returns.mean().values
     cov = returns.cov().values
     tickers = returns.columns.tolist()
     bounds = tuple(
-        asset_bounds.get(t, (0.0, max_weight)) if asset_bounds else (0.0, max_weight)
+        asset_bounds.get(t, (min_weight, max_weight)) if asset_bounds else (min_weight, max_weight)
         for t in tickers
     )
     w = _run_optimizer(_neg_sharpe_hist, len(tickers), bounds, mean_ret, cov, rf)
@@ -190,12 +192,14 @@ def optimize_max_sharpe_capm(
     expected_returns: dict[str, float],
     rf: float = 0.0364,
     max_weight: float = 1.0,
+    min_weight: float = 0.0,
     asset_bounds: Optional[dict[str, tuple[float, float]]] = None,
 ) -> dict[str, float]:
     """Max-Sharpe using CAPM expected returns + analyst views.
 
     Uses annualised covariance matrix and annual expected returns directly,
     matching the notebook's portfolio_performance() formulation.
+    min_weight < 0 enables short positions.
     """
     tickers = [t for t in returns.columns if t in expected_returns]
     if not tickers:
@@ -206,7 +210,7 @@ def optimize_max_sharpe_capm(
     n = len(tickers)
 
     bounds = tuple(
-        asset_bounds.get(t, (0.0, max_weight)) if asset_bounds else (0.0, max_weight)
+        asset_bounds.get(t, (min_weight, max_weight)) if asset_bounds else (min_weight, max_weight)
         for t in tickers
     )
 
@@ -291,8 +295,11 @@ def optimize_max_sortino(
     returns: pd.DataFrame,
     rf: float = 0.0,
     max_weight: float = 1.0,
+    min_weight: float = 0.0,
 ) -> dict[str, float]:
-    """Maximise the Sortino ratio (annualised return / annualised downside vol)."""
+    """Maximise the Sortino ratio (annualised return / annualised downside vol).
+    min_weight < 0 enables short positions.
+    """
     tickers = returns.columns.tolist()
     n = len(tickers)
     mean_ret = returns.mean().values
@@ -307,7 +314,7 @@ def optimize_max_sortino(
         dv = float(np.std(downside, ddof=1)) * np.sqrt(252)
         return -(port_ann_ret - rf) / dv if dv > 0 else 0.0
 
-    bounds = tuple((0.0, max_weight) for _ in tickers)
+    bounds = tuple((min_weight, max_weight) for _ in tickers)
     w = _run_optimizer(neg_sortino, n, bounds)
     return dict(zip(tickers, w.tolist()))
 
@@ -316,11 +323,12 @@ def optimize_min_cvar(
     returns: pd.DataFrame,
     alpha: float = 0.05,
     max_weight: float = 1.0,
+    min_weight: float = 0.0,
 ) -> dict[str, float]:
     """Minimise CVaR (Expected Shortfall) at the (1-alpha) confidence level.
 
     Minimises the expected loss in the worst alpha-fraction of days.
-    At alpha=0.05 this is the 95% CVaR (ES).
+    At alpha=0.05 this is the 95% CVaR (ES). min_weight < 0 enables shorts.
     """
     tickers = returns.columns.tolist()
     n = len(tickers)
@@ -334,7 +342,7 @@ def optimize_min_cvar(
             return 0.0
         return -float(np.mean(tail))  # minimise → worst expected loss
 
-    bounds = tuple((0.0, max_weight) for _ in tickers)
+    bounds = tuple((min_weight, max_weight) for _ in tickers)
     w = _run_optimizer(cvar_objective, n, bounds)
     return dict(zip(tickers, w.tolist()))
 
@@ -367,8 +375,11 @@ def optimize_target_volatility(
     returns: pd.DataFrame,
     vol_target: float = 0.10,
     max_weight: float = 1.0,
+    min_weight: float = 0.0,
 ) -> dict[str, float]:
-    """Maximise expected return subject to annualised portfolio vol ≤ vol_target."""
+    """Maximise expected return subject to annualised portfolio vol ≤ vol_target.
+    min_weight < 0 enables short positions.
+    """
     cov = returns.cov().values * 252
     mean_ret_ann = returns.mean().values * 252
     tickers = returns.columns.tolist()
@@ -377,7 +388,7 @@ def optimize_target_volatility(
     def neg_ret(w: np.ndarray) -> float:
         return -float(np.dot(w, mean_ret_ann))
 
-    bounds = tuple((0.0, max_weight) for _ in tickers)
+    bounds = tuple((min_weight, max_weight) for _ in tickers)
     x0 = np.ones(n) / n
     constraints = [
         {"type": "eq",   "fun": lambda w: w.sum() - 1.0},

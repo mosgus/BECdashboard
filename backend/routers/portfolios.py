@@ -30,6 +30,13 @@ from core.portfolio import (
     optimize_target_volatility,
 )
 from core.signals import compute_all_signals
+from core.stats import run_validation_suite
+from core.forecast import (
+    forecast_ewma,
+    forecast_arima,
+    forecast_prophet,
+    forecast_ensemble,
+)
 from db.base import get_db
 from db.models import Portfolio, PortfolioCandidate, PortfolioIndicatorConfig, Position, UniverseTicker
 
@@ -73,6 +80,20 @@ class PortfolioOptimizeRequest(BaseModel):
     ] = "min_variance"
     max_weight: float = 1.0
     vol_target: float = 0.10
+    allow_short: bool = False
+    start: Optional[str] = None
+    end: Optional[str] = None
+
+
+class PortfolioValidateRequest(BaseModel):
+    quick: bool = True
+    start: Optional[str] = None
+    end: Optional[str] = None
+
+
+class PortfolioForecastRequest(BaseModel):
+    method: Literal["ewma", "arima", "prophet", "ensemble"] = "ensemble"
+    horizon_days: int = 30
     start: Optional[str] = None
     end: Optional[str] = None
 
@@ -431,33 +452,40 @@ def optimize_portfolio(
     if len(returns) < 60:
         warnings.append("Fewer than 60 trading days of history — optimization results may be unreliable.")
 
+    # Compute min_weight for short-capable modes
+    min_w = -body.max_weight if body.allow_short else 0.0
+    if body.allow_short:
+        warnings.append(
+            "Short positions enabled. Equal Weight, Risk Parity, and Max Diversification remain long-only."
+        )
+
     feasible = True
     try:
         if body.mode == "equal_weight":
             target_dict = optimize_equal_weight(returns)
         elif body.mode == "min_variance":
-            target_dict = optimize_min_variance(returns, max_weight=body.max_weight)
+            target_dict = optimize_min_variance(returns, max_weight=body.max_weight, min_weight=min_w)
         elif body.mode == "max_sharpe":
-            target_dict = optimize_max_sharpe(returns, max_weight=body.max_weight)
+            target_dict = optimize_max_sharpe(returns, max_weight=body.max_weight, min_weight=min_w)
         elif body.mode == "max_sharpe_capm":
-            # Reuse the already-fetched prices (includes BENCHMARK from line 414)
+            # Reuse the already-fetched prices (includes BENCHMARK)
             capm_returns = compute_returns(prices)
             betas = compute_betas(capm_returns, BENCHMARK)
             exp_ret = compute_capm_expected_returns(betas, rf=0.0364, mrp=0.05)
             target_dict = optimize_max_sharpe_capm(
-                returns, exp_ret, rf=0.0364, max_weight=body.max_weight
+                returns, exp_ret, rf=0.0364, max_weight=body.max_weight, min_weight=min_w
             )
         elif body.mode == "risk_parity":
             target_dict = optimize_risk_parity(returns, max_weight=body.max_weight)
         elif body.mode == "max_sortino":
-            target_dict = optimize_max_sortino(returns, max_weight=body.max_weight)
+            target_dict = optimize_max_sortino(returns, max_weight=body.max_weight, min_weight=min_w)
         elif body.mode == "min_cvar":
-            target_dict = optimize_min_cvar(returns, max_weight=body.max_weight)
+            target_dict = optimize_min_cvar(returns, max_weight=body.max_weight, min_weight=min_w)
         elif body.mode == "max_diversification":
             target_dict = optimize_max_diversification(returns, max_weight=body.max_weight)
         else:  # target_volatility
             target_dict = optimize_target_volatility(
-                returns, vol_target=body.vol_target, max_weight=body.max_weight
+                returns, vol_target=body.vol_target, max_weight=body.max_weight, min_weight=min_w
             )
     except RuntimeError as exc:
         warnings.append(f"Optimizer did not converge: {exc}")
@@ -705,3 +733,139 @@ def delete_indicator_config(
         raise HTTPException(status_code=404, detail=f"Config {ticker}/{indicator} not found.")
     db.delete(obj)
     db.commit()
+
+
+# ── Portfolio Validate ─────────────────────────────────────────────────────────
+
+@router.post("/portfolios/{portfolio_id}/validate")
+def validate_portfolio(
+    portfolio_id: str,
+    body: PortfolioValidateRequest,
+    db: Session = Depends(get_db),
+    _: None = Depends(require_write_key),
+) -> dict:
+    p = _get_or_404(db, portfolio_id)
+    positions = (
+        db.query(Position)
+        .filter(Position.portfolio_id == p.id)
+        .order_by(Position.ticker)
+        .all()
+    )
+
+    warnings: list[str] = []
+
+    if not positions:
+        raise HTTPException(status_code=422, detail="No positions in portfolio.")
+
+    tickers = [pos.ticker for pos in positions]
+    raw_weights = [(pos.weight or 1.0) for pos in positions]
+    total_w = sum(raw_weights) or 1.0
+    weights = np.array([w / total_w for w in raw_weights])
+
+    today = date.today()
+    end_str = body.end or today.isoformat()
+    start_str = body.start or (today - timedelta(days=DEFAULT_LOOKBACK_DAYS)).isoformat()
+
+    prices = fetch_prices(tuple(sorted(set(tickers + [BENCHMARK]))), start_str, end_str)
+    if prices is None or prices.empty:
+        raise HTTPException(status_code=422, detail="Could not fetch price data.")
+
+    valid_tickers = [t for t in tickers if t in prices.columns]
+    if not valid_tickers:
+        raise HTTPException(status_code=422, detail="No valid price data for any holding.")
+
+    if len(valid_tickers) < len(tickers):
+        missing = [t for t in tickers if t not in valid_tickers]
+        warnings.append(f"No data for: {', '.join(missing)}")
+
+    weight_map = dict(zip(tickers, weights.tolist()))
+    vw_raw = [weight_map[t] for t in valid_tickers]
+    vw_sum = sum(vw_raw) or 1.0
+    valid_weights = np.array([w / vw_sum for w in vw_raw])
+
+    returns = compute_returns(prices[valid_tickers])
+    port_returns = (returns * valid_weights).sum(axis=1).values
+
+    if len(port_returns) < 120:
+        warnings.append("Fewer than 120 trading days — validation results may be unreliable.")
+
+    suite = run_validation_suite(port_returns, quick=body.quick)
+    suite["portfolio_id"] = portfolio_id
+    suite["returns_used"] = len(port_returns)
+    suite["warnings"] = warnings
+
+    return suite
+
+
+# ── Portfolio Forecast ─────────────────────────────────────────────────────────
+
+@router.post("/portfolios/{portfolio_id}/forecast")
+def forecast_portfolio(
+    portfolio_id: str,
+    body: PortfolioForecastRequest,
+    db: Session = Depends(get_db),
+    _: None = Depends(require_write_key),
+) -> dict:
+    p = _get_or_404(db, portfolio_id)
+    positions = (
+        db.query(Position)
+        .filter(Position.portfolio_id == p.id)
+        .order_by(Position.ticker)
+        .all()
+    )
+
+    warnings: list[str] = []
+
+    if not positions:
+        raise HTTPException(status_code=422, detail="No positions in portfolio.")
+
+    tickers = [pos.ticker for pos in positions]
+    raw_weights = [(pos.weight or 1.0) for pos in positions]
+    total_w = sum(raw_weights) or 1.0
+    weights = np.array([w / total_w for w in raw_weights])
+
+    today = date.today()
+    end_str = body.end or today.isoformat()
+    start_str = body.start or (today - timedelta(days=DEFAULT_LOOKBACK_DAYS)).isoformat()
+
+    prices = fetch_prices(tuple(sorted(tickers)), start_str, end_str)
+    if prices is None or prices.empty:
+        raise HTTPException(status_code=422, detail="Could not fetch price data.")
+
+    valid_tickers = [t for t in tickers if t in prices.columns]
+    if not valid_tickers:
+        raise HTTPException(status_code=422, detail="No valid price data.")
+
+    if len(valid_tickers) < len(tickers):
+        missing = [t for t in tickers if t not in valid_tickers]
+        warnings.append(f"No data for: {', '.join(missing)}")
+
+    weight_map = dict(zip(tickers, weights.tolist()))
+    vw_raw = [weight_map[t] for t in valid_tickers]
+    vw_sum = sum(vw_raw) or 1.0
+    valid_weights = np.array([w / vw_sum for w in vw_raw])
+
+    returns = compute_returns(prices[valid_tickers])
+    port_returns = (returns * valid_weights).sum(axis=1)
+    # Simulated equity curve starting at 1.0
+    equity = (1 + port_returns).cumprod()
+
+    horizon = max(1, min(body.horizon_days, 252))
+
+    try:
+        if body.method == "ewma":
+            result = forecast_ewma(equity, horizon)
+        elif body.method == "arima":
+            result = forecast_arima(equity, horizon)
+        elif body.method == "prophet":
+            result = forecast_prophet(equity, horizon)
+        else:  # ensemble
+            result = forecast_ensemble(equity, horizon)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Forecast failed: {exc}")
+
+    result["portfolio_id"] = portfolio_id
+    result["horizon_days"] = horizon
+    result["warnings"] = warnings
+    result["simulated"] = True
+    return result

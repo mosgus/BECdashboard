@@ -14,12 +14,14 @@ import {
   fetchPortfolioAnalytics,
   fetchPortfolioDetail,
   fetchTickerTechnicals,
+  forecastPortfolio,
   optimizePortfolio,
   refreshCandidates,
   removeCandidate,
   removePosition,
   updatePosition,
   upsertIndicatorConfig,
+  validatePortfolio,
 } from "@/lib/api";
 import { fmtNum, fmtPct, colorForValue, downsample } from "@/lib/utils";
 import SignalBadge from "@/components/SignalBadge";
@@ -28,9 +30,11 @@ import HelpSidebar from "@/components/HelpSidebar";
 import UniverseTickerPicker from "@/components/UniverseTickerPicker";
 import TechnicalsChart from "@/components/TechnicalsChart";
 import OptimizerGuide from "@/components/OptimizerGuide";
+import FanChart from "@/components/FanChart";
 import { PortfolioAnalytics, PortfolioOptimizeResult, Position } from "@/types/sprint3";
 import { SignalResult } from "@/types/sprint2";
 import type { CandidateRefreshResponse, IndicatorType, PortfolioIndicatorConfig } from "@/types/sprint4";
+import type { PortfolioValidationResult, PortfolioForecastResult } from "@/types/sprint6";
 import {
   LineChart,
   Line,
@@ -42,7 +46,7 @@ import {
   ResponsiveContainer,
 } from "recharts";
 
-type Tab = "holdings" | "watchlist" | "technicals" | "analytics" | "optimize";
+type Tab = "holdings" | "watchlist" | "technicals" | "analytics" | "optimize" | "validation" | "forecast";
 
 // ── Quick Technicals accordion per holding row ────────────────────────────────
 
@@ -355,16 +359,32 @@ function AnalyticsTab({ portfolioId }: { portfolioId: string }) {
             Exit Signals
             <InfoTooltip text="Signals use no look-ahead: each indicator scans historical data and reports the last trigger event." />
           </h3>
-          <div className="space-y-3">
-            {analytics.signals_by_ticker.map(({ ticker, signals }) => (
-              <div key={ticker} className="flex flex-wrap items-center gap-3">
-                <Link href={`/ticker/${ticker}`} className="w-16 font-mono text-xs font-semibold text-[var(--color-primary)] hover:underline">{ticker}</Link>
-                {signals.length ? signals.map((s) => <SignalBadge key={s.signal} state={s.state} lastDate={s.last_trigger_date} />) : (
-                  <span className="text-xs text-[var(--color-muted)]">—</span>
-                )}
-              </div>
+          {/* Header row */}
+          <div className="mb-1 grid grid-cols-[5rem_1fr_1fr_1fr] gap-2 border-b border-[var(--color-border)] pb-1">
+            <span />
+            {[
+              { key: "sma_cross",     label: "SMA 20/50" },
+              { key: "rsi_threshold", label: "RSI 14" },
+              { key: "macd_cross",    label: "MACD (12,26,9)" },
+            ].map((c) => (
+              <span key={c.key} className="text-xs font-semibold text-[var(--color-muted)]">{c.label}</span>
             ))}
           </div>
+          {/* One row per ticker */}
+          {analytics.signals_by_ticker.map(({ ticker, signals }) => {
+            const byKey = Object.fromEntries(signals.map((s) => [s.signal, s]));
+            return (
+              <div key={ticker} className="grid grid-cols-[5rem_1fr_1fr_1fr] gap-2 items-center py-1">
+                <Link href={`/ticker/${ticker}`} className="font-mono text-xs font-semibold text-[var(--color-primary)] hover:underline truncate">{ticker}</Link>
+                {["sma_cross", "rsi_threshold", "macd_cross"].map((k) => {
+                  const s = byKey[k];
+                  return s
+                    ? <SignalBadge key={k} state={s.state} lastDate={s.last_trigger_date} />
+                    : <span key={k} className="text-xs text-[var(--color-muted)]">—</span>;
+                })}
+              </div>
+            );
+          })}
         </div>
       ) : null}
     </div>
@@ -377,9 +397,12 @@ function OptimizeTab({ portfolioId }: { portfolioId: string }) {
   const [mode, setMode] = useState("min_variance");
   const [maxWeight, setMaxWeight] = useState(1.0);
   const [volTarget, setVolTarget] = useState(0.10);
+  const [allowShort, setAllowShort] = useState(false);
   const [guideOpen, setGuideOpen] = useState(false);
   const [result, setResult] = useState<PortfolioOptimizeResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const LONG_ONLY_MODES = ["equal_weight", "risk_parity", "max_diversification"];
 
   const optMut = useMutation({
     mutationFn: () =>
@@ -390,6 +413,7 @@ function OptimizeTab({ portfolioId }: { portfolioId: string }) {
         undefined,
         undefined,
         mode === "target_volatility" ? volTarget : undefined,
+        allowShort,
       ),
     onSuccess: (data) => { setResult(data); setError(null); },
     onError: (e: Error) => setError(e.message),
@@ -427,7 +451,7 @@ function OptimizeTab({ portfolioId }: { portfolioId: string }) {
           </div>
           <div>
             <label className="mb-1 block text-xs font-medium text-[var(--color-muted)]">
-              Max weight per asset: {(maxWeight * 100).toFixed(0)}%
+              {allowShort ? "Max abs. weight per asset" : "Max weight per asset"}: {(maxWeight * 100).toFixed(0)}%
             </label>
             <input
               type="range" min={10} max={100} step={5}
@@ -448,6 +472,16 @@ function OptimizeTab({ portfolioId }: { portfolioId: string }) {
                 />
               </div>
             )}
+            <label className="mt-3 flex items-center gap-2 text-xs text-[var(--color-muted)]">
+              <input
+                type="checkbox"
+                checked={allowShort}
+                onChange={(e) => setAllowShort(e.target.checked)}
+                className="accent-[var(--color-primary)]"
+              />
+              Allow short positions
+              <InfoTooltip text={`Negative weights (short selling). ${LONG_ONLY_MODES.map((m) => m.replace(/_/g, " ")).join(", ")} remain long-only regardless.`} />
+            </label>
           </div>
           <div className="flex items-end">
             <button
@@ -920,6 +954,235 @@ function TechnicalsTab({
   );
 }
 
+// ── Validation tab ────────────────────────────────────────────────────────────
+
+const TEST_INTERPRETATIONS: Record<string, string> = {
+  sharpe_ttest:      "Is the Sharpe ratio statistically different from zero? (Lo 2002 autocorrelation correction)",
+  block_permutation: "Does return timing add value vs shuffled 4-week blocks?",
+  block_bootstrap_ci:"Bootstrap 95% CI for annualised Sharpe — does it exclude zero?",
+  stationarity_adf:  "Are returns stationary? (Augmented Dickey-Fuller — rejection = stationary)",
+  autocorrelation_lb:"Are returns serially independent? (Ljung-Box lag 10 — fail = autocorrelation present)",
+  normality_jb:      "Do returns have fat tails? (Jarque-Bera — rejection is expected for real returns)",
+  drawdown_bootstrap:"Is max drawdown consistent with random timing? (block-bootstrap null)",
+};
+
+function ValidationTab({ portfolioId }: { portfolioId: string }) {
+  const [result, setResult] = useState<PortfolioValidationResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const valMut = useMutation({
+    mutationFn: () => validatePortfolio(portfolioId, true),
+    onSuccess: (data) => { setResult(data); setError(null); },
+    onError: (e: Error) => setError(e.message),
+  });
+
+  return (
+    <div className="space-y-5">
+      <div className="rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] p-5 shadow-sm">
+        <h3 className="mb-2 text-sm font-semibold text-[var(--color-text)]">Statistical Validation Suite</h3>
+        <p className="mb-4 text-xs text-[var(--color-muted)]">
+          Runs 7 statistical tests on the portfolio's simulated daily returns. Quick mode: 500 permutations / 1,000 bootstrap samples (~20–30 s).
+        </p>
+        <button
+          onClick={() => valMut.mutate()}
+          disabled={valMut.isPending}
+          className="rounded-[var(--radius-btn)] bg-[var(--color-primary)] px-5 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50 transition-opacity"
+        >
+          {valMut.isPending ? "Running 7 tests…" : "Run Validation"}
+        </button>
+        {error && <p className="mt-3 text-xs text-[var(--color-negative)]">{error}</p>}
+      </div>
+
+      {result && (
+        <>
+          {result.warnings?.length > 0 && (
+            <div className="space-y-1">
+              {result.warnings.map((w, i) => (
+                <p key={i} className="rounded bg-amber-50 px-3 py-1.5 text-xs text-amber-700 border border-amber-200">{w}</p>
+              ))}
+            </div>
+          )}
+
+          {/* GO / NO-GO badge */}
+          <div className={`flex items-center gap-4 rounded-[var(--radius-card)] border p-5 shadow-sm ${result.go_decision ? "border-green-200 bg-green-50" : "border-red-200 bg-red-50"}`}>
+            <span className={`text-3xl font-black ${result.go_decision ? "text-green-600" : "text-red-600"}`}>
+              {result.go_decision ? "GO" : "NO-GO"}
+            </span>
+            <div>
+              <p className="text-sm font-semibold text-[var(--color-text)]">
+                {result.n_passing}/{result.n_total} tests passed
+              </p>
+              <p className="text-xs text-[var(--color-muted)]">
+                {result.returns_used} trading days · {result.quick_mode ? "Quick mode" : "Full mode"}
+              </p>
+            </div>
+          </div>
+
+          {/* 7 test cards */}
+          <div className="grid gap-3 sm:grid-cols-2">
+            {result.tests.map((t) => (
+              <div
+                key={t.test}
+                className={`rounded-[var(--radius-card)] border p-4 shadow-sm ${t.passed ? "border-green-100 bg-green-50" : "border-red-100 bg-red-50"}`}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <p className={`text-xs font-semibold ${t.passed ? "text-green-700" : "text-red-700"}`}>{t.label}</p>
+                  <span className={`shrink-0 rounded px-1.5 py-0.5 text-xs font-bold ${t.passed ? "bg-green-200 text-green-800" : "bg-red-200 text-red-800"}`}>
+                    {t.passed ? "PASS" : "FAIL"}
+                  </span>
+                </div>
+                <p className="mt-1 text-xs text-[var(--color-muted)]">{TEST_INTERPRETATIONS[t.test] ?? ""}</p>
+                <div className="mt-2 flex flex-wrap gap-3 text-xs text-[var(--color-text)]">
+                  {t.statistic != null && <span>stat: <strong>{t.statistic.toFixed(3)}</strong></span>}
+                  {t.p_value != null && <span>p: <strong>{t.p_value.toFixed(3)}</strong></span>}
+                  {t.details?.ci_lower != null && (
+                    <span>95% CI: [<strong>{String(t.details.ci_lower)}</strong>, <strong>{String(t.details.ci_upper)}</strong>]</span>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ── Forecast tab ───────────────────────────────────────────────────────────────
+
+function ForecastTab({ portfolioId }: { portfolioId: string }) {
+  const [method, setMethod] = useState("ensemble");
+  const [horizon, setHorizon] = useState(30);
+  const [result, setResult] = useState<PortfolioForecastResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const fcMut = useMutation({
+    mutationFn: () => forecastPortfolio(portfolioId, method, horizon),
+    onSuccess: (data) => { setResult(data); setError(null); },
+    onError: (e: Error) => setError(e.message),
+  });
+
+  return (
+    <div className="space-y-5">
+      <div className="rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] p-5 shadow-sm">
+        <h3 className="mb-4 text-sm font-semibold text-[var(--color-text)]">
+          Forecast Settings
+          <InfoTooltip text="Forecasts the simulated portfolio equity curve and rolling volatility using the selected method. Prophet may take 30–60 s." />
+        </h3>
+        <div className="flex flex-wrap items-end gap-4">
+          <div>
+            <label className="mb-1 block text-xs font-medium text-[var(--color-muted)]">Method</label>
+            <select
+              value={method}
+              onChange={(e) => setMethod(e.target.value)}
+              className="rounded-[var(--radius-btn)] border border-[var(--color-border)] px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]"
+            >
+              <option value="ewma">EWMA + Random Walk</option>
+              <option value="arima">ARIMA (1,1,0)</option>
+              <option value="prophet">Prophet</option>
+              <option value="ensemble">Ensemble (Average)</option>
+            </select>
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-[var(--color-muted)]">Horizon</label>
+            <div className="flex gap-1">
+              {[30, 60, 90].map((d) => (
+                <button
+                  key={d}
+                  onClick={() => setHorizon(d)}
+                  className={`rounded-[var(--radius-btn)] px-3 py-2 text-sm font-medium transition-colors ${horizon === d ? "bg-[var(--color-primary)] text-white" : "border border-[var(--color-border)] text-[var(--color-muted)] hover:bg-[var(--color-border)]"}`}
+                >
+                  {d}d
+                </button>
+              ))}
+            </div>
+          </div>
+          <button
+            onClick={() => fcMut.mutate()}
+            disabled={fcMut.isPending}
+            className="rounded-[var(--radius-btn)] bg-[var(--color-primary)] px-5 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50 transition-opacity"
+          >
+            {fcMut.isPending ? "Forecasting…" : "Run Forecast"}
+          </button>
+        </div>
+        {error && <p className="mt-3 text-xs text-[var(--color-negative)]">{error}</p>}
+      </div>
+
+      {result && (
+        <>
+          {result.warnings?.length > 0 && (
+            <div className="space-y-1">
+              {result.warnings.map((w, i) => (
+                <p key={i} className="rounded bg-amber-50 px-3 py-1.5 text-xs text-amber-700 border border-amber-200">{w}</p>
+              ))}
+            </div>
+          )}
+
+          {/* Fan charts */}
+          <div className="grid gap-4 lg:grid-cols-2">
+            <FanChart
+              data={result.price_series}
+              title={`Price Forecast — ${result.method} (${result.horizon_days}d)`}
+              yLabel="Portfolio equity (start = 1.0)"
+            />
+            <FanChart
+              data={result.vol_series}
+              title="Volatility Forecast (annualised)"
+              yLabel="Annualised vol"
+            />
+          </div>
+
+          {/* Calibration + model info */}
+          <div className="grid gap-4 sm:grid-cols-2">
+            {/* Calibration panel */}
+            <div className="rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-sm">
+              <h3 className="mb-3 text-sm font-semibold text-[var(--color-text)]">
+                Calibration (last 30-day hold-out)
+                <InfoTooltip text="Model was fit on data up to 30 days ago, then forecast forward. Metrics compare P50 vs actual." />
+              </h3>
+              <dl className="grid grid-cols-3 gap-3 text-xs">
+                {[
+                  ["RMSE", result.calibration.rmse != null ? result.calibration.rmse.toFixed(4) : "—"],
+                  ["MAE", result.calibration.mae != null ? result.calibration.mae.toFixed(4) : "—"],
+                  ["Dir. Acc.", result.calibration.directional_accuracy != null ? `${(result.calibration.directional_accuracy * 100).toFixed(1)}%` : "—"],
+                ].map(([l, v]) => (
+                  <div key={l}>
+                    <dt className="text-[var(--color-muted)]">{l}</dt>
+                    <dd className="font-semibold text-[var(--color-text)]">{v}</dd>
+                  </div>
+                ))}
+              </dl>
+            </div>
+
+            {/* Model info */}
+            <div className="rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-sm">
+              <h3 className="mb-3 text-sm font-semibold text-[var(--color-text)]">Model Info</h3>
+              <dl className="space-y-1 text-xs">
+                <div>
+                  <dt className="text-[var(--color-muted)]">Method</dt>
+                  <dd className="font-medium text-[var(--color-text)]">{result.method}</dd>
+                </div>
+                <div>
+                  <dt className="text-[var(--color-muted)]">Horizon</dt>
+                  <dd className="font-medium text-[var(--color-text)]">{result.horizon_days} trading days</dd>
+                </div>
+                {Object.entries(result.model_info).map(([k, v]) => (
+                  <div key={k}>
+                    <dt className="text-[var(--color-muted)]">{k.replace(/_/g, " ")}</dt>
+                    <dd className="font-medium text-[var(--color-text)]">
+                      {Array.isArray(v) ? v.join(", ") : String(v)}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function PortfolioDetailPage({
@@ -957,6 +1220,8 @@ export default function PortfolioDetailPage({
     { key: "technicals", label: "Technicals" },
     { key: "analytics",  label: "Analytics"  },
     { key: "optimize",   label: "Optimize"   },
+    { key: "validation", label: "Validation" },
+    { key: "forecast",   label: "Forecast"   },
   ];
 
   return (
@@ -1013,6 +1278,8 @@ export default function PortfolioDetailPage({
       )}
       {tab === "analytics" && <AnalyticsTab portfolioId={id} />}
       {tab === "optimize" && <OptimizeTab portfolioId={id} />}
+      {tab === "validation" && <ValidationTab portfolioId={id} />}
+      {tab === "forecast" && <ForecastTab portfolioId={id} />}
     </div>
   );
 }

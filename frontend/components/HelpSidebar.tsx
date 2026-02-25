@@ -52,6 +52,18 @@ const GLOSSARY = [
     def: "The minimum number of days that must pass before the same rule+ticker combination can fire again. Prevents alert storms after a single sharp move.",
   },
   {
+    term: "Allow Short Positions",
+    def: "When enabled in the Optimize tab, the optimizer may assign negative weights (short selling). Min weight = −max weight. Equal Weight, Risk Parity, and Max Diversification always remain long-only regardless of this toggle.",
+  },
+  {
+    term: "Validation Suite (7 Tests)",
+    def: "Statistical checks on the portfolio's daily return series: (1) Sharpe t-test (Lo 2002 autocorrelation-corrected), (2) Block Permutation null, (3) Bootstrap 95% CI for Sharpe, (4) ADF Stationarity, (5) Ljung-Box Serial Independence, (6) Jarque-Bera Fat Tails (rejection is expected), (7) Max Drawdown vs block-bootstrap null. GO decision requires ≥ 4/7 passes.",
+  },
+  {
+    term: "Forecast Methods",
+    def: "EWMA: simulates 500 GBM paths using EWMA drift (λ=0.97) and vol (λ=0.94). ARIMA: fits ARIMA(1,1,0) on log prices; CI mapped to bands. Prophet: Facebook's trend+seasonality model (30–60 s, adds ~450 MB). Ensemble: averages P50 across all three, uses widest bands. Fan chart shows P10/P25/P50/P75/P90 percentiles.",
+  },
+  {
     term: "Optimize Modes",
     def: "Nine modes available. Equal Weight (1/N): naive baseline. Min Variance: lowest portfolio vol. Max Sharpe: best historical risk-adjusted return. Max Sharpe — CAPM: CAPM beta-driven expected returns. Risk Parity: equal risk contribution per asset. Max Sortino: maximise return per unit of downside vol. Min CVaR (95%): minimise expected tail loss. Max Diversification: maximise correlation-adjusted diversification. Target Volatility: best return within a hard vol ceiling. Click 'Optimizer Guide →' in the Optimize tab for full details. Implied trades = target weight − current weight.",
   },

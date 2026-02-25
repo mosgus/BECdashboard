@@ -31,6 +31,7 @@ import {
   EnrichedUniverseTicker,
   PortfolioIndicatorConfig,
 } from "@/types/sprint4";
+import { PortfolioValidationResult, PortfolioForecastResult } from "@/types/sprint6";
 import { apiDelete, apiGet, apiPatch, apiPost, apiPut, apiUpload } from "./utils";
 
 // ── Portfolio & analytics ─────────────────────────────────────────────────────
@@ -161,6 +162,7 @@ export const optimizePortfolio = (
   start?: string,
   end?: string,
   volTarget?: number,
+  allowShort?: boolean,
 ): Promise<PortfolioOptimizeResult> =>
   apiPost<PortfolioOptimizeResult>(`/api/portfolios/${id}/optimize`, {
     mode,
@@ -168,6 +170,20 @@ export const optimizePortfolio = (
     start,
     end,
     ...(volTarget !== undefined ? { vol_target: volTarget } : {}),
+    ...(allowShort !== undefined ? { allow_short: allowShort } : {}),
+  });
+
+export const validatePortfolio = (id: string, quick = true): Promise<PortfolioValidationResult> =>
+  apiPost<PortfolioValidationResult>(`/api/portfolios/${id}/validate`, { quick });
+
+export const forecastPortfolio = (
+  id: string,
+  method: string,
+  horizonDays: number,
+): Promise<PortfolioForecastResult> =>
+  apiPost<PortfolioForecastResult>(`/api/portfolios/${id}/forecast`, {
+    method,
+    horizon_days: horizonDays,
   });
 
 // ── Candidates ────────────────────────────────────────────────────────────────
