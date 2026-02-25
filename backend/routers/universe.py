@@ -1,11 +1,13 @@
-"""Universe management — import CSV, list, toggle active."""
+"""Universe management — import CSV, list, toggle active, enrich metadata."""
 from __future__ import annotations
 
 import csv
 import io
 import re
+from datetime import datetime, timezone
 from typing import Optional
 
+import yfinance as yf
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -18,6 +20,40 @@ from db.models import UniverseTicker
 router = APIRouter()
 
 _TICKER_RE = re.compile(r"^[A-Z0-9\-\.]{1,10}$")
+
+
+def _enrich(obj: UniverseTicker) -> None:
+    """Fetch yfinance metadata and populate enrichment fields. Non-blocking on failure."""
+    try:
+        info = yf.Ticker(obj.ticker).info
+        if not obj.name:
+            obj.name = info.get("longName") or info.get("shortName")
+        obj.sector = info.get("sector") or info.get("quoteType")
+        raw_cap = info.get("marketCap")
+        obj.market_cap = int(raw_cap) if raw_cap is not None else None
+        obj.pe_ratio = info.get("trailingPE")
+        obj.dividend_yield = info.get("dividendYield")
+        obj.fifty_two_week_high = info.get("fiftyTwoWeekHigh")
+        obj.fifty_two_week_low = info.get("fiftyTwoWeekLow")
+        obj.last_enriched_at = datetime.now(timezone.utc)
+    except Exception:
+        pass  # enrichment is best-effort; ticker still added
+
+
+def _ticker_dict(t: UniverseTicker) -> dict:
+    return {
+        "ticker": t.ticker,
+        "name": t.name,
+        "active": t.active,
+        "created_at": t.created_at.isoformat(),
+        "sector": t.sector,
+        "market_cap": t.market_cap,
+        "pe_ratio": t.pe_ratio,
+        "dividend_yield": t.dividend_yield,
+        "fifty_two_week_high": t.fifty_two_week_high,
+        "fifty_two_week_low": t.fifty_two_week_low,
+        "last_enriched_at": t.last_enriched_at.isoformat() if t.last_enriched_at else None,
+    }
 
 
 class TickerActiveUpdate(BaseModel):
@@ -72,10 +108,21 @@ def add_universe_ticker(
         raise HTTPException(status_code=422, detail=f"Invalid ticker format: {ticker}")
     existing = db.get(UniverseTicker, ticker)
     if existing:
-        raise HTTPException(status_code=409, detail=f"{ticker} is already in the universe.")
-    db.add(UniverseTicker(ticker=ticker, name=body.name or None, active=True))
+        if existing.active:
+            raise HTTPException(status_code=409, detail=f"{ticker} is already active in the universe.")
+        # Ticker exists but inactive — reactivate it (and update name if provided)
+        existing.active = True
+        if body.name:
+            existing.name = body.name
+        _enrich(existing)
+        db.commit()
+        return _ticker_dict(existing)
+    obj = UniverseTicker(ticker=ticker, name=body.name or None, active=True)
+    _enrich(obj)
+    db.add(obj)
     db.commit()
-    return {"ticker": ticker, "name": body.name or None, "active": True}
+    db.refresh(obj)
+    return _ticker_dict(obj)
 
 
 @router.post("/universe/import_csv")
@@ -152,18 +199,39 @@ def list_universe(
         ]
 
     return {
-        "tickers": [
-            {
-                "ticker": t.ticker,
-                "name": t.name,
-                "active": t.active,
-                "created_at": t.created_at.isoformat(),
-            }
-            for t in tickers
-        ],
+        "tickers": [_ticker_dict(t) for t in tickers],
         "total": len(tickers),
         "active_count": sum(1 for t in tickers if t.active),
     }
+
+
+@router.get("/universe/{ticker}")
+def get_universe_ticker(
+    ticker: str,
+    db: Session = Depends(get_db),
+) -> dict:
+    """Get full enriched metadata for a single universe ticker."""
+    ticker = ticker.upper()
+    obj = db.get(UniverseTicker, ticker)
+    if not obj:
+        raise HTTPException(status_code=404, detail=f"Ticker {ticker} not in universe.")
+    return _ticker_dict(obj)
+
+
+@router.post("/universe/{ticker}/enrich")
+def enrich_universe_ticker(
+    ticker: str,
+    db: Session = Depends(get_db),
+    _: None = Depends(require_write_key),
+) -> dict:
+    """Re-fetch yfinance metadata for an existing universe ticker."""
+    ticker = ticker.upper()
+    obj = db.get(UniverseTicker, ticker)
+    if not obj:
+        raise HTTPException(status_code=404, detail=f"Ticker {ticker} not in universe.")
+    _enrich(obj)
+    db.commit()
+    return _ticker_dict(obj)
 
 
 @router.patch("/universe/{ticker}")

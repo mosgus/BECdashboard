@@ -5,6 +5,14 @@ export interface UniverseTicker {
   name: string | null;
   active: boolean;
   created_at: string;
+  // Sprint 4 enrichment fields (nullable — populated via yfinance on add)
+  sector?: string | null;
+  market_cap?: number | null;
+  pe_ratio?: number | null;
+  dividend_yield?: number | null;
+  fifty_two_week_high?: number | null;
+  fifty_two_week_low?: number | null;
+  last_enriched_at?: string | null;
 }
 
 export interface UniverseResponse {

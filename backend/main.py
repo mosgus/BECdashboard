@@ -1,4 +1,4 @@
-"""Blue Eagle API — v3.5.0 (actor-header identity + audit + persistence)."""
+"""Blue Eagle API — v4.0.0 (actor-header identity + audit + persistence)."""
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -17,7 +17,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="Blue Eagle API", version="3.5.0", lifespan=lifespan)
+app = FastAPI(title="Blue Eagle API", version="4.0.0", lifespan=lifespan)
 
 # Middleware — added in reverse order (last added = outermost wrapper)
 # AuditMiddleware must be inner so it sees final status codes from CORS
@@ -51,4 +51,4 @@ def health() -> dict:
         db_status = "ok"
     except Exception:
         db_status = "error"
-    return {"status": "ok", "db": db_status, "version": "3.5.0"}
+    return {"status": "ok", "db": db_status, "version": "4.0.0"}

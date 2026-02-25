@@ -26,6 +26,11 @@ import {
   PortfolioOptimizeResult,
   PortfolioSummary,
 } from "@/types/sprint3";
+import {
+  CandidateRefreshResponse,
+  EnrichedUniverseTicker,
+  PortfolioIndicatorConfig,
+} from "@/types/sprint4";
 import { apiDelete, apiGet, apiPatch, apiPost, apiPut, apiUpload } from "./utils";
 
 // ── Portfolio & analytics ─────────────────────────────────────────────────────
@@ -58,6 +63,12 @@ export const addUniverseTicker = (ticker: string, name?: string): Promise<{ tick
 
 export const patchUniverseTicker = (ticker: string, active: boolean): Promise<{ ticker: string; active: boolean }> =>
   apiPatch(`/api/universe/${ticker}`, { active });
+
+export const fetchUniverseTicker = (ticker: string): Promise<EnrichedUniverseTicker> =>
+  apiGet<EnrichedUniverseTicker>(`/api/universe/${ticker}`);
+
+export const enrichUniverseTicker = (ticker: string): Promise<EnrichedUniverseTicker> =>
+  apiPost<EnrichedUniverseTicker>(`/api/universe/${ticker}/enrich`, {});
 
 // ── Watchlists ────────────────────────────────────────────────────────────────
 
@@ -156,6 +167,34 @@ export const optimizePortfolio = (
     start,
     end,
   });
+
+// ── Candidates ────────────────────────────────────────────────────────────────
+
+export const fetchCandidates = (portfolioId: string): Promise<CandidateRefreshResponse> =>
+  apiGet<CandidateRefreshResponse>(`/api/portfolios/${portfolioId}/candidates`);
+
+export const addCandidate = (portfolioId: string, ticker: string): Promise<{ portfolio_id: string; ticker: string }> =>
+  apiPost(`/api/portfolios/${portfolioId}/candidates`, { ticker });
+
+export const removeCandidate = (portfolioId: string, ticker: string): Promise<void> =>
+  apiDelete(`/api/portfolios/${portfolioId}/candidates/${ticker}`);
+
+export const refreshCandidates = (portfolioId: string): Promise<CandidateRefreshResponse> =>
+  apiPost<CandidateRefreshResponse>(`/api/portfolios/${portfolioId}/candidates/refresh`, {});
+
+// ── Indicator Configs ─────────────────────────────────────────────────────────
+
+export const fetchIndicatorConfigs = (portfolioId: string): Promise<{ configs: PortfolioIndicatorConfig[] }> =>
+  apiGet(`/api/portfolios/${portfolioId}/indicator_configs`);
+
+export const upsertIndicatorConfig = (
+  portfolioId: string,
+  body: { ticker: string; indicator_type: string; params_json?: Record<string, unknown> | null; enabled: boolean },
+): Promise<PortfolioIndicatorConfig> =>
+  apiPost<PortfolioIndicatorConfig>(`/api/portfolios/${portfolioId}/indicator_configs`, body);
+
+export const deleteIndicatorConfig = (portfolioId: string, ticker: string, indicator: string): Promise<void> =>
+  apiDelete(`/api/portfolios/${portfolioId}/indicator_configs/${ticker}/${indicator}`);
 
 // ── Alert Rules ────────────────────────────────────────────────────────────────
 

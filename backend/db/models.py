@@ -4,14 +4,18 @@ Sprint 1 tables (keep untouched):
   audit_log  — request audit trail
   universe   — legacy seed ticker list
 
-Sprint 2 tables (scaffolding only — no UI/CRUD yet):
+Sprint 2 tables:
   universe_tickers  — managed ticker universe
-  watchlists        — named watchlists
-  watchlist_items   — watchlist ↔ ticker join
+  watchlists        — named watchlists (kept for backward compat)
+  watchlist_items   — watchlist ↔ ticker join (kept for backward compat)
   portfolios        — named portfolios
   positions         — portfolio ↔ ticker positions
   alerts            — alert rule definitions
   alert_events      — alert trigger history
+
+Sprint 4 tables:
+  portfolio_candidates       — tickers being considered for a portfolio
+  portfolio_indicator_configs — indicator config per ticker per portfolio
 """
 from __future__ import annotations
 
@@ -19,6 +23,7 @@ import uuid
 from datetime import date, datetime
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     Date,
     DateTime,
@@ -27,6 +32,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
     func,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
@@ -65,10 +71,18 @@ class UniverseTicker(Base):
     """Managed ticker universe — replaces the legacy universe table for Sprint 2+ features."""
     __tablename__ = "universe_tickers"
 
-    ticker:     Mapped[str]           = mapped_column(Text, primary_key=True)
-    name:       Mapped[str | None]    = mapped_column(Text, nullable=True)
-    active:     Mapped[bool]          = mapped_column(Boolean, nullable=False, default=True, index=True)
-    created_at: Mapped[datetime]      = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    ticker:               Mapped[str]           = mapped_column(Text, primary_key=True)
+    name:                 Mapped[str | None]    = mapped_column(Text, nullable=True)
+    active:               Mapped[bool]          = mapped_column(Boolean, nullable=False, default=True, index=True)
+    created_at:           Mapped[datetime]      = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    # Sprint 4 enrichment columns (populated via yfinance on add)
+    sector:               Mapped[str | None]    = mapped_column(Text, nullable=True)
+    market_cap:           Mapped[int | None]    = mapped_column(BigInteger, nullable=True)
+    pe_ratio:             Mapped[float | None]  = mapped_column(Float, nullable=True)
+    dividend_yield:       Mapped[float | None]  = mapped_column(Float, nullable=True)
+    fifty_two_week_high:  Mapped[float | None]  = mapped_column(Float, nullable=True)
+    fifty_two_week_low:   Mapped[float | None]  = mapped_column(Float, nullable=True)
+    last_enriched_at:     Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class Watchlist(Base):
@@ -129,3 +143,29 @@ class AlertEvent(Base):
     triggered_at: Mapped[datetime]  = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     asof_date:    Mapped[date]      = mapped_column(Date, nullable=False)
     payload_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+
+
+# ── Sprint 4 (portfolio workspace) ────────────────────────────────────────────
+
+class PortfolioCandidate(Base):
+    """Tickers being considered for inclusion in a specific portfolio."""
+    __tablename__ = "portfolio_candidates"
+
+    portfolio_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("portfolios.id", ondelete="CASCADE"), primary_key=True)
+    ticker:       Mapped[str]       = mapped_column(Text, ForeignKey("universe_tickers.ticker", ondelete="CASCADE"), primary_key=True)
+    created_at:   Mapped[datetime]  = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class PortfolioIndicatorConfig(Base):
+    """Indicator configuration per ticker per portfolio (infrastructure for future computation)."""
+    __tablename__ = "portfolio_indicator_configs"
+
+    id:             Mapped[uuid.UUID]    = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    portfolio_id:   Mapped[uuid.UUID]    = mapped_column(UUID(as_uuid=True), ForeignKey("portfolios.id", ondelete="CASCADE"), nullable=False)
+    ticker:         Mapped[str]          = mapped_column(Text, ForeignKey("universe_tickers.ticker", ondelete="CASCADE"), nullable=False)
+    indicator_type: Mapped[str]          = mapped_column(Text, nullable=False)   # 'sma' | 'rsi' | 'macd' | 'atr'
+    params_json:    Mapped[dict | None]  = mapped_column(JSONB, nullable=True)
+    enabled:        Mapped[bool]         = mapped_column(Boolean, nullable=False, default=True)
+    created_at:     Mapped[datetime]     = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (UniqueConstraint("portfolio_id", "ticker", "indicator_type", name="uq_pic_portfolio_ticker_indicator"),)

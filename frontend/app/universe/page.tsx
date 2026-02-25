@@ -6,6 +6,8 @@ import { addUniverseTicker, fetchUniverse, importUniverseCSV, patchUniverseTicke
 import { useAuth } from "@/hooks/useAuth";
 import type { UniverseTicker } from "@/types/sprint2";
 import InfoTooltip from "@/components/InfoTooltip";
+import TickerDetailPanel from "@/components/TickerDetailPanel";
+import { fmtDollar, fmtNum, fmtPct } from "@/lib/utils";
 
 export default function UniversePage() {
   const { checked } = useAuth();
@@ -17,6 +19,7 @@ export default function UniversePage() {
   const [importResult, setImportResult] = useState<{ added: number; skipped: number; warnings: string[] } | null>(null);
   const [newTicker, setNewTicker] = useState("");
   const [newName, setNewName] = useState("");
+  const [selectedTicker, setSelectedTicker] = useState<string | null>(null);
 
   const active = activeFilter === "all" ? undefined : activeFilter === "active";
 
@@ -61,13 +64,18 @@ export default function UniversePage() {
 
   return (
     <div className="space-y-6">
+      {/* Ticker detail panel */}
+      {selectedTicker && (
+        <TickerDetailPanel ticker={selectedTicker} onClose={() => setSelectedTicker(null)} />
+      )}
+
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-lg font-bold text-[var(--color-text)]">Universe</h1>
           <p className="text-sm text-[var(--color-muted)]">
-            Managed ticker universe — source of truth for watchlists
-            <InfoTooltip text="Only active tickers can be added to watchlists. Import via CSV to bulk-load tickers." />
+            Managed ticker universe — click any row to view metrics
+            <InfoTooltip text="Only active tickers can be added to portfolio watchlists. Import via CSV to bulk-load tickers." />
           </p>
         </div>
         <button
@@ -178,7 +186,7 @@ export default function UniversePage() {
       </div>
 
       {/* Ticker table */}
-      <div className="rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-sm overflow-hidden">
+      <div className="rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-sm overflow-x-auto">
         {isLoading ? (
           <p className="p-6 text-center text-sm text-[var(--color-muted)]">Loading…</p>
         ) : !data?.tickers.length ? (
@@ -192,25 +200,43 @@ export default function UniversePage() {
               <tr>
                 <th className="px-4 py-3 text-left text-xs font-medium text-[var(--color-muted)]">Ticker</th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-[var(--color-muted)]">Name</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-[var(--color-muted)]">Added</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-[var(--color-muted)]">Sector</th>
+                <th className="px-4 py-3 text-right text-xs font-medium text-[var(--color-muted)]">Mkt Cap</th>
+                <th className="px-4 py-3 text-right text-xs font-medium text-[var(--color-muted)]">P/E</th>
+                <th className="px-4 py-3 text-right text-xs font-medium text-[var(--color-muted)]">Div Yield</th>
+                <th className="px-4 py-3 text-right text-xs font-medium text-[var(--color-muted)]">52w Range</th>
                 <th className="px-4 py-3 text-right text-xs font-medium text-[var(--color-muted)]">Active</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-[var(--color-border)]">
               {data.tickers.map((t: UniverseTicker) => (
-                <tr key={t.ticker} className="hover:bg-[var(--color-bg)] transition-colors">
-                  <td className="px-4 py-3 font-mono font-semibold text-[var(--color-text)]">
+                <tr
+                  key={t.ticker}
+                  className="hover:bg-[var(--color-bg)] transition-colors cursor-pointer"
+                  onClick={() => setSelectedTicker(t.ticker)}
+                >
+                  <td className="px-4 py-3 font-mono font-semibold text-[var(--color-primary)]">
                     {t.ticker}
                   </td>
-                  <td className="px-4 py-3 text-[var(--color-muted)]">{t.name ?? "—"}</td>
-                  <td className="px-4 py-3 text-[var(--color-muted)]">
-                    {t.created_at.slice(0, 10)}
+                  <td className="px-4 py-3 text-[var(--color-muted)] max-w-[160px] truncate">{t.name ?? "—"}</td>
+                  <td className="px-4 py-3 text-[var(--color-muted)]">{t.sector ?? "—"}</td>
+                  <td className="px-4 py-3 text-right text-[var(--color-muted)]">
+                    {t.market_cap != null ? fmtDollar(t.market_cap) : "—"}
                   </td>
-                  <td className="px-4 py-3 text-right">
+                  <td className="px-4 py-3 text-right text-[var(--color-muted)]">
+                    {t.pe_ratio != null ? fmtNum(t.pe_ratio, 1) : "—"}
+                  </td>
+                  <td className="px-4 py-3 text-right text-[var(--color-muted)]">
+                    {t.dividend_yield != null ? fmtPct(t.dividend_yield) : "—"}
+                  </td>
+                  <td className="px-4 py-3 text-right text-[var(--color-muted)] whitespace-nowrap">
+                    {t.fifty_two_week_low != null && t.fifty_two_week_high != null
+                      ? `$${fmtNum(t.fifty_two_week_low, 0)} – $${fmtNum(t.fifty_two_week_high, 0)}`
+                      : "—"}
+                  </td>
+                  <td className="px-4 py-3 text-right" onClick={(e) => e.stopPropagation()}>
                     <button
-                      onClick={() =>
-                        toggleMutation.mutate({ ticker: t.ticker, active: !t.active })
-                      }
+                      onClick={() => toggleMutation.mutate({ ticker: t.ticker, active: !t.active })}
                       className="inline-flex items-center text-[var(--color-muted)] hover:text-[var(--color-text)] transition-colors"
                       title={t.active ? "Click to deactivate" : "Click to activate"}
                     >
