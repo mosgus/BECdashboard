@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from config import settings
 from db.base import Base, engine
 from middleware.audit import AuditMiddleware
-from routers import alerts, optimize, portfolio, technicals, ticker, universe, watchlists
+from routers import alert_rules, alerts, optimize, portfolio, portfolios, technicals, ticker, universe, watchlists
 
 
 @asynccontextmanager
@@ -17,7 +17,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="Blue Eagle API", version="2.1.0", lifespan=lifespan)
+app = FastAPI(title="Blue Eagle API", version="3.0.0", lifespan=lifespan)
 
 # Middleware — added in reverse order (last added = outermost wrapper)
 # AuditMiddleware must be inner so it sees final status codes from CORS
@@ -37,6 +37,8 @@ app.include_router(alerts.router,       prefix="/api",           tags=["alerts"]
 app.include_router(universe.router,     prefix="/api",           tags=["universe"])
 app.include_router(watchlists.router,   prefix="/api",           tags=["watchlists"])
 app.include_router(ticker.router,       prefix="/api",           tags=["ticker"])
+app.include_router(portfolios.router,   prefix="/api",           tags=["portfolios"])
+app.include_router(alert_rules.router,  prefix="/api",           tags=["alert_rules"])
 
 
 @app.get("/health", tags=["ops"])
@@ -49,4 +51,4 @@ def health() -> dict:
         db_status = "ok"
     except Exception:
         db_status = "error"
-    return {"status": "ok", "db": db_status, "version": "2.1.0"}
+    return {"status": "ok", "db": db_status, "version": "3.0.0"}

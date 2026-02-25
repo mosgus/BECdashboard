@@ -10,12 +10,13 @@ export const metadata: Metadata = {
 };
 
 const NAV = [
-  { href: "/", label: "Overview" },
-  { href: "/optimize", label: "Optimization" },
+  { href: "/universe", label: "Universe" },
+  { href: "/portfolios", label: "Portfolios" },
+  { href: "/watchlists", label: "Watchlists" },
   { href: "/technicals", label: "Technicals" },
   { href: "/alerts", label: "Alerts" },
-  { href: "/universe", label: "Universe" },
-  { href: "/watchlists", label: "Watchlists" },
+  { href: "/", label: "Overview" },
+  { href: "/optimize", label: "Optimization" },
 ];
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

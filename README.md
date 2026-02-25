@@ -12,6 +12,8 @@ Production-grade portfolio analytics web app for the Emory Practicum cohort.
 | **Overview** | Equity curve, rolling vol, drawdown, correlation heatmap, performance table |
 | **Optimization** | Min-Variance · Max-Sharpe (historical) · Max-Sharpe CAPM with analyst views + per-asset bounds |
 | **Technicals** | SMA(20/50), RSI(14), MACD(12,26,9) for any ticker |
+| **Portfolios** | CRUD portfolios; add/remove/edit holdings from Universe; simulated analytics (CAGR, Sharpe, MaxDD, β, α + equity curve vs SPY); per-position signal badges; portfolio-level min-variance / max-Sharpe optimization with implied-trades rebalance plan |
+| **Alert Rules** | 8 rule types (SMA/RSI/MACD cross + price threshold); scope to ticker, watchlist, or portfolio; cooldown enforcement; *Evaluate Now* synchronous sweep; events inbox with evidence payload |
 | **Alerts** | SMA crossover, RSI threshold, price threshold — with email stub (SendGrid-ready) |
 | **Universe** | 15 pre-seeded tickers; CSV import (header or headerless); active/inactive toggle |
 | **Watchlists** | Full CRUD watchlists; add/remove tickers; one-click refresh populates SMA/RSI/MACD signal badges |
@@ -97,16 +99,17 @@ blue-eagle/
 │   ├── config.py            # pydantic-settings (CLASS_WRITE_KEY optional, DATABASE_URL required)
 │   ├── auth.py              # get_actor_name(), require_write_key() dependency
 │   ├── middleware/audit.py  # AuditMiddleware — writes every POST/PUT/PATCH/DELETE to DB
-│   ├── db/                  # SQLAlchemy engine, Base, models (all Sprint 2 tables)
+│   ├── db/                  # SQLAlchemy engine, Base, models (all Sprint 2+3 tables)
 │   ├── alembic/             # 0001_baseline (audit_log, universe), 0002_sprint2_schema (7 tables)
-│   ├── routers/             # portfolio, optimize, technicals, alerts, universe, watchlists, ticker
+│   ├── routers/             # portfolio, portfolios, optimize, technicals, alerts, alert_rules,
+│   │                        #   universe, watchlists, ticker
 │   ├── core/                # portfolio, indicators, cache (TTLCache), signals, provider (YFinance)
 │   └── tests/               # test_signals.py (34 tests), test_universe_import.py
 └── frontend/
     ├── app/                 # Next.js App Router pages: overview, optimize, technicals, alerts,
     │                        #   universe, watchlists/[id], ticker/[symbol], login
     ├── components/          # Charts, AuthNav, Providers, SignalBadge, InfoTooltip, HelpSidebar
-    ├── types/               # sprint2.ts — all Sprint 2 TypeScript interfaces
+    ├── types/               # sprint2.ts (Sprint 2), sprint3.ts (portfolios, alert rules, events)
     ├── hooks/useAuth.ts     # Auth guard — redirects to /login if no actor name set
     └── lib/                 # api.ts (typed fetch), auth.ts (actor helpers), utils.ts
 ```
@@ -194,14 +197,61 @@ docker exec blue-eagle-db-1 psql -U blueeagle -c \
 
 ---
 
+## Sprint 3 Verification
+
+```bash
+# API version
+curl http://localhost:8000/health
+# → {"status":"ok","db":"ok","version":"3.0.0"}
+
+# Create portfolio
+curl -X POST http://localhost:8000/api/portfolios \
+  -H "Content-Type: application/json" -H "X-Actor-Name: demo" \
+  -d '{"name": "Core Holdings"}'
+
+# Add holdings (must be active universe tickers)
+PORT_ID=<id from above>
+curl -X POST "http://localhost:8000/api/portfolios/$PORT_ID/positions" \
+  -H "Content-Type: application/json" -H "X-Actor-Name: demo" \
+  -d '{"ticker": "AAPL", "weight": 0.4}'
+
+# Portfolio analytics (simulated — current weights held constant)
+curl "http://localhost:8000/api/portfolios/$PORT_ID/analytics"
+# → {simulated: true, metrics: {cagr, sharpe, max_dd, beta, alpha}, equity_curves, signals_by_ticker}
+
+# Portfolio optimization
+curl -X POST "http://localhost:8000/api/portfolios/$PORT_ID/optimize" \
+  -H "Content-Type: application/json" -H "X-Actor-Name: demo" \
+  -d '{"mode": "max_sharpe", "max_weight": 0.6}'
+# → {target_weights, implied_trades, metrics: {current, optimized}, equity_curves}
+
+# Create alert rule (default params auto-populated)
+curl -X POST http://localhost:8000/api/alert_rules \
+  -H "Content-Type: application/json" -H "X-Actor-Name: demo" \
+  -d '{"scope": "ticker", "ticker": "AAPL", "rule_type": "sma_cross_up", "cooldown_days": 3}'
+
+# Evaluate all enabled rules synchronously
+curl -X POST http://localhost:8000/api/alert_rules/evaluate_now -H "X-Actor-Name: demo"
+# → {evaluated: N, triggered: N, skipped: N, asof_date, events}
+
+# Events inbox
+curl http://localhost:8000/api/alert_rules/events
+```
+
+---
+
 ## 5-Minute Demo Script
 
 1. **Login** — enter your name → lands on Overview
-2. **Overview** — default tickers (AAPL, MSFT, GOOGL, AMZN, NVDA) + SPY → Run Analysis → walk equity curve + drawdown
-3. **Universe** — Upload a CSV or see the 15 seeded tickers; toggle TSLA inactive
-4. **Watchlists** — Create "Tech Picks" → add AAPL, MSFT, NVDA → Refresh prices → SMA/RSI/MACD badges appear
-5. **Ticker Detail** — click AAPL → OHLCV bars + ATR14 + signal panel + Help glossary
-6. **Optimization** — Max Sharpe CAPM, NVDA view = 0.5 → Run → CAPM table + weight bar chart
-7. **Alerts** — NVDA, RSI OB/OS → Check Alert → Simulate Email
+2. **Overview** — default tickers (AAPL, MSFT, GOOGL, AMZN, NVDA) + SPY → Run Analysis → equity curve + drawdown
+3. **Universe** — 15 seeded tickers; toggle TSLA inactive to see it blocked in Portfolios
+4. **Portfolios** — Create "Core Holdings" → add AAPL 40%, MSFT 35%, NVDA 25%
+   - **Holdings tab** → click AAPL row ▶ to expand Quick Technicals (SMA/RSI/MACD badges + ATR14)
+   - **Analytics tab** → equity curve vs SPY + per-holding exit signals
+   - **Optimize tab** → Max Sharpe, max weight 60% → Run → see Sharpe jump + rebalance plan
+5. **Alert Rules** — create SMA Cross Up on AAPL, cooldown 3 days → **Evaluate Now** → check Inbox tab
+6. **Watchlists** — Create "Tech Picks" → add tickers → Refresh → signal badges appear
+7. **Technicals** — look up any ticker → OHLCV bars + signals
+8. **Optimization** — Max Sharpe CAPM, analyst view NVDA = 0.5 → Run
 
-Total: ~5 minutes
+Total: ~7 minutes
