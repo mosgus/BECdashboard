@@ -1,4 +1,4 @@
-# Blue Eagle Portfolio Dashboard
+# Blue Eagle Portfolio Dashboard 🦅
 
 Production-grade portfolio analytics web app for the Emory Practicum cohort.
 
