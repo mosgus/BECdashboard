@@ -19,9 +19,20 @@ export interface Position {
   updated_at: string;
 }
 
+export interface LastTargetSet {
+  source: string;  // "optimizer" | "tilt" | "manual"
+  weights: Record<string, number>;
+  mode: string | null;
+  views_applied: boolean;
+  delta_mu?: Record<string, number> | null;
+  as_of_date: string;
+  created_at: string;
+}
+
 export interface PortfolioDetail extends PortfolioSummary {
   positions: Position[];
   notional_value: number | null;
+  last_target_set: LastTargetSet | null;
 }
 
 export interface ImplementationRow {

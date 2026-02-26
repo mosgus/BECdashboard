@@ -3,9 +3,10 @@ from __future__ import annotations
 
 import csv
 import io
+import json
 import re
 import uuid
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Literal, Optional
 
 import numpy as np
@@ -124,6 +125,14 @@ class ScenarioRequest(BaseModel):
 
 class RebalanceRequest(BaseModel):
     target_weights: dict[str, float]
+
+
+class TargetSetPayload(BaseModel):
+    source: str                                      # "optimizer" | "tilt" | "manual"
+    weights: dict[str, float]
+    mode: Optional[str] = None
+    views_applied: bool = False
+    delta_mu: Optional[dict[str, float]] = None
 
 
 class CandidateAdd(BaseModel):
@@ -276,6 +285,7 @@ def get_portfolio(portfolio_id: str, db: Session = Depends(get_db)) -> dict:
         "name": p.name,
         "created_at": p.created_at.isoformat(),
         "notional_value": float(p.notional_value) if p.notional_value is not None else None,
+        "last_target_set": json.loads(p.last_target_set) if p.last_target_set else None,
         "positions": [_pos_dict(pos) for pos in positions],
     }
 
@@ -296,6 +306,34 @@ def patch_portfolio_notional(
         "name": p.name,
         "notional_value": float(p.notional_value) if p.notional_value is not None else None,
     }
+
+
+@router.patch("/portfolios/{portfolio_id}/targets")
+def save_target_set(
+    portfolio_id: str,
+    body: TargetSetPayload,
+    db: Session = Depends(get_db),
+    _: None = Depends(require_write_key),
+) -> dict:
+    """Persist the most recent target weight set for a portfolio.
+
+    Overwrites any previous target set — only the latest is stored.
+    The Rebalance tab reads this to compute whole-share trade quantities
+    across page refreshes (no session-state dependency).
+    """
+    p = _get_or_404(db, portfolio_id)
+    stored = {
+        "source": body.source,
+        "weights": body.weights,
+        "mode": body.mode,
+        "views_applied": body.views_applied,
+        "delta_mu": body.delta_mu,
+        "as_of_date": date.today().isoformat(),
+        "created_at": datetime.utcnow().isoformat() + "Z",
+    }
+    p.last_target_set = json.dumps(stored)
+    db.commit()
+    return {"last_target_set": stored}
 
 
 @router.put("/portfolios/{portfolio_id}")

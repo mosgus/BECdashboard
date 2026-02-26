@@ -32,6 +32,7 @@ import {
   PortfolioOptimizeResult,
   PortfolioSummary,
   RuleMetadata,
+  LastTargetSet,
   TiltResult,
 } from "@/types/sprint3";
 import {
@@ -232,6 +233,12 @@ export const fetchRebalance = (
 
 export const patchPortfolioNotional = (id: string, notionalValue: number | null): Promise<{ id: string; name: string; notional_value: number | null }> =>
   apiPatch(`/api/portfolios/${id}/notional`, { notional_value: notionalValue });
+
+export const patchPortfolioTargets = (
+  id: string,
+  payload: { source: string; weights: Record<string, number>; mode?: string | null; views_applied?: boolean; delta_mu?: Record<string, number> | null },
+): Promise<{ last_target_set: LastTargetSet }> =>
+  apiPatch(`/api/portfolios/${id}/targets`, payload);
 
 export const computeImplementation = (
   id: string,
