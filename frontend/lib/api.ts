@@ -32,6 +32,7 @@ import {
   PortfolioIndicatorConfig,
 } from "@/types/sprint4";
 import { PortfolioValidationResult, PortfolioForecastResult } from "@/types/sprint6";
+import type { PortfolioHealthResult, ScenarioResult, ScenarioRequest, RebalanceResult, ExtendedTechnicalsResponse } from "@/types/sprint7";
 import { apiDelete, apiGet, apiPatch, apiPost, apiPut, apiUpload } from "./utils";
 
 // ── Portfolio & analytics ─────────────────────────────────────────────────────
@@ -107,11 +108,13 @@ export const fetchTickerTechnicals = (
   start?: string,
   end?: string,
   signals = true,
-): Promise<TickerTechnicalsResponse> =>
-  apiGet<TickerTechnicalsResponse>(`/api/ticker/${ticker}/technicals`, {
+  include?: string,
+): Promise<ExtendedTechnicalsResponse> =>
+  apiGet<ExtendedTechnicalsResponse>(`/api/ticker/${ticker}/technicals`, {
     start,
     end,
     signals: signals ? 1 : 0,
+    ...(include ? { include } : {}),
   });
 
 // ── Portfolios ────────────────────────────────────────────────────────────────
@@ -185,6 +188,24 @@ export const forecastPortfolio = (
     method,
     horizon_days: horizonDays,
   });
+
+// ── Portfolio Health & Scenarios ──────────────────────────────────────────────
+
+export const fetchPortfolioHealth = (
+  id: string,
+  benchmark = "SPY",
+  lookback = 252,
+): Promise<PortfolioHealthResult> =>
+  apiGet<PortfolioHealthResult>(`/api/portfolios/${id}/health`, { benchmark, lookback });
+
+export const runScenario = (id: string, body: ScenarioRequest): Promise<ScenarioResult> =>
+  apiPost<ScenarioResult>(`/api/portfolios/${id}/scenarios/run`, body);
+
+export const fetchRebalance = (
+  id: string,
+  targetWeights: Record<string, number>,
+): Promise<RebalanceResult> =>
+  apiPost<RebalanceResult>(`/api/portfolios/${id}/rebalance`, { target_weights: targetWeights });
 
 // ── Candidates ────────────────────────────────────────────────────────────────
 

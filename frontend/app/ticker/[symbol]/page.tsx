@@ -5,6 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useSearchParams } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { fetchTickerTechnicals } from "@/lib/api";
+import type { ExtendedTechnicalsResponse } from "@/types/sprint7";
 import { useAuth } from "@/hooks/useAuth";
 import TechnicalsChart from "@/components/TechnicalsChart";
 import SignalBadge from "@/components/SignalBadge";
@@ -40,12 +41,24 @@ export default function TickerDetailPage({
 
   const [start, setStart] = useState(ONE_YEAR_AGO);
   const [end, setEnd] = useState(TODAY);
+  const [visibleIndicators, setVisibleIndicators] = useState<Set<string>>(new Set());
 
-  const { data, isLoading, error, refetch } = useQuery({
-    queryKey: ["ticker-technicals", ticker, start, end],
-    queryFn: () => fetchTickerTechnicals(ticker, start, end, true),
+  const includeParam = Array.from(visibleIndicators).join(",");
+
+  const { data, isLoading, error, refetch } = useQuery<ExtendedTechnicalsResponse>({
+    queryKey: ["ticker-technicals", ticker, start, end, includeParam],
+    queryFn: () => fetchTickerTechnicals(ticker, start, end, true, includeParam || undefined),
     enabled: !!ticker,
   });
+
+  function toggleIndicator(key: string) {
+    setVisibleIndicators((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
 
   if (!checked) return null;
 
@@ -101,6 +114,29 @@ export default function TickerDetailPage({
         </button>
       </div>
 
+      {/* Extra indicator toggles */}
+      <div className="flex flex-wrap items-center gap-3 rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3 shadow-sm">
+        <span className="text-xs font-semibold text-[var(--color-muted)]">Indicators:</span>
+        {[
+          { key: "ema",        label: "EMA 20/50" },
+          { key: "bollinger",  label: "Bollinger (20, 2σ)" },
+          { key: "donchian",   label: "Donchian (20)" },
+          { key: "adx",        label: "ADX 14" },
+          { key: "stochastic", label: "Stochastic (14,3)" },
+          { key: "obv",        label: "OBV" },
+        ].map(({ key, label }) => (
+          <label key={key} className="flex items-center gap-1.5 cursor-pointer text-xs text-[var(--color-text)]">
+            <input
+              type="checkbox"
+              checked={visibleIndicators.has(key)}
+              onChange={() => toggleIndicator(key)}
+              className="accent-[var(--color-primary)]"
+            />
+            {label}
+          </label>
+        ))}
+      </div>
+
       {error && (
         <p className="text-sm text-[var(--color-negative)]">
           {(error as Error).message}
@@ -116,7 +152,7 @@ export default function TickerDetailPage({
       {data && (
         <>
           {/* Charts — reuse TechnicalsChart (same data shape) */}
-          <TechnicalsChart data={data} />
+          <TechnicalsChart data={data} visibleIndicators={visibleIndicators} />
 
           {/* ATR card */}
           <div className="flex items-center gap-3 rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-sm">

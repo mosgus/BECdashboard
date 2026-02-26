@@ -13,12 +13,14 @@ import {
   fetchIndicatorConfigs,
   fetchPortfolioAnalytics,
   fetchPortfolioDetail,
+  fetchPortfolioHealth,
   fetchTickerTechnicals,
   forecastPortfolio,
   optimizePortfolio,
   refreshCandidates,
   removeCandidate,
   removePosition,
+  runScenario,
   updatePosition,
   upsertIndicatorConfig,
   validatePortfolio,
@@ -33,10 +35,13 @@ import OptimizerGuide from "@/components/OptimizerGuide";
 import ValidationGuide from "@/components/ValidationGuide";
 import ForecastGuide from "@/components/ForecastGuide";
 import FanChart from "@/components/FanChart";
+import RiskContributionChart from "@/components/RiskContributionChart";
+import ScenarioGuide from "@/components/ScenarioGuide";
 import { PortfolioAnalytics, PortfolioOptimizeResult, Position } from "@/types/sprint3";
 import { SignalResult } from "@/types/sprint2";
 import type { CandidateRefreshResponse, IndicatorType, PortfolioIndicatorConfig } from "@/types/sprint4";
 import type { PortfolioValidationResult, PortfolioForecastResult } from "@/types/sprint6";
+import type { PortfolioHealthResult, ScenarioResult, ScenarioType, ScenarioRequest } from "@/types/sprint7";
 import {
   LineChart,
   Line,
@@ -48,7 +53,7 @@ import {
   ResponsiveContainer,
 } from "recharts";
 
-type Tab = "holdings" | "watchlist" | "technicals" | "analytics" | "optimize" | "validation" | "forecast";
+type Tab = "holdings" | "watchlist" | "technicals" | "analytics" | "optimize" | "validation" | "forecast" | "health" | "scenarios";
 
 // ── Quick Technicals accordion per holding row ────────────────────────────────
 
@@ -545,10 +550,43 @@ function OptimizeTab({ portfolioId }: { portfolioId: string }) {
 
           {/* Implied trades table */}
           <div className="rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-sm">
-            <h3 className="mb-3 text-sm font-semibold text-[var(--color-text)]">
-              Rebalance Plan
-              <InfoTooltip text="Delta = target weight minus current weight. Positive = buy more; negative = trim." />
-            </h3>
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <h3 className="text-sm font-semibold text-[var(--color-text)]">
+                Rebalance Plan
+                <InfoTooltip text="Delta = target weight minus current weight. Positive = buy more; negative = trim." />
+              </h3>
+              <div className="flex items-center gap-3">
+                {/* Turnover chip */}
+                {(() => {
+                  const to = 0.5 * Object.values(result.implied_trades).reduce((s, v) => s + Math.abs(v as number), 0);
+                  return (
+                    <span className="rounded-full border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-1 text-xs font-semibold text-[var(--color-muted)]">
+                      TO: {(to * 100).toFixed(1)}%
+                    </span>
+                  );
+                })()}
+                {/* Export CSV */}
+                <button
+                  className="rounded-[var(--radius-btn)] border border-[var(--color-border)] px-3 py-1 text-xs font-semibold text-[var(--color-text)] hover:bg-[var(--color-bg)] transition-colors"
+                  onClick={() => {
+                    const rows = result.tickers.map((t) => {
+                      const delta = result.implied_trades[t] ?? 0;
+                      return [t, result.current_weights[t], result.target_weights[t], delta].join(",");
+                    });
+                    const csv = ["ticker,current_weight,target_weight,delta", ...rows].join("\n");
+                    const blob = new Blob([csv], { type: "text/csv" });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement("a");
+                    a.href = url;
+                    a.download = "rebalance_trades.csv";
+                    a.click();
+                    URL.revokeObjectURL(url);
+                  }}
+                >
+                  Export CSV
+                </button>
+              </div>
+            </div>
             <div className="overflow-auto">
               <table className="w-full text-xs">
                 <thead className="border-b border-[var(--color-border)] bg-gray-50">
@@ -1246,6 +1284,8 @@ export default function PortfolioDetailPage({
     { key: "optimize",   label: "Optimize"   },
     { key: "validation", label: "Validation" },
     { key: "forecast",   label: "Forecast"   },
+    { key: "health",     label: "Health"     },
+    { key: "scenarios",  label: "Scenarios"  },
   ];
 
   return (
@@ -1304,6 +1344,358 @@ export default function PortfolioDetailPage({
       {tab === "optimize" && <OptimizeTab portfolioId={id} />}
       {tab === "validation" && <ValidationTab portfolioId={id} />}
       {tab === "forecast" && <ForecastTab portfolioId={id} />}
+      {tab === "health" && <HealthTab portfolioId={id} />}
+      {tab === "scenarios" && <ScenariosTab portfolioId={id} />}
+    </div>
+  );
+}
+
+
+// ── HealthTab ──────────────────────────────────────────────────────────────────
+
+function HealthTab({ portfolioId }: { portfolioId: string }) {
+  const { data, isLoading, error } = useQuery<PortfolioHealthResult>({
+    queryKey: ["portfolio-health", portfolioId],
+    queryFn: () => fetchPortfolioHealth(portfolioId),
+  });
+
+  if (isLoading) {
+    return (
+      <div className="rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] p-12 text-center text-sm text-[var(--color-muted)]">
+        Computing health metrics…
+      </div>
+    );
+  }
+  if (error || !data) {
+    return (
+      <p className="text-sm text-[var(--color-negative)]">
+        {(error as Error)?.message ?? "Failed to load health data."}
+      </p>
+    );
+  }
+
+  const cards = [
+    {
+      label: "HHI",
+      value: data.concentration.hhi.toFixed(4),
+      tooltip: "Herfindahl-Hirschman Index: Σw². Ranges 1/N (perfectly diversified) to 1.0 (single position). Higher = more concentrated.",
+    },
+    {
+      label: "N_eff",
+      value: data.concentration.n_eff.toFixed(2),
+      tooltip: "Effective N: 1/HHI. The equivalent number of equally-weighted positions that would produce the same concentration.",
+    },
+    {
+      label: "Top 5",
+      value: fmtPct(data.concentration.top5),
+      tooltip: "Sum of the 5 largest position weights. A proxy for how top-heavy the portfolio is.",
+    },
+    {
+      label: "Beta",
+      value: data.beta != null ? data.beta.toFixed(3) : "—",
+      tooltip: "OLS beta vs SPY over the lookback window. Beta > 1 = amplifies market moves; < 1 = dampens.",
+    },
+    {
+      label: "Ann. Vol",
+      value: data.vol != null ? fmtPct(data.vol) : "—",
+      tooltip: "Annualised portfolio volatility (daily std × √252) computed over the lookback window.",
+    },
+  ];
+
+  return (
+    <div className="space-y-5">
+      {/* Summary cards */}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+        {cards.map((c) => (
+          <div key={c.label} className="rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-sm">
+            <p className="text-xs text-[var(--color-muted)]">
+              {c.label}
+              <InfoTooltip text={c.tooltip} />
+            </p>
+            <p className="mt-1 text-xl font-bold text-[var(--color-text)]">{c.value}</p>
+          </div>
+        ))}
+      </div>
+
+      {/* Risk contribution chart */}
+      {data.risk_contributions.length > 0 && (
+        <div className="rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-sm">
+          <h3 className="mb-4 text-sm font-semibold text-[var(--color-text)]">
+            Risk Contributions
+            <InfoTooltip text="RC_i = w_i × (Σw)_i / (w′Σw). Σ RC_i = 1. Shows which positions drive portfolio variance most." />
+          </h3>
+          <RiskContributionChart contributions={data.risk_contributions} />
+        </div>
+      )}
+
+      {/* RC table */}
+      <div className="rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-sm">
+        <h3 className="mb-3 text-sm font-semibold text-[var(--color-text)]">Risk Contribution Detail</h3>
+        <div className="overflow-auto">
+          <table className="w-full text-xs">
+            <thead className="border-b border-[var(--color-border)] bg-gray-50">
+              <tr>
+                {["Ticker", "Weight", "RC", "MCTR"].map((h) => (
+                  <th key={h} className="px-3 py-2 text-left font-semibold text-[var(--color-muted)]">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {data.risk_contributions.map((r) => (
+                <tr key={r.ticker} className="hover:bg-gray-50">
+                  <td className="px-3 py-2 font-mono font-medium">{r.ticker}</td>
+                  <td className="px-3 py-2">{fmtPct(r.weight)}</td>
+                  <td className="px-3 py-2">{r.rc != null ? fmtPct(r.rc) : "—"}</td>
+                  <td className="px-3 py-2 text-[var(--color-muted)]">{r.mctr != null ? r.mctr.toFixed(4) : "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <p className="text-xs text-[var(--color-muted)]">As of {data.as_of_date} · {data.data_source}</p>
+
+      {data.warnings?.length > 0 && (
+        <div className="space-y-1">
+          {data.warnings.map((w, i) => (
+            <p key={i} className="text-xs text-[var(--color-negative)]">{w}</p>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+// ── ScenariosTab ───────────────────────────────────────────────────────────────
+
+function ScenariosTab({ portfolioId }: { portfolioId: string }) {
+  const [scenarioType, setScenarioType] = useState<ScenarioType>("market_shock");
+  const [shockPct, setShockPct] = useState("-20");
+  const [volScale, setVolScale] = useState("2");
+  const [replayStart, setReplayStart] = useState("2022-01-01");
+  const [replayEnd, setReplayEnd] = useState("2022-12-31");
+  const [result, setResult] = useState<ScenarioResult | null>(null);
+  const [showGuide, setShowGuide] = useState(false);
+
+  const mutation = useMutation<ScenarioResult, Error, ScenarioRequest>({
+    mutationFn: (body) => runScenario(portfolioId, body),
+    onSuccess: (data) => setResult(data),
+  });
+
+  function handleRun() {
+    const body: ScenarioRequest = { scenario_type: scenarioType };
+    if (scenarioType === "market_shock") body.shock_pct = parseFloat(shockPct) / 100;
+    if (scenarioType === "vol_shock") body.vol_scale = parseFloat(volScale);
+    if (scenarioType === "historical_replay") { body.start_date = replayStart; body.end_date = replayEnd; }
+    mutation.mutate(body);
+  }
+
+  const TYPES: { key: ScenarioType; label: string }[] = [
+    { key: "market_shock", label: "Market Shock" },
+    { key: "vol_shock", label: "Vol Shock" },
+    { key: "historical_replay", label: "Historical Replay" },
+  ];
+
+  return (
+    <div className="space-y-5">
+      {showGuide && <ScenarioGuide onClose={() => setShowGuide(false)} />}
+
+      {/* Type selector */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex rounded-[var(--radius-btn)] border border-[var(--color-border)] overflow-hidden">
+          {TYPES.map(({ key, label }) => (
+            <button
+              key={key}
+              onClick={() => { setScenarioType(key); setResult(null); }}
+              className={`px-4 py-2 text-sm font-medium transition-colors ${
+                scenarioType === key
+                  ? "bg-[var(--color-primary)] text-white"
+                  : "bg-[var(--color-surface)] text-[var(--color-muted)] hover:text-[var(--color-text)]"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <button
+          onClick={() => setShowGuide(true)}
+          className="flex items-center gap-1 text-xs text-[var(--color-primary)] hover:underline"
+        >
+          <BookOpen size={13} /> Scenario Guide
+        </button>
+      </div>
+
+      {/* Inputs */}
+      <div className="flex flex-wrap items-end gap-4 rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-sm">
+        {scenarioType === "market_shock" && (
+          <div>
+            <label className="mb-1 block text-xs font-medium text-[var(--color-muted)]">Shock % (e.g. −20)</label>
+            <input
+              type="number"
+              value={shockPct}
+              onChange={(e) => setShockPct(e.target.value)}
+              className="w-32 rounded-[var(--radius-btn)] border border-[var(--color-border)] px-3 py-2 text-sm"
+            />
+          </div>
+        )}
+        {scenarioType === "vol_shock" && (
+          <div>
+            <label className="mb-1 block text-xs font-medium text-[var(--color-muted)]">Vol Scale (e.g. 2 = 2×)</label>
+            <input
+              type="number"
+              min="0.1"
+              step="0.1"
+              value={volScale}
+              onChange={(e) => setVolScale(e.target.value)}
+              className="w-32 rounded-[var(--radius-btn)] border border-[var(--color-border)] px-3 py-2 text-sm"
+            />
+          </div>
+        )}
+        {scenarioType === "historical_replay" && (
+          <>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-[var(--color-muted)]">Start</label>
+              <input type="date" value={replayStart} onChange={(e) => setReplayStart(e.target.value)}
+                className="rounded-[var(--radius-btn)] border border-[var(--color-border)] px-3 py-2 text-sm" />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-[var(--color-muted)]">End</label>
+              <input type="date" value={replayEnd} onChange={(e) => setReplayEnd(e.target.value)}
+                className="rounded-[var(--radius-btn)] border border-[var(--color-border)] px-3 py-2 text-sm" />
+            </div>
+          </>
+        )}
+        <button
+          onClick={handleRun}
+          disabled={mutation.isPending}
+          className="rounded-[var(--radius-btn)] bg-[var(--color-primary)] px-5 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50 transition-opacity"
+        >
+          {mutation.isPending ? "Running…" : "Run Scenario"}
+        </button>
+      </div>
+
+      {mutation.error && (
+        <p className="text-sm text-[var(--color-negative)]">{mutation.error.message}</p>
+      )}
+
+      {/* Results */}
+      {result && (
+        <div className="space-y-4">
+          {/* Market shock result */}
+          {result.scenario_type === "market_shock" && result.portfolio_impact != null && (
+            <>
+              <div className="rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-sm">
+                <p className="text-xs text-[var(--color-muted)]">Portfolio Impact</p>
+                <p className={`text-3xl font-bold ${colorForValue(result.portfolio_impact)}`}>
+                  {fmtPct(result.portfolio_impact)}
+                </p>
+              </div>
+              {result.contributions && (
+                <div className="rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-sm overflow-auto">
+                  <h3 className="mb-3 text-sm font-semibold text-[var(--color-text)]">Per-Asset Impact</h3>
+                  <table className="w-full text-xs">
+                    <thead className="border-b border-[var(--color-border)] bg-gray-50">
+                      <tr>
+                        {["Ticker", "Weight", "Impact"].map((h) => (
+                          <th key={h} className="px-3 py-2 text-left font-semibold text-[var(--color-muted)]">{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {result.contributions.map((c) => (
+                        <tr key={c.ticker} className="hover:bg-gray-50">
+                          <td className="px-3 py-2 font-mono font-medium">{c.ticker}</td>
+                          <td className="px-3 py-2">{fmtPct(c.weight)}</td>
+                          <td className={`px-3 py-2 font-semibold ${colorForValue(c.impact)}`}>{fmtPct(c.impact)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </>
+          )}
+
+          {/* Vol shock result */}
+          {result.scenario_type === "vol_shock" && (
+            <div className="grid grid-cols-3 gap-3">
+              {[
+                { label: "Base Vol", value: result.base_vol != null ? fmtPct(result.base_vol) : "—" },
+                { label: "Shocked Vol", value: result.shocked_vol != null ? fmtPct(result.shocked_vol) : "—" },
+                { label: "Vol Scale", value: `${result.vol_scale}×` },
+              ].map((c) => (
+                <div key={c.label} className="rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-sm">
+                  <p className="text-xs text-[var(--color-muted)]">{c.label}</p>
+                  <p className="text-2xl font-bold text-[var(--color-text)]">{c.value}</p>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Historical replay result */}
+          {result.scenario_type === "historical_replay" && (
+            <>
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                {[
+                  { label: "Total Return", value: result.total_return != null ? fmtPct(result.total_return) : "—", colored: true },
+                  { label: "Max Drawdown", value: result.max_dd != null ? fmtPct(result.max_dd) : "—", colored: true },
+                  { label: "Best Day", value: result.best_day != null ? fmtPct(result.best_day) : "—", colored: true },
+                  { label: "Worst Day", value: result.worst_day != null ? fmtPct(result.worst_day) : "—", colored: true },
+                ].map((c) => (
+                  <div key={c.label} className="rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-sm">
+                    <p className="text-xs text-[var(--color-muted)]">{c.label}</p>
+                    <p className={`text-xl font-bold ${colorForValue(parseFloat(c.value.replace(/[%+]/g, "") || "0"))}`}>{c.value}</p>
+                  </div>
+                ))}
+              </div>
+
+              {/* Equity curve */}
+              {result.equity_curve && result.equity_curve.length > 1 && (
+                <div className="rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-sm">
+                  <h3 className="mb-3 text-sm font-semibold text-[var(--color-text)]">Equity Curve</h3>
+                  <ResponsiveContainer width="100%" height={150}>
+                    <LineChart data={downsample(result.equity_curve, 300)} margin={{ top: 4, right: 16, bottom: 0, left: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
+                      <XAxis dataKey="date" tick={{ fontSize: 10 }} minTickGap={60} tickFormatter={(d: string) => d.slice(0, 7)} />
+                      <YAxis tick={{ fontSize: 10 }} width={48} domain={["auto", "auto"]} tickFormatter={(v: number) => v.toFixed(2)} />
+                      <Tooltip labelFormatter={(l) => `Date: ${l}`} formatter={(v: number | undefined) => [(v ?? 0).toFixed(4), "Portfolio"]} />
+                      <Line type="monotone" dataKey="value" stroke="var(--color-primary)" strokeWidth={1.5} dot={false} name="Portfolio" />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+
+              {/* Contributors */}
+              {result.contributors && (
+                <div className="rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-sm overflow-auto">
+                  <h3 className="mb-3 text-sm font-semibold text-[var(--color-text)]">Asset Contributions</h3>
+                  <table className="w-full text-xs">
+                    <thead className="border-b border-[var(--color-border)] bg-gray-50">
+                      <tr>
+                        {["Ticker", "Asset Return", "Weight", "Contribution"].map((h) => (
+                          <th key={h} className="px-3 py-2 text-left font-semibold text-[var(--color-muted)]">{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {[...result.contributors].sort((a, b) => b.weighted_contribution - a.weighted_contribution).map((c) => (
+                        <tr key={c.ticker} className="hover:bg-gray-50">
+                          <td className="px-3 py-2 font-mono font-medium">{c.ticker}</td>
+                          <td className={`px-3 py-2 ${colorForValue(c.asset_return)}`}>{fmtPct(c.asset_return)}</td>
+                          <td className="px-3 py-2">{fmtPct(c.weight)}</td>
+                          <td className={`px-3 py-2 font-semibold ${colorForValue(c.weighted_contribution)}`}>{fmtPct(c.weighted_contribution)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
 }

@@ -67,6 +67,38 @@ const GLOSSARY = [
     term: "Optimize Modes",
     def: "Nine modes available. Equal Weight (1/N): naive baseline. Min Variance: lowest portfolio vol. Max Sharpe: best historical risk-adjusted return. Max Sharpe — CAPM: CAPM beta-driven expected returns. Risk Parity: equal risk contribution per asset. Max Sortino: maximise return per unit of downside vol. Min CVaR (95%): minimise expected tail loss. Max Diversification: maximise correlation-adjusted diversification. Target Volatility: best return within a hard vol ceiling. Click 'Optimizer Guide →' in the Optimize tab for full details. Implied trades = target weight − current weight.",
   },
+  {
+    term: "HHI (Herfindahl-Hirschman Index)",
+    def: "Concentration measure: Σw_i². Ranges from 1/N (perfectly equal) to 1.0 (single position). Rule of thumb: < 0.15 = diversified, 0.15–0.25 = moderate, > 0.25 = concentrated.",
+  },
+  {
+    term: "N_eff (Effective N)",
+    def: "1/HHI. The number of equal-weight positions that would produce the same concentration as the current portfolio. N_eff = 10 means the portfolio behaves as if it held 10 equal positions regardless of how many tickers it actually holds.",
+  },
+  {
+    term: "RC (Risk Contribution)",
+    def: "The fraction of total portfolio variance attributable to each position: RC_i = w_i × (Σw)_i / (w′Σw). By construction Σ RC_i = 1 (100%). A position with a small weight but high correlation to the rest can carry a disproportionate RC.",
+  },
+  {
+    term: "MCTR (Marginal Contribution to Risk)",
+    def: "The derivative of portfolio volatility with respect to a small increase in position i's weight: MCTR_i = (Σw)_i / σ_p. High MCTR = adding more of this asset increases portfolio vol quickly. Used to identify which positions are 'expensive' in risk terms.",
+  },
+  {
+    term: "Market Shock Scenario",
+    def: "Applies a uniform instantaneous shock to every asset simultaneously. Portfolio impact = shock_pct × Σw. Use a negative shock_pct to model a crash (e.g. −20% = 2020-style drawdown). Individual contributions = w_i × shock_pct.",
+  },
+  {
+    term: "Vol Shock Scenario",
+    def: "Scales the covariance matrix by vol_scale². New portfolio vol = sqrt(w′ × shocked_Σ × w). A 2× vol shock models a VIX doubling. Base vol uses the most recent 252 trading days.",
+  },
+  {
+    term: "Historical Replay Scenario",
+    def: "Applies today's fixed weights to realized returns in a past date window. No rebalancing, no transaction costs. Use it to answer: 'How would my current allocation have performed during 2008, COVID-2020, or 2022 rate hikes?' Equity curve, max drawdown, and per-asset contribution are all shown.",
+  },
+  {
+    term: "Extra Indicators (EMA / Bollinger / ADX / Donchian / Stochastic / OBV)",
+    def: "EMA: Exponential Moving Average (faster reaction than SMA). Bollinger Bands: SMA ± 2 standard deviations — price outside bands signals potential reversal or breakout. ADX: Average Directional Index, 0–100, measures trend strength (> 25 = trending). Donchian Channel: rolling high/low range — breakout above upper = momentum signal. Stochastic %K/%D: 0–100 oscillator; above 80 = overbought, below 20 = oversold. OBV: On-Balance Volume — cumulative volume weighted by price direction; divergence from price can signal reversals. Toggle any indicator using the checkboxes on the Technicals page.",
+  },
 ];
 
 export default function HelpSidebar() {

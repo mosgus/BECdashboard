@@ -8,7 +8,18 @@ import numpy as np
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from auth import require_write_key
-from core.indicators import compute_atr, compute_macd, compute_rsi, compute_sma
+from core.indicators import (
+    compute_atr,
+    compute_macd,
+    compute_rsi,
+    compute_sma,
+    compute_ema,
+    compute_bollinger,
+    compute_adx,
+    compute_donchian,
+    compute_stochastic,
+    compute_obv,
+)
 from core.provider import provider as data_provider
 from core.signals import compute_all_signals
 
@@ -68,8 +79,9 @@ def get_ticker_technicals(
     start: Optional[str] = Query(None),
     end: Optional[str] = Query(None),
     signals: int = Query(0, description="Set to 1 to include signal states"),
+    include: str = Query("", description="Comma-separated extra indicators: ema,bollinger,adx,donchian,stochastic,obv"),
 ) -> dict:
-    """Enhanced technicals: SMA20/50, RSI14, MACD, ATR14, optional signal states."""
+    """Enhanced technicals: SMA20/50, RSI14, MACD, ATR14, optional signal states and extra indicators."""
     ticker = ticker.upper()
     start = start or _YEAR_AGO()
     end = end or _TODAY()
@@ -81,6 +93,7 @@ def get_ticker_technicals(
     close = df["close"]
     high = df["high"]
     low = df["low"]
+    volume = df["volume"]
 
     sma20 = compute_sma(close, 20)
     sma50 = compute_sma(close, 50)
@@ -128,5 +141,61 @@ def get_ticker_technicals(
 
     if signals:
         result["signals"] = compute_all_signals(close)
+
+    # ── Optional extra indicators ──────────────────────────────────────────────
+    extras = {x.strip().lower() for x in include.split(",") if x.strip()}
+
+    if "ema" in extras:
+        ema20 = compute_ema(close, 20)
+        ema50 = compute_ema(close, 50)
+        result["ema"] = [
+            {"date": str(d.date()), "ema20": _clean(ema20[d]), "ema50": _clean(ema50[d])}
+            for d in close.index
+        ]
+
+    if "bollinger" in extras:
+        bb_upper, bb_mid, bb_lower = compute_bollinger(close)
+        result["bollinger"] = [
+            {
+                "date": str(d.date()),
+                "upper": _clean(bb_upper[d]),
+                "mid": _clean(bb_mid[d]),
+                "lower": _clean(bb_lower[d]),
+            }
+            for d in close.index
+        ]
+
+    if "adx" in extras:
+        adx = compute_adx(high, low, close)
+        result["adx"] = [
+            {"date": str(d.date()), "adx": _clean(adx[d])}
+            for d in adx.index
+        ]
+
+    if "donchian" in extras:
+        dc_upper, dc_mid, dc_lower = compute_donchian(high, low)
+        result["donchian"] = [
+            {
+                "date": str(d.date()),
+                "upper": _clean(dc_upper[d]),
+                "mid": _clean(dc_mid[d]),
+                "lower": _clean(dc_lower[d]),
+            }
+            for d in close.index
+        ]
+
+    if "stochastic" in extras:
+        stoch_k, stoch_d = compute_stochastic(high, low, close)
+        result["stochastic"] = [
+            {"date": str(d.date()), "k": _clean(stoch_k[d]), "d": _clean(stoch_d[d])}
+            for d in close.index
+        ]
+
+    if "obv" in extras:
+        obv = compute_obv(close, volume)
+        result["obv"] = [
+            {"date": str(d.date()), "obv": None if np.isnan(float(obv[d])) else round(float(obv[d]), 2)}
+            for d in obv.index
+        ]
 
     return result

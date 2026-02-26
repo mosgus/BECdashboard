@@ -105,6 +105,123 @@ def compute_atr(
     return tr.ewm(com=window - 1, min_periods=window).mean()
 
 
+# ── New indicators (Sprint 4) ─────────────────────────────────────────────────
+
+def compute_ema(series: pd.Series, window: int) -> pd.Series:
+    """Exponential Moving Average (EWM span)."""
+    return series.ewm(span=window, adjust=False).mean()
+
+
+def compute_bollinger(
+    series: pd.Series,
+    window: int = 20,
+    num_std: float = 2.0,
+) -> tuple[pd.Series, pd.Series, pd.Series]:
+    """Bollinger Bands: (upper, middle, lower).
+
+    middle = SMA(window)
+    upper  = middle + num_std * rolling_std
+    lower  = middle - num_std * rolling_std
+    """
+    mid = series.rolling(window).mean()
+    std = series.rolling(window).std(ddof=1)
+    upper = mid + num_std * std
+    lower = mid - num_std * std
+    return upper, mid, lower
+
+
+def compute_adx(
+    high: pd.Series,
+    low: pd.Series,
+    close: pd.Series,
+    window: int = 14,
+) -> pd.Series:
+    """Average Directional Index using Wilder EWM smoothing.
+
+    Values 0–100. Conventionally: > 25 = trending, < 20 = ranging.
+    No look-ahead: all computations use only past bars.
+    """
+    # True Range
+    prev_close = close.shift(1)
+    tr = pd.concat(
+        [high - low, (high - prev_close).abs(), (low - prev_close).abs()],
+        axis=1,
+    ).max(axis=1)
+
+    # Directional movement
+    up_move = high.diff()
+    down_move = -low.diff()
+
+    dm_plus = np.where((up_move > down_move) & (up_move > 0), up_move, 0.0)
+    dm_minus = np.where((down_move > up_move) & (down_move > 0), down_move, 0.0)
+
+    dm_plus_s = pd.Series(dm_plus, index=high.index)
+    dm_minus_s = pd.Series(dm_minus, index=high.index)
+
+    # Wilder smoothing
+    atr = tr.ewm(com=window - 1, adjust=False, min_periods=window).mean()
+    di_plus = 100.0 * dm_plus_s.ewm(com=window - 1, adjust=False, min_periods=window).mean() / atr
+    di_minus = 100.0 * dm_minus_s.ewm(com=window - 1, adjust=False, min_periods=window).mean() / atr
+
+    dx_denom = (di_plus + di_minus).replace(0.0, np.nan)
+    dx = 100.0 * (di_plus - di_minus).abs() / dx_denom
+    adx = dx.ewm(com=window - 1, adjust=False, min_periods=window).mean()
+    return adx
+
+
+def compute_donchian(
+    high: pd.Series,
+    low: pd.Series,
+    window: int = 20,
+) -> tuple[pd.Series, pd.Series, pd.Series]:
+    """Donchian Channel: (upper, mid, lower).
+
+    upper = rolling max(high, window)
+    lower = rolling min(low,  window)
+    mid   = (upper + lower) / 2
+    """
+    upper = high.rolling(window).max()
+    lower = low.rolling(window).min()
+    mid = (upper + lower) / 2.0
+    return upper, mid, lower
+
+
+def compute_stochastic(
+    high: pd.Series,
+    low: pd.Series,
+    close: pd.Series,
+    k_window: int = 14,
+    d_window: int = 3,
+    smooth_k: int = 3,
+) -> tuple[pd.Series, pd.Series]:
+    """Full Stochastic Oscillator (%K smoothed, %D). Values 0–100.
+
+    Raw %K = 100 * (close - lowest_low) / (highest_high - lowest_low)
+    Smooth %K = SMA(raw_K, smooth_k)
+    %D        = SMA(smooth_%K, d_window)
+    """
+    lowest_low = low.rolling(k_window).min()
+    highest_high = high.rolling(k_window).max()
+    range_ = (highest_high - lowest_low).replace(0.0, np.nan)
+    raw_k = 100.0 * (close - lowest_low) / range_
+    k = raw_k.rolling(smooth_k).mean()
+    d = k.rolling(d_window).mean()
+    return k, d
+
+
+def compute_obv(close: pd.Series, volume: pd.Series) -> pd.Series:
+    """On-Balance Volume: cumulative sum weighted by daily close direction.
+
+    OBV_t = OBV_{t-1} + volume_t  if close_t > close_{t-1}
+                       - volume_t  if close_t < close_{t-1}
+                       + 0         otherwise
+    """
+    direction = np.sign(close.diff().fillna(0.0))
+    return (direction * volume).cumsum()
+
+
+# ── Alert checks ──────────────────────────────────────────────────────────────
+
 def simulate_email_alert(ticker: str, alert: dict) -> dict:
     return {
         "to": "analyst@blueeagle.fund",
