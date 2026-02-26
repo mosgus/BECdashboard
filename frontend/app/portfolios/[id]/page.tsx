@@ -3,7 +3,7 @@ import { use, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { BookOpen, ChevronDown, ChevronRight, Trash2 } from "lucide-react";
+import { BookOpen, ChevronDown, ChevronRight, Trash2, Upload } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import {
   addCandidate,
@@ -16,6 +16,7 @@ import {
   fetchPortfolioHealth,
   fetchTickerTechnicals,
   forecastPortfolio,
+  importPortfolioCSV,
   optimizePortfolio,
   refreshCandidates,
   removeCandidate,
@@ -99,6 +100,20 @@ function HoldingsTab({
   const [editError, setEditError] = useState<string | null>(null);
   const [expandedTicker, setExpandedTicker] = useState<string | null>(null);
   const [addError, setAddError] = useState<string | null>(null);
+  const [csvResult, setCsvResult] = useState<{
+    positions_added: number;
+    positions_updated: number;
+    universe_added: string[];
+    warnings: string[];
+  } | null>(null);
+
+  const csvMut = useMutation({
+    mutationFn: (file: File) => importPortfolioCSV(portfolioId, file),
+    onSuccess: (result) => {
+      setCsvResult(result);
+      onRefetch();
+    },
+  });
 
   const addMut = useMutation({
     mutationFn: () =>
@@ -158,10 +173,44 @@ function HoldingsTab({
     <div className="space-y-4">
       {/* Add position form */}
       <div className="rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-sm">
-        <h3 className="mb-3 text-sm font-semibold text-[var(--color-text)]">
-          Add Holding
-          <InfoTooltip text="Tickers must be in the active Universe. Enter weight as a percentage (e.g. 25 = 25%). All weights must sum to exactly 100%." />
-        </h3>
+        <div className="mb-3 flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-[var(--color-text)]">
+            Add Holding
+            <InfoTooltip text="Tickers must be in the active Universe. Enter weight as a percentage (e.g. 25 = 25%). All weights must sum to exactly 100%." />
+          </h3>
+          <label className={`flex cursor-pointer items-center gap-1.5 rounded-[var(--radius-btn)] border border-[var(--color-border)] px-3 py-1.5 text-xs font-medium text-[var(--color-text)] hover:bg-gray-50 transition-colors ${csvMut.isPending ? "opacity-50 pointer-events-none" : ""}`}>
+            <Upload className="h-3.5 w-3.5" />
+            {csvMut.isPending ? "Importing…" : "Import CSV"}
+            <input
+              type="file"
+              accept=".csv,text/csv"
+              className="sr-only"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) { setCsvResult(null); csvMut.mutate(f); }
+                e.target.value = "";
+              }}
+            />
+          </label>
+        </div>
+        {csvMut.isError && (
+          <p className="mb-2 text-xs text-[var(--color-negative)]">
+            Import failed: {(csvMut.error as Error).message}
+          </p>
+        )}
+        {csvResult && (
+          <div className="mb-3 rounded-[var(--radius-btn)] border border-green-200 bg-green-50 p-3 text-xs text-green-800 space-y-1">
+            <p className="font-semibold">
+              Import complete — {csvResult.positions_added} added, {csvResult.positions_updated} updated
+            </p>
+            {csvResult.universe_added.length > 0 && (
+              <p>Auto-added to universe: <span className="font-mono">{csvResult.universe_added.join(", ")}</span></p>
+            )}
+            {csvResult.warnings.map((w, i) => (
+              <p key={i} className="text-amber-700">{w}</p>
+            ))}
+          </div>
+        )}
         <div className="flex flex-wrap gap-3">
           <UniverseTickerPicker
             value={newTicker}

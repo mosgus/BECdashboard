@@ -1,18 +1,22 @@
 """Portfolio CRUD, positions management, analytics (simulated), and optimization."""
 from __future__ import annotations
 
+import csv
+import io
+import re
 import uuid
 from datetime import date, timedelta
 from typing import Literal, Optional
 
 import numpy as np
 import pandas as pd
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel, field_validator
 from sqlalchemy.orm import Session
 
 from auth import require_write_key
 from core.cache import fetch_prices
+from routers.universe import _TICKER_RE, _enrich
 from core.portfolio import (
     compute_betas,
     compute_capm_expected_returns,
@@ -135,6 +139,50 @@ class IndicatorConfigUpsert(BaseModel):
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
+
+def _parse_portfolio_csv(content: str) -> list[dict]:
+    """Parse portfolio CSV into [{ticker, weight}] dicts.
+
+    Accepted formats:
+      - Header row with 'ticker' column; optional 'weight' column
+      - No header: first column = ticker, second column = optional weight
+
+    Weights may be decimals (0.25) or percentages (25 or 25%); decimals ≤ 1
+    are converted to percentage scale to match the Position model convention.
+    """
+    reader = csv.DictReader(io.StringIO(content))
+    fieldnames = [h.lower().strip() for h in (reader.fieldnames or [])]
+
+    def _parse_weight(raw: str) -> float | None:
+        raw = raw.strip().rstrip("%")
+        if not raw:
+            return None
+        try:
+            w = float(raw)
+            return round(w * 100, 6) if 0 < w <= 1 else w
+        except ValueError:
+            return None
+
+    if "ticker" in fieldnames:
+        return [
+            {
+                "ticker": (row.get("ticker") or "").strip().upper(),
+                "weight": _parse_weight(row.get("weight") or ""),
+            }
+            for row in reader
+        ]
+
+    # No header
+    rows: list[dict] = []
+    for line in csv.reader(io.StringIO(content)):
+        if not line:
+            continue
+        rows.append({
+            "ticker": line[0].strip().upper(),
+            "weight": _parse_weight(line[1]) if len(line) > 1 else None,
+        })
+    return rows
+
 
 def _get_or_404(db: Session, portfolio_id: str) -> Portfolio:
     try:
@@ -310,6 +358,78 @@ def delete_position(
         raise HTTPException(status_code=404, detail=f"Position {ticker} not found.")
     db.delete(pos)
     db.commit()
+
+
+@router.post("/portfolios/{portfolio_id}/import_csv")
+def import_portfolio_csv(
+    portfolio_id: str,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    _: None = Depends(require_write_key),
+) -> dict:
+    """Import positions from a CSV file.
+
+    Auto-adds any tickers not already in the universe (with yfinance enrichment).
+    CSV formats accepted:
+      - Header 'ticker' (+ optional 'weight') columns
+      - Headerless: first column = ticker, second = optional weight
+    Weights may be decimals (0.25) or percentages (25 or 25%).
+    Omitting weight leaves weight as null (equal-weight in analytics).
+    """
+    p = _get_or_404(db, portfolio_id)
+
+    try:
+        content = file.file.read().decode("utf-8", errors="replace")
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=f"Could not read file: {exc}")
+
+    rows = _parse_portfolio_csv(content)
+    positions_added = 0
+    positions_updated = 0
+    universe_added: list[str] = []
+    warnings: list[str] = []
+
+    for row in rows:
+        ticker = row["ticker"]
+        weight = row["weight"]
+
+        if not ticker or ticker in ("TICKER", "SYMBOL"):
+            continue
+
+        if not _TICKER_RE.match(ticker):
+            warnings.append(f"{ticker}: invalid format — skipped")
+            continue
+
+        # Ensure ticker is in active universe; auto-add if missing
+        ut = db.query(UniverseTicker).filter(UniverseTicker.ticker == ticker).first()
+        if not ut:
+            ut = UniverseTicker(ticker=ticker, active=True)
+            _enrich(ut)
+            db.add(ut)
+            db.flush()
+            universe_added.append(ticker)
+        elif not ut.active:
+            ut.active = True
+            universe_added.append(ticker)
+
+        # Upsert position
+        existing = db.query(Position).filter(
+            Position.portfolio_id == p.id, Position.ticker == ticker
+        ).first()
+        if existing:
+            existing.weight = weight
+            positions_updated += 1
+        else:
+            db.add(Position(portfolio_id=p.id, ticker=ticker, weight=weight))
+            positions_added += 1
+
+    db.commit()
+    return {
+        "positions_added": positions_added,
+        "positions_updated": positions_updated,
+        "universe_added": universe_added,
+        "warnings": warnings,
+    }
 
 
 # ── Analytics ─────────────────────────────────────────────────────────────────

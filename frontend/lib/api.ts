@@ -157,6 +157,15 @@ export const updatePosition = (
 export const removePosition = (portfolioId: string, ticker: string): Promise<void> =>
   apiDelete(`/api/portfolios/${portfolioId}/positions/${ticker}`);
 
+export const importPortfolioCSV = (
+  portfolioId: string,
+  file: File,
+): Promise<{ positions_added: number; positions_updated: number; universe_added: string[]; warnings: string[] }> => {
+  const fd = new FormData();
+  fd.append("file", file);
+  return apiUpload(`/api/portfolios/${portfolioId}/import_csv`, fd);
+};
+
 export const fetchPortfolioAnalytics = (
   id: string,
   start?: string,
