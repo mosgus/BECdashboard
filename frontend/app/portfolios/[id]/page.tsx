@@ -41,7 +41,7 @@ import { PortfolioAnalytics, PortfolioOptimizeResult, Position } from "@/types/s
 import { SignalResult } from "@/types/sprint2";
 import type { CandidateRefreshResponse, IndicatorType, PortfolioIndicatorConfig } from "@/types/sprint4";
 import type { PortfolioValidationResult, PortfolioForecastResult } from "@/types/sprint6";
-import type { PortfolioHealthResult, ScenarioResult, ScenarioType, ScenarioRequest } from "@/types/sprint7";
+import type { PortfolioHealthResult, ScenarioResult, ScenarioType, ScenarioRequest, ExtendedTechnicalsResponse } from "@/types/sprint7";
 import {
   LineChart,
   Line,
@@ -95,6 +95,7 @@ function HoldingsTab({
   const [newWeight, setNewWeight] = useState("");
   const [editingTicker, setEditingTicker] = useState<string | null>(null);
   const [editWeight, setEditWeight] = useState("");
+  const [editError, setEditError] = useState<string | null>(null);
   const [expandedTicker, setExpandedTicker] = useState<string | null>(null);
   const [addError, setAddError] = useState<string | null>(null);
 
@@ -119,9 +120,24 @@ function HoldingsTab({
       updatePosition(portfolioId, ticker, weight),
     onSuccess: () => {
       setEditingTicker(null);
+      setEditError(null);
       onRefetch();
     },
   });
+
+  function saveWeight(ticker: string) {
+    const val = parseFloat(editWeight) || 0;
+    const otherSum = positions
+      .filter((p) => p.ticker !== ticker)
+      .reduce((s, p) => s + (p.weight ?? 0), 0);
+    if (val < 0) { setEditError("Must be ≥ 0%"); return; }
+    if (otherSum + val > 100 + 0.001) {
+      setEditError(`Total would be ${(otherSum + val).toFixed(1)}% — exceeds 100%`);
+      return;
+    }
+    setEditError(null);
+    updateMut.mutate({ ticker, weight: val || null });
+  }
 
   const removeMut = useMutation({
     mutationFn: (ticker: string) => removePosition(portfolioId, ticker),
@@ -129,6 +145,13 @@ function HoldingsTab({
   });
 
   const totalWeight = positions.reduce((s, p) => s + (p.weight ?? 1), 0) || 1;
+  const currentTotal = positions.reduce((s, p) => s + (p.weight ?? 0), 0);
+  const editingCurrentWeight = editingTicker
+    ? (positions.find((p) => p.ticker === editingTicker)?.weight ?? 0)
+    : 0;
+  const displayTotal = editingTicker
+    ? currentTotal - editingCurrentWeight + (parseFloat(editWeight) || 0)
+    : currentTotal;
 
   return (
     <div className="space-y-4">
@@ -136,7 +159,7 @@ function HoldingsTab({
       <div className="rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-sm">
         <h3 className="mb-3 text-sm font-semibold text-[var(--color-text)]">
           Add Holding
-          <InfoTooltip text="Tickers must be in the active Universe. Weight is relative (e.g. 1, 2, 3…) and normalised to 100%." />
+          <InfoTooltip text="Tickers must be in the active Universe. Enter weight as a percentage (e.g. 25 = 25%). All weights must sum to exactly 100%." />
         </h3>
         <div className="flex flex-wrap gap-3">
           <UniverseTickerPicker
@@ -147,15 +170,24 @@ function HoldingsTab({
           />
           <input
             value={newWeight}
-            onChange={(e) => setNewWeight(e.target.value)}
-            placeholder="Weight (optional)"
+            onChange={(e) => { setNewWeight(e.target.value); setAddError(null); }}
+            placeholder="Weight % (e.g. 25)"
             type="number"
             min={0}
-            step={0.01}
+            max={100}
+            step={0.1}
             className="w-36 rounded-[var(--radius-btn)] border border-[var(--color-border)] px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]"
           />
           <button
-            onClick={() => addMut.mutate()}
+            onClick={() => {
+              const newW = newWeight ? parseFloat(newWeight) : 0;
+              if (newW < 0) { setAddError("Weight cannot be negative."); return; }
+              if (newW > 0 && currentTotal + newW > 100 + 0.001) {
+                setAddError(`Adding ${newW}% would exceed 100% (current: ${currentTotal.toFixed(1)}%).`);
+                return;
+              }
+              addMut.mutate();
+            }}
             disabled={!newTicker.trim() || addMut.isPending}
             className="rounded-[var(--radius-btn)] bg-[var(--color-primary)] px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50 transition-opacity"
           >
@@ -176,7 +208,7 @@ function HoldingsTab({
             <thead className="border-b border-[var(--color-border)] bg-gray-50">
               <tr>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-[var(--color-muted)]">Ticker</th>
-                <th className="px-4 py-3 text-right text-xs font-semibold text-[var(--color-muted)]">Weight</th>
+                <th className="px-4 py-3 text-right text-xs font-semibold text-[var(--color-muted)]">Weight %</th>
                 <th className="px-4 py-3 text-right text-xs font-semibold text-[var(--color-muted)]">Alloc %</th>
                 <th className="px-4 py-3 text-xs font-semibold text-[var(--color-muted)]">Signals</th>
                 <th className="px-4 py-3" />
@@ -196,27 +228,35 @@ function HoldingsTab({
                       </td>
                       <td className="px-4 py-3 text-right">
                         {editingTicker === pos.ticker ? (
-                          <input
-                            autoFocus
-                            type="number"
-                            value={editWeight}
-                            onChange={(e) => setEditWeight(e.target.value)}
-                            onKeyDown={(e) => {
-                              if (e.key === "Enter")
-                                updateMut.mutate({ ticker: pos.ticker, weight: editWeight ? parseFloat(editWeight) : null });
-                              if (e.key === "Escape") setEditingTicker(null);
-                            }}
-                            onBlur={() =>
-                              updateMut.mutate({ ticker: pos.ticker, weight: editWeight ? parseFloat(editWeight) : null })
-                            }
-                            className="w-20 rounded border border-[var(--color-border)] px-2 py-0.5 text-sm text-right focus:outline-none focus:ring-1 focus:ring-[var(--color-primary)]"
-                          />
+                          <div className="flex flex-col items-end gap-1">
+                            <div className="flex items-center gap-1">
+                              <input
+                                autoFocus
+                                type="number"
+                                min={0}
+                                max={100}
+                                step={0.1}
+                                value={editWeight}
+                                onChange={(e) => { setEditWeight(e.target.value); setEditError(null); }}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter") saveWeight(pos.ticker);
+                                  if (e.key === "Escape") { setEditingTicker(null); setEditError(null); }
+                                }}
+                                onBlur={() => saveWeight(pos.ticker)}
+                                className="w-20 rounded border border-[var(--color-border)] px-2 py-0.5 text-sm text-right focus:outline-none focus:ring-1 focus:ring-[var(--color-primary)]"
+                              />
+                              <span className="text-xs text-[var(--color-muted)]">%</span>
+                            </div>
+                            {editError && (
+                              <p className="text-xs text-[var(--color-negative)] max-w-[140px] text-right">{editError}</p>
+                            )}
+                          </div>
                         ) : (
                           <button
-                            onClick={() => { setEditingTicker(pos.ticker); setEditWeight(String(pos.weight ?? "")); }}
+                            onClick={() => { setEditingTicker(pos.ticker); setEditWeight(String(pos.weight ?? "")); setEditError(null); }}
                             className="text-[var(--color-text)] hover:text-[var(--color-primary)] transition-colors"
                           >
-                            {pos.weight ?? "—"}
+                            {pos.weight != null ? `${pos.weight}%` : "—"}
                           </button>
                         )}
                       </td>
@@ -251,6 +291,29 @@ function HoldingsTab({
                 );
               })}
             </tbody>
+            <tfoot className="border-t-2 border-[var(--color-border)] bg-gray-50">
+              <tr>
+                <td colSpan={2} className="px-4 py-2 text-right text-xs font-semibold text-[var(--color-muted)]">
+                  Total
+                </td>
+                <td className={`px-4 py-2 text-right text-sm font-bold ${
+                  displayTotal > 100 + 0.001
+                    ? "text-[var(--color-negative)]"
+                    : Math.abs(displayTotal - 100) <= 0.1
+                    ? "text-green-600"
+                    : "text-amber-500"
+                }`}>
+                  {displayTotal.toFixed(1)}%
+                </td>
+                <td colSpan={2} className="px-4 py-2 text-xs text-[var(--color-muted)]">
+                  {displayTotal > 100 + 0.001
+                    ? "Over-allocated — reduce a weight"
+                    : Math.abs(displayTotal - 100) <= 0.1
+                    ? "Fully allocated"
+                    : `${(100 - displayTotal).toFixed(1)}% remaining`}
+                </td>
+              </tr>
+            </tfoot>
           </table>
         </div>
       )}
@@ -837,10 +900,21 @@ function TechnicalsTab({
   const [start, setStart] = useState(twoYearsAgo);
   const [end, setEnd] = useState(today);
   const [chartParams, setChartParams] = useState<{ ticker: string; start: string; end: string } | null>(null);
+  const [visibleIndicators, setVisibleIndicators] = useState<Set<string>>(new Set());
+  const includeParam = Array.from(visibleIndicators).join(",");
 
-  const { data: chartData, isLoading: chartLoading } = useQuery({
-    queryKey: ["ticker-technicals-tab", chartParams],
-    queryFn: () => fetchTickerTechnicals(chartParams!.ticker, chartParams!.start, chartParams!.end, true),
+  function toggleIndicator(key: string) {
+    setVisibleIndicators((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+
+  const { data: chartData, isLoading: chartLoading } = useQuery<ExtendedTechnicalsResponse>({
+    queryKey: ["ticker-technicals-tab", chartParams, includeParam],
+    queryFn: () => fetchTickerTechnicals(chartParams!.ticker, chartParams!.start, chartParams!.end, true, includeParam || undefined),
     enabled: !!chartParams,
   });
 
@@ -907,10 +981,33 @@ function TechnicalsTab({
             </div>
           </div>
 
+          {/* Indicator toggles */}
+          <div className="flex flex-wrap items-center gap-3 rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3 shadow-sm">
+            <span className="text-xs font-semibold text-[var(--color-muted)]">Indicators:</span>
+            {[
+              { key: "ema",        label: "EMA 20/50" },
+              { key: "bollinger",  label: "Bollinger (20, 2σ)" },
+              { key: "donchian",   label: "Donchian (20)" },
+              { key: "adx",        label: "ADX 14" },
+              { key: "stochastic", label: "Stochastic (14,3)" },
+              { key: "obv",        label: "OBV" },
+            ].map(({ key, label }) => (
+              <label key={key} className="flex items-center gap-1.5 cursor-pointer text-xs text-[var(--color-text)]">
+                <input
+                  type="checkbox"
+                  checked={visibleIndicators.has(key)}
+                  onChange={() => toggleIndicator(key)}
+                  className="accent-[var(--color-primary)]"
+                />
+                {label}
+              </label>
+            ))}
+          </div>
+
           {/* Chart */}
           {chartData && (
             <div className="rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-sm">
-              <TechnicalsChart data={chartData} />
+              <TechnicalsChart data={chartData} visibleIndicators={visibleIndicators} />
             </div>
           )}
           {!chartData && !chartLoading && (
