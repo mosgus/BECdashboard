@@ -41,7 +41,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <header className="sticky top-0 z-50 border-b border-[var(--color-border)] bg-[var(--color-surface)]/95 backdrop-blur-sm">
             <div className="mx-auto max-w-screen-2xl px-4 sm:px-6">
               <div className="flex h-14 items-center justify-between">
-                <Link href="/portfolios" className="flex items-center gap-2.5">
+                <Link href="/" className="flex items-center gap-2.5">
                   <Image
                     src="/logo-nav.png"
                     alt="Blue Eagle Capital"
