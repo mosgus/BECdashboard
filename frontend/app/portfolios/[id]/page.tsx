@@ -8,6 +8,8 @@ import { useAuth } from "@/hooks/useAuth";
 import {
   addCandidate,
   addPosition,
+  computeImplementation,
+  computeTilt,
   deleteIndicatorConfig,
   fetchCandidates,
   fetchIndicatorConfigs,
@@ -18,6 +20,7 @@ import {
   forecastPortfolio,
   importPortfolioCSV,
   optimizePortfolio,
+  patchPortfolioNotional,
   refreshCandidates,
   removeCandidate,
   removePosition,
@@ -39,7 +42,7 @@ import FanChart from "@/components/FanChart";
 import RiskContributionChart from "@/components/RiskContributionChart";
 import ScenarioGuide from "@/components/ScenarioGuide";
 import TechnicalsGuide from "@/components/TechnicalsGuide";
-import { PortfolioAnalytics, PortfolioOptimizeResult, Position } from "@/types/sprint3";
+import { ImplementationResult, PortfolioAnalytics, PortfolioOptimizeResult, Position, TiltResult } from "@/types/sprint3";
 import { SignalResult } from "@/types/sprint2";
 import type { CandidateRefreshResponse, IndicatorType, PortfolioIndicatorConfig } from "@/types/sprint4";
 import type { PortfolioValidationResult, PortfolioForecastResult } from "@/types/sprint6";
@@ -87,12 +90,19 @@ function QuickTechnicals({ ticker }: { ticker: string }) {
 function HoldingsTab({
   portfolioId,
   positions,
+  notionalValue,
   onRefetch,
+  lastOptimizerResult,
+  lastTiltResult,
 }: {
   portfolioId: string;
   positions: Position[];
+  notionalValue: number | null;
   onRefetch: () => void;
+  lastOptimizerResult: PortfolioOptimizeResult | null;
+  lastTiltResult: TiltResult | null;
 }) {
+  const qc = useQueryClient();
   const [newTicker, setNewTicker] = useState("");
   const [newWeight, setNewWeight] = useState("");
   const [editingTicker, setEditingTicker] = useState<string | null>(null);
@@ -100,6 +110,40 @@ function HoldingsTab({
   const [editError, setEditError] = useState<string | null>(null);
   const [expandedTicker, setExpandedTicker] = useState<string | null>(null);
   const [addError, setAddError] = useState<string | null>(null);
+
+  // Notional value editor state
+  const [editingNotional, setEditingNotional] = useState(false);
+  const [notionalInput, setNotionalInput] = useState(notionalValue != null ? String(notionalValue) : "");
+  const notionalMut = useMutation({
+    mutationFn: (v: number | null) => patchPortfolioNotional(portfolioId, v),
+    onSuccess: () => {
+      setEditingNotional(false);
+      qc.invalidateQueries({ queryKey: ["portfolio", portfolioId] });
+      onRefetch();
+    },
+  });
+
+  // Implementation Worksheet state
+  const [worksheetSource, setWorksheetSource] = useState<"current" | "optimizer" | "tilt">("current");
+  const [worksheetResult, setWorksheetResult] = useState<ImplementationResult | null>(null);
+  const [worksheetError, setWorksheetError] = useState<string | null>(null);
+  const worksheetMut = useMutation({
+    mutationFn: () => {
+      let targetWeights: Record<string, number> = {};
+      const total = positions.reduce((s, p) => s + (p.weight ?? 1), 0) || 1;
+      if (worksheetSource === "current") {
+        positions.forEach((p) => { targetWeights[p.ticker] = (p.weight ?? 1) / total; });
+      } else if (worksheetSource === "optimizer" && lastOptimizerResult) {
+        targetWeights = lastOptimizerResult.target_weights;
+      } else if (worksheetSource === "tilt" && lastTiltResult) {
+        targetWeights = lastTiltResult.tilt_weights;
+      }
+      return computeImplementation(portfolioId, targetWeights, worksheetSource);
+    },
+    onSuccess: (data) => { setWorksheetResult(data); setWorksheetError(null); },
+    onError: (e: Error) => setWorksheetError(e.message),
+  });
+
   const [csvResult, setCsvResult] = useState<{
     positions_added: number;
     positions_updated: number;
@@ -171,6 +215,39 @@ function HoldingsTab({
 
   return (
     <div className="space-y-4">
+      {/* Portfolio Value editor */}
+      <div className="flex items-center gap-3 rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3 shadow-sm">
+        <span className="text-xs font-semibold text-[var(--color-muted)] shrink-0">Portfolio Value</span>
+        {editingNotional ? (
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-[var(--color-muted)]">$</span>
+            <input
+              autoFocus
+              type="number"
+              min={0}
+              step={1000}
+              value={notionalInput}
+              onChange={(e) => setNotionalInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") notionalMut.mutate(notionalInput ? parseFloat(notionalInput) : null);
+                if (e.key === "Escape") setEditingNotional(false);
+              }}
+              onBlur={() => notionalMut.mutate(notionalInput ? parseFloat(notionalInput) : null)}
+              className="w-36 rounded border border-[var(--color-border)] px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]"
+              placeholder="e.g. 500000"
+            />
+          </div>
+        ) : (
+          <button
+            onClick={() => { setNotionalInput(notionalValue != null ? String(notionalValue) : ""); setEditingNotional(true); }}
+            className="text-sm text-[var(--color-primary)] hover:underline"
+          >
+            {notionalValue != null ? `$${notionalValue.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}` : "Set portfolio value →"}
+          </button>
+        )}
+        <InfoTooltip text="Used by the Implementation Worksheet to compute whole-share trade quantities." />
+      </div>
+
       {/* Add position form */}
       <div className="rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-sm">
         <div className="mb-3 flex items-center justify-between">
@@ -367,6 +444,128 @@ function HoldingsTab({
           </table>
         </div>
       )}
+
+      {/* Implementation Worksheet */}
+      {notionalValue != null && (
+        <div className="rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-sm">
+          <h3 className="mb-4 text-sm font-semibold text-[var(--color-text)]">
+            Implementation Worksheet
+            <InfoTooltip text="Translates target weights into whole-share trade quantities using the portfolio dollar value. Floors to whole shares then greedily allocates residual cash." />
+          </h3>
+
+          {/* Source selector */}
+          <div className="mb-4 flex flex-wrap gap-4">
+            {(["current", "optimizer", "tilt"] as const).map((src) => (
+              <label key={src} className="flex items-center gap-2 text-xs cursor-pointer">
+                <input
+                  type="radio"
+                  name="worksheet-source"
+                  value={src}
+                  checked={worksheetSource === src}
+                  onChange={() => setWorksheetSource(src)}
+                  className="accent-[var(--color-primary)]"
+                />
+                <span>
+                  {src === "current" ? "Current Weights" : src === "optimizer" ? "Last Optimizer Result" : "Last Tilt Result"}
+                  {src === "optimizer" && !lastOptimizerResult && <span className="text-[var(--color-muted)] ml-1">(none yet)</span>}
+                  {src === "tilt" && !lastTiltResult && <span className="text-[var(--color-muted)] ml-1">(none yet)</span>}
+                </span>
+              </label>
+            ))}
+          </div>
+
+          {worksheetError && (
+            <p className="mb-3 text-xs text-[var(--color-negative)]">{worksheetError}</p>
+          )}
+
+          <button
+            onClick={() => worksheetMut.mutate()}
+            disabled={
+              worksheetMut.isPending ||
+              (worksheetSource === "optimizer" && !lastOptimizerResult) ||
+              (worksheetSource === "tilt" && !lastTiltResult) ||
+              positions.length === 0
+            }
+            className="mb-4 rounded-[var(--radius-btn)] bg-[var(--color-primary)] px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50 transition-opacity"
+          >
+            {worksheetMut.isPending ? "Computing…" : "Compute Worksheet"}
+          </button>
+
+          {worksheetResult && (
+            <div className="space-y-3">
+              {/* Summary bar */}
+              <div className="flex flex-wrap gap-4 rounded-[var(--radius-btn)] border border-[var(--color-border)] bg-gray-50 px-4 py-2.5 text-xs text-[var(--color-muted)]">
+                <span>Notional: <strong className="text-[var(--color-text)]">${worksheetResult.notional_value.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</strong></span>
+                <span>Turnover: <strong className="text-[var(--color-text)]">{(worksheetResult.total_turnover * 100).toFixed(1)}%</strong></span>
+                <span>Residual Cash: <strong className="text-[var(--color-text)]">${worksheetResult.residual_cash.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></span>
+                <span>As of: <strong className="text-[var(--color-text)]">{worksheetResult.as_of_date}</strong></span>
+              </div>
+
+              {/* Export CSV */}
+              <div className="flex justify-end">
+                <button
+                  className="rounded-[var(--radius-btn)] border border-[var(--color-border)] px-3 py-1 text-xs font-semibold text-[var(--color-text)] hover:bg-[var(--color-bg)] transition-colors"
+                  onClick={() => {
+                    const headers = ["ticker","price","current_weight","target_weight","current_value","target_value","current_shares_implied","target_shares_raw","target_shares","delta_shares","delta_value","action"];
+                    const rows = worksheetResult.rows.map((r) =>
+                      [r.ticker, r.price, r.current_weight, r.target_weight, r.current_value, r.target_value, r.current_shares_implied, r.target_shares_raw, r.target_shares, r.delta_shares, r.delta_value, r.action].join(",")
+                    );
+                    const csv = [headers.join(","), ...rows].join("\n");
+                    const blob = new Blob([csv], { type: "text/csv" });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement("a"); a.href = url; a.download = "implementation_worksheet.csv"; a.click();
+                    URL.revokeObjectURL(url);
+                  }}
+                >
+                  Export CSV
+                </button>
+              </div>
+
+              {/* Worksheet table */}
+              <div className="overflow-auto">
+                <table className="w-full text-xs">
+                  <thead className="border-b border-[var(--color-border)] bg-gray-50">
+                    <tr>
+                      {["Ticker","Price","Cur Wt%","Tgt Wt%","Cur $Val","Tgt $Val","Cur Shs","Raw Shs","Shs","Δ Shs","Δ $","Action"].map((h) => (
+                        <th key={h} className="whitespace-nowrap px-3 py-2 text-left font-semibold text-[var(--color-muted)]">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {worksheetResult.rows.map((row) => (
+                      <tr
+                        key={row.ticker}
+                        className={`hover:bg-gray-50 ${row.action === "BUY" ? "text-green-700" : row.action === "SELL" ? "text-red-700" : "text-[var(--color-muted)]"}`}
+                      >
+                        <td className="px-3 py-2 font-mono font-semibold">{row.ticker}</td>
+                        <td className="px-3 py-2">${fmtNum(row.price, 2)}</td>
+                        <td className="px-3 py-2">{(row.current_weight * 100).toFixed(1)}%</td>
+                        <td className="px-3 py-2">{(row.target_weight * 100).toFixed(1)}%</td>
+                        <td className="px-3 py-2">${fmtNum(row.current_value, 0)}</td>
+                        <td className="px-3 py-2">${fmtNum(row.target_value, 0)}</td>
+                        <td className="px-3 py-2">{fmtNum(row.current_shares_implied, 1)}</td>
+                        <td className="px-3 py-2">{fmtNum(row.target_shares_raw, 1)}</td>
+                        <td className="px-3 py-2 font-semibold">{row.target_shares}</td>
+                        <td className="px-3 py-2 font-bold">{row.delta_shares >= 0 ? "+" : ""}{row.delta_shares}</td>
+                        <td className="px-3 py-2">${fmtNum(Math.abs(row.delta_value), 0)}</td>
+                        <td className="px-3 py-2">
+                          <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${
+                            row.action === "BUY" ? "bg-green-100 text-green-700" :
+                            row.action === "SELL" ? "bg-red-100 text-red-700" :
+                            "bg-gray-100 text-gray-500"
+                          }`}>
+                            {row.action}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -559,16 +758,43 @@ function AnalyticsTab({ portfolioId }: { portfolioId: string }) {
 
 // ── Optimize tab ──────────────────────────────────────────────────────────────
 
-function OptimizeTab({ portfolioId }: { portfolioId: string }) {
+function OptimizeTab({
+  portfolioId,
+  positions,
+  onOptimizerResult,
+  onTiltResult,
+  onSwitchToHoldings,
+}: {
+  portfolioId: string;
+  positions: Position[];
+  onOptimizerResult: (r: PortfolioOptimizeResult) => void;
+  onTiltResult: (r: TiltResult) => void;
+  onSwitchToHoldings: () => void;
+}) {
+  const qc = useQueryClient();
   const [mode, setMode] = useState("min_variance");
   const [maxWeight, setMaxWeight] = useState(1.0);
+  const [minWeight, setMinWeight] = useState(0.0);
   const [volTarget, setVolTarget] = useState(0.10);
   const [allowShort, setAllowShort] = useState(false);
+  const [kappa, setKappa] = useState(0.05);
   const [guideOpen, setGuideOpen] = useState(false);
   const [result, setResult] = useState<PortfolioOptimizeResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [applySuccess, setApplySuccess] = useState(false);
+
+  // Conviction / tilt state
+  const [convictionOpen, setConvictionOpen] = useState(false);
+  const [convictionViews, setConvictionViews] = useState<Record<string, number>>({});
+  const [tiltBaseline, setTiltBaseline] = useState<"equal" | "current" | "optimizer">("equal");
+  const [tiltLam, setTiltLam] = useState(1.0);
+  const [tiltResult, setTiltResult] = useState<TiltResult | null>(null);
+  const [tiltError, setTiltError] = useState<string | null>(null);
 
   const LONG_ONLY_MODES = ["equal_weight", "risk_parity", "max_diversification"];
+  const VIEWS_MODES = ["max_sharpe", "max_sharpe_capm", "max_sortino"];
+  const nonZeroViews = Object.fromEntries(Object.entries(convictionViews).filter(([, v]) => v !== 0));
+  const hasViews = Object.keys(nonZeroViews).length > 0;
 
   const optMut = useMutation({
     mutationFn: () =>
@@ -580,9 +806,46 @@ function OptimizeTab({ portfolioId }: { portfolioId: string }) {
         undefined,
         mode === "target_volatility" ? volTarget : undefined,
         allowShort,
+        minWeight,
+        hasViews && VIEWS_MODES.includes(mode) ? nonZeroViews : undefined,
+        hasViews && VIEWS_MODES.includes(mode) ? kappa : undefined,
       ),
-    onSuccess: (data) => { setResult(data); setError(null); },
+    onSuccess: (data) => {
+      setResult(data);
+      setError(null);
+      setApplySuccess(false);
+      onOptimizerResult(data);
+    },
     onError: (e: Error) => setError(e.message),
+  });
+
+  const tiltMut = useMutation({
+    mutationFn: () =>
+      computeTilt(portfolioId, {
+        baseline: tiltBaseline,
+        optimizer_mode: tiltBaseline === "optimizer" ? mode : null,
+        conviction: nonZeroViews,
+        lam: tiltLam,
+        u0: 20.0,
+      }),
+    onSuccess: (data) => {
+      setTiltResult(data);
+      setTiltError(null);
+      onTiltResult(data);
+    },
+    onError: (e: Error) => setTiltError(e.message),
+  });
+
+  const applyMut = useMutation({
+    mutationFn: async (weights: Record<string, number>) => {
+      for (const [ticker, w] of Object.entries(weights)) {
+        await updatePosition(portfolioId, ticker, parseFloat((w * 100).toFixed(4)));
+      }
+    },
+    onSuccess: () => {
+      setApplySuccess(true);
+      qc.invalidateQueries({ queryKey: ["portfolio", portfolioId] });
+    },
   });
 
   return (
@@ -617,7 +880,7 @@ function OptimizeTab({ portfolioId }: { portfolioId: string }) {
           </div>
           <div>
             <label className="mb-1 block text-xs font-medium text-[var(--color-muted)]">
-              {allowShort ? "Max abs. weight per asset" : "Max weight per asset"}: {(maxWeight * 100).toFixed(0)}%
+              {allowShort ? "Max abs. weight" : "Max weight"}: {(maxWeight * 100).toFixed(0)}%
             </label>
             <input
               type="range" min={10} max={100} step={5}
@@ -625,8 +888,18 @@ function OptimizeTab({ portfolioId }: { portfolioId: string }) {
               onChange={(e) => setMaxWeight(+e.target.value / 100)}
               className="w-full accent-[var(--color-primary)]"
             />
+            <label className="mt-2 block text-xs font-medium text-[var(--color-muted)]">
+              Min weight: {(minWeight * 100).toFixed(0)}%
+              <InfoTooltip text="Minimum allocation per asset. Must satisfy: min_weight × N ≤ 100%." />
+            </label>
+            <input
+              type="range" min={0} max={20} step={1}
+              value={minWeight * 100}
+              onChange={(e) => setMinWeight(+e.target.value / 100)}
+              className="w-full accent-[var(--color-primary)]"
+            />
             {mode === "target_volatility" && (
-              <div className="mt-3">
+              <div className="mt-2">
                 <label className="mb-1 block text-xs font-medium text-[var(--color-muted)]">
                   Vol target: {(volTarget * 100).toFixed(0)}% / yr
                 </label>
@@ -638,7 +911,7 @@ function OptimizeTab({ portfolioId }: { portfolioId: string }) {
                 />
               </div>
             )}
-            <label className="mt-3 flex items-center gap-2 text-xs text-[var(--color-muted)]">
+            <label className="mt-2 flex items-center gap-2 text-xs text-[var(--color-muted)]">
               <input
                 type="checkbox"
                 checked={allowShort}
@@ -649,11 +922,25 @@ function OptimizeTab({ portfolioId }: { portfolioId: string }) {
               <InfoTooltip text={`Negative weights (short selling). ${LONG_ONLY_MODES.map((m) => m.replace(/_/g, " ")).join(", ")} remain long-only regardless.`} />
             </label>
           </div>
-          <div className="flex items-end">
+          <div className="flex flex-col gap-2">
+            {VIEWS_MODES.includes(mode) && hasViews && (
+              <div>
+                <label className="mb-1 block text-xs font-medium text-[var(--color-muted)]">
+                  Return bump κ: {(kappa * 100).toFixed(0)}% / 1% view
+                  <InfoTooltip text="Annual return added per 1% undervaluation conviction. e.g. κ=5% + 20% view → +1% annual bump. Only applies to Max Sharpe / Sortino modes." />
+                </label>
+                <input
+                  type="range" min={1} max={20} step={1}
+                  value={kappa * 100}
+                  onChange={(e) => setKappa(+e.target.value / 100)}
+                  className="w-full accent-[var(--color-primary)]"
+                />
+              </div>
+            )}
             <button
               onClick={() => optMut.mutate()}
               disabled={optMut.isPending}
-              className="w-full rounded-[var(--radius-btn)] bg-[var(--color-primary)] px-6 py-2.5 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50 transition-opacity"
+              className="rounded-[var(--radius-btn)] bg-[var(--color-primary)] px-6 py-2.5 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50 transition-opacity"
             >
               {optMut.isPending ? "Optimizing…" : "Run Optimizer"}
             </button>
@@ -672,11 +959,157 @@ function OptimizeTab({ portfolioId }: { portfolioId: string }) {
       </div>
       {guideOpen && <OptimizerGuide onClose={() => setGuideOpen(false)} />}
 
+      {/* Conviction Tilts panel */}
+      <div className="rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-sm">
+        <button
+          onClick={() => setConvictionOpen((o) => !o)}
+          className="flex w-full items-center justify-between px-5 py-3 text-sm font-semibold text-[var(--color-text)] hover:bg-gray-50 transition-colors"
+        >
+          <span className="flex items-center gap-2">
+            Conviction Tilts
+            <InfoTooltip text="Apply per-ticker undervaluation views to tilt weights via the tanh→exp formula, or inject as Δμ return bumps into Max Sharpe / Sortino optimizer modes." />
+            {hasViews && (
+              <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-bold text-blue-700">
+                {Object.keys(nonZeroViews).length} view{Object.keys(nonZeroViews).length > 1 ? "s" : ""}
+              </span>
+            )}
+          </span>
+          {convictionOpen ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+        </button>
+
+        {convictionOpen && (
+          <div className="border-t border-[var(--color-border)] px-5 pb-5 pt-4 space-y-4">
+            {/* Baseline */}
+            <div>
+              <p className="mb-2 text-xs font-medium text-[var(--color-muted)]">Tilt baseline</p>
+              <div className="flex flex-wrap gap-4">
+                {(["equal", "current", "optimizer"] as const).map((b) => (
+                  <label key={b} className="flex items-center gap-2 text-xs cursor-pointer">
+                    <input
+                      type="radio" name="tilt-baseline" value={b}
+                      checked={tiltBaseline === b}
+                      onChange={() => setTiltBaseline(b)}
+                      className="accent-[var(--color-primary)]"
+                    />
+                    {b === "equal" ? "Equal Weight" : b === "current" ? "Current Weights" : "Optimizer Baseline"}
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            {/* λ slider */}
+            <div>
+              <label className="mb-1 block text-xs font-medium text-[var(--color-muted)]">
+                Aggressiveness λ: {tiltLam.toFixed(1)}
+                <InfoTooltip text="Higher λ amplifies conviction effect. λ=1 = moderate, λ=3 = aggressive." />
+              </label>
+              <input
+                type="range" min={1} max={30} step={1}
+                value={tiltLam * 10}
+                onChange={(e) => setTiltLam(+e.target.value / 10)}
+                className="w-full max-w-xs accent-[var(--color-primary)]"
+              />
+            </div>
+
+            {/* Per-ticker inputs */}
+            {positions.length > 0 ? (
+              <div>
+                <p className="mb-2 text-xs font-medium text-[var(--color-muted)]">
+                  Undervaluation % per ticker (+ve = undervalued → tilt up, −ve = overvalued → tilt down)
+                </p>
+                <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                  {positions.map((p) => (
+                    <div key={p.ticker} className="flex items-center gap-2">
+                      <span className="w-14 font-mono text-xs font-semibold text-[var(--color-text)]">{p.ticker}</span>
+                      <input
+                        type="number"
+                        min={-100} max={100} step={5}
+                        value={convictionViews[p.ticker] ?? 0}
+                        onChange={(e) =>
+                          setConvictionViews((prev) => ({ ...prev, [p.ticker]: parseFloat(e.target.value) || 0 }))
+                        }
+                        className="w-20 rounded border border-[var(--color-border)] px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-[var(--color-primary)]"
+                      />
+                      <span className="text-xs text-[var(--color-muted)]">%</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <p className="text-xs text-[var(--color-muted)]">Add holdings to enter conviction views.</p>
+            )}
+
+            {/* Actions */}
+            <div className="flex flex-wrap gap-3">
+              <button
+                onClick={() => tiltMut.mutate()}
+                disabled={tiltMut.isPending || !hasViews}
+                className="rounded-[var(--radius-btn)] bg-[var(--color-primary)] px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50 transition-opacity"
+              >
+                {tiltMut.isPending ? "Computing…" : "Generate Tilt Targets"}
+              </button>
+              <button
+                onClick={() => setConvictionViews({})}
+                className="rounded-[var(--radius-btn)] border border-[var(--color-border)] px-3 py-2 text-xs text-[var(--color-muted)] hover:bg-gray-50"
+              >
+                Reset Views
+              </button>
+            </div>
+
+            {tiltError && <p className="text-xs text-[var(--color-negative)]">{tiltError}</p>}
+
+            {tiltResult && (
+              <div className="space-y-3">
+                <div className="overflow-auto">
+                  <table className="w-full text-xs">
+                    <thead className="border-b border-[var(--color-border)] bg-gray-50">
+                      <tr>
+                        {["Ticker", "Base Wt%", "Tilted Wt%", "Δ"].map((h) => (
+                          <th key={h} className="px-3 py-2 text-left font-semibold text-[var(--color-muted)]">{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {Object.entries(tiltResult.tilt_weights).map(([ticker, tw]) => {
+                        const bw = tiltResult.base_weights[ticker] ?? 0;
+                        const delta = tw - bw;
+                        return (
+                          <tr key={ticker} className="hover:bg-gray-50">
+                            <td className="px-3 py-2 font-mono font-semibold">{ticker}</td>
+                            <td className="px-3 py-2">{(bw * 100).toFixed(1)}%</td>
+                            <td className="px-3 py-2">{(tw * 100).toFixed(1)}%</td>
+                            <td className={`px-3 py-2 font-semibold ${colorForValue(delta)}`}>
+                              {delta >= 0 ? "+" : ""}{(delta * 100).toFixed(1)}%
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                <button
+                  onClick={() => applyMut.mutate(tiltResult.tilt_weights)}
+                  disabled={applyMut.isPending}
+                  className="rounded-[var(--radius-btn)] bg-green-600 px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50 transition-opacity"
+                >
+                  {applyMut.isPending ? "Applying…" : "Apply Tilt as Targets"}
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
       {result && (
         <>
           {result.as_of_date && (
             <p className="text-xs text-[var(--color-muted)]">
               Data as of {result.as_of_date}
+              {result.views_applied && (
+                <span className="ml-2 rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-bold text-blue-700">
+                  Views applied
+                </span>
+              )}
             </p>
           )}
           {result.warnings.map((w, i) => (
@@ -687,6 +1120,32 @@ function OptimizeTab({ portfolioId }: { portfolioId: string }) {
               Optimizer did not converge — showing current weights as fallback.
             </p>
           )}
+
+          {/* Apply as Targets buttons */}
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              onClick={() => applyMut.mutate(result.target_weights)}
+              disabled={applyMut.isPending}
+              className="rounded-[var(--radius-btn)] bg-green-600 px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50 transition-opacity"
+            >
+              {applyMut.isPending ? "Applying…" : "Apply as Targets"}
+            </button>
+            <button
+              onClick={async () => {
+                await applyMut.mutateAsync(result.target_weights);
+                onSwitchToHoldings();
+              }}
+              disabled={applyMut.isPending}
+              className="rounded-[var(--radius-btn)] border border-green-600 px-4 py-2 text-sm font-semibold text-green-700 hover:bg-green-50 disabled:opacity-50 transition-colors"
+            >
+              Apply + Open Worksheet
+            </button>
+            {applySuccess && (
+              <span className="rounded-full bg-green-100 px-3 py-1 text-xs font-semibold text-green-700">
+                Targets applied — Holdings updated.
+              </span>
+            )}
+          </div>
 
           {/* Metrics comparison */}
           <div className="grid gap-4 sm:grid-cols-2">
@@ -715,7 +1174,6 @@ function OptimizeTab({ portfolioId }: { portfolioId: string }) {
                 <InfoTooltip text="Delta = target weight minus current weight. Positive = buy more; negative = trim." />
               </h3>
               <div className="flex items-center gap-3">
-                {/* Turnover chip */}
                 {(() => {
                   const to = 0.5 * Object.values(result.implied_trades).reduce((s, v) => s + Math.abs(v as number), 0);
                   return (
@@ -724,7 +1182,6 @@ function OptimizeTab({ portfolioId }: { portfolioId: string }) {
                     </span>
                   );
                 })()}
-                {/* Export CSV */}
                 <button
                   className="rounded-[var(--radius-btn)] border border-[var(--color-border)] px-3 py-1 text-xs font-semibold text-[var(--color-text)] hover:bg-[var(--color-bg)] transition-colors"
                   onClick={() => {
@@ -1464,6 +1921,8 @@ export default function PortfolioDetailPage({
   const { checked } = useAuth();
   const qc = useQueryClient();
   const [tab, setTab] = useState<Tab>("holdings");
+  const [lastOptimizerResult, setLastOptimizerResult] = useState<PortfolioOptimizeResult | null>(null);
+  const [lastTiltResult, setLastTiltResult] = useState<TiltResult | null>(null);
 
   const { data, refetch, isLoading } = useQuery({
     queryKey: ["portfolio", id],
@@ -1530,6 +1989,9 @@ export default function PortfolioDetailPage({
         <HoldingsTab
           portfolioId={id}
           positions={data.positions}
+          notionalValue={data.notional_value ?? null}
+          lastOptimizerResult={lastOptimizerResult}
+          lastTiltResult={lastTiltResult}
           onRefetch={() => { refetch(); qc.invalidateQueries({ queryKey: ["portfolio", id] }); }}
         />
       )}
@@ -1548,7 +2010,15 @@ export default function PortfolioDetailPage({
         />
       )}
       {tab === "analytics" && <AnalyticsTab portfolioId={id} />}
-      {tab === "optimize" && <OptimizeTab portfolioId={id} />}
+      {tab === "optimize" && (
+        <OptimizeTab
+          portfolioId={id}
+          positions={data.positions}
+          onOptimizerResult={setLastOptimizerResult}
+          onTiltResult={setLastTiltResult}
+          onSwitchToHoldings={() => setTab("holdings")}
+        />
+      )}
       {tab === "validation" && <ValidationTab portfolioId={id} />}
       {tab === "forecast" && <ForecastTab portfolioId={id} />}
       {tab === "scenarios" && <ScenariosTab portfolioId={id} />}

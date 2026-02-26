@@ -21,6 +21,44 @@ export interface Position {
 
 export interface PortfolioDetail extends PortfolioSummary {
   positions: Position[];
+  notional_value: number | null;
+}
+
+export interface ImplementationRow {
+  ticker: string;
+  price: number;
+  current_weight: number;
+  target_weight: number;
+  current_value: number;
+  target_value: number;
+  current_shares_implied: number;
+  target_shares_raw: number;
+  target_shares: number;
+  delta_shares: number;
+  delta_value: number;
+  action: "BUY" | "SELL" | "HOLD";
+}
+
+export interface ImplementationResult {
+  rows: ImplementationRow[];
+  residual_cash: number;
+  total_turnover: number;
+  notional_value: number;
+  source: string;
+  as_of_date: string;
+}
+
+export interface TiltResult {
+  tilt_weights: Record<string, number>;
+  base_weights: Record<string, number>;
+  source: "tilt";
+  params: {
+    baseline: string;
+    optimizer_mode: string | null;
+    conviction: Record<string, number>;
+    lam: number;
+    u0: number;
+  };
 }
 
 export interface PortfolioAnalytics {
@@ -68,6 +106,9 @@ export interface PortfolioOptimizeResult {
   }>;
   feasible: boolean;
   mode: string;
+  min_weight?: number;
+  views_applied?: boolean;
+  delta_mu?: Record<string, number>;
   warnings: string[];
   simulated: true;
   as_of_date?: string;

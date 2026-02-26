@@ -16,6 +16,8 @@ from sqlalchemy.orm import Session
 
 from auth import require_write_key
 from core.cache import fetch_prices
+from core.rebalance import compute_implementation
+from core.tilt import compute_tilt
 from routers.universe import _TICKER_RE, _enrich
 from core.portfolio import (
     compute_betas,
@@ -63,6 +65,10 @@ class PortfolioRename(BaseModel):
     name: str
 
 
+class PortfolioNotional(BaseModel):
+    notional_value: Optional[float] = None
+
+
 class PositionUpsert(BaseModel):
     ticker: str
     weight: Optional[float] = None  # 0–1, primary field; shares optional
@@ -86,10 +92,13 @@ class PortfolioOptimizeRequest(BaseModel):
         "target_volatility",
     ] = "min_variance"
     max_weight: float = 1.0
+    min_weight: float = 0.0           # global lower bound (fractions, 0.0 = unconstrained)
     vol_target: float = 0.10
     allow_short: bool = False
     start: Optional[str] = None
     end: Optional[str] = None
+    conviction_views: Optional[dict[str, float]] = None  # ticker → u_i in %
+    kappa: float = 0.05               # % annual return bump per 1% undervaluation
 
 
 class PortfolioValidateRequest(BaseModel):
@@ -266,7 +275,26 @@ def get_portfolio(portfolio_id: str, db: Session = Depends(get_db)) -> dict:
         "id": str(p.id),
         "name": p.name,
         "created_at": p.created_at.isoformat(),
+        "notional_value": float(p.notional_value) if p.notional_value is not None else None,
         "positions": [_pos_dict(pos) for pos in positions],
+    }
+
+
+@router.patch("/portfolios/{portfolio_id}/notional")
+def patch_portfolio_notional(
+    portfolio_id: str,
+    body: PortfolioNotional,
+    db: Session = Depends(get_db),
+    _: None = Depends(require_write_key),
+) -> dict:
+    """Set or clear the portfolio's notional dollar value (used by the Implementation Worksheet)."""
+    p = _get_or_404(db, portfolio_id)
+    p.notional_value = body.notional_value
+    db.commit()
+    return {
+        "id": str(p.id),
+        "name": p.name,
+        "notional_value": float(p.notional_value) if p.notional_value is not None else None,
     }
 
 
@@ -432,6 +460,139 @@ def import_portfolio_csv(
     }
 
 
+# ── Implementation Worksheet + Tilt ───────────────────────────────────────────
+
+class ImplementationRequest(BaseModel):
+    target_weights: dict[str, float]
+    source: str = "manual"  # manual | optimizer | tilt
+
+
+class TiltRequest(BaseModel):
+    baseline: Literal["equal", "current", "optimizer"] = "current"
+    optimizer_mode: Optional[str] = None  # used when baseline="optimizer"
+    conviction: dict[str, float] = {}    # ticker → u_i in %
+    lam: float = 1.0
+    u0: float = 20.0
+
+
+@router.post("/portfolios/{portfolio_id}/implementation")
+def compute_portfolio_implementation(
+    portfolio_id: str,
+    body: ImplementationRequest,
+    db: Session = Depends(get_db),
+) -> dict:
+    """Whole-share implementation worksheet.
+
+    Converts target_weights (fractions) into share-level trade orders using
+    the portfolio's stored notional_value. Returns per-ticker price/shares/delta table.
+    """
+    p = _get_or_404(db, portfolio_id)
+    if p.notional_value is None:
+        raise HTTPException(
+            status_code=422,
+            detail="Set a portfolio value first (Holdings tab → Portfolio Value).",
+        )
+    V = float(p.notional_value)
+    positions = db.query(Position).filter(Position.portfolio_id == p.id).order_by(Position.ticker).all()
+
+    tickers_all = sorted(set(pos.ticker for pos in positions) | set(body.target_weights.keys()))
+
+    today = date.today()
+    start_str = (today - timedelta(days=5)).isoformat()
+    prices_df = fetch_prices(tuple(sorted(tickers_all)), start_str, today.isoformat())
+    if prices_df is None or prices_df.empty:
+        raise HTTPException(status_code=422, detail="Could not fetch price data.")
+    prices = {t: float(prices_df[t].dropna().iloc[-1]) for t in tickers_all if t in prices_df.columns}
+
+    # Normalize current weights (fractions)
+    raw_w = [(pos.weight or 1.0) for pos in positions]
+    total_w = sum(raw_w) or 1.0
+    current_weights = {pos.ticker: w / total_w for pos, w in zip(positions, raw_w)}
+
+    result = compute_implementation(
+        current_weights=current_weights,
+        target_weights=body.target_weights,
+        prices=prices,
+        notional_value=V,
+    )
+    result["source"] = body.source
+    result["as_of_date"] = today.isoformat()
+    return result
+
+
+@router.post("/portfolios/{portfolio_id}/tilt")
+def compute_portfolio_tilt(
+    portfolio_id: str,
+    body: TiltRequest,
+    db: Session = Depends(get_db),
+) -> dict:
+    """Apply conviction tilt to a set of base weights.
+
+    Returns tilt_weights alongside base_weights so the UI can show the diff.
+    """
+    p = _get_or_404(db, portfolio_id)
+    positions = (
+        db.query(Position)
+        .filter(Position.portfolio_id == p.id)
+        .order_by(Position.ticker)
+        .all()
+    )
+    if not positions:
+        raise HTTPException(status_code=422, detail="Portfolio has no positions.")
+
+    tickers = [pos.ticker for pos in positions]
+    n = len(tickers)
+
+    if body.baseline == "equal":
+        base_weights = {t: 1.0 / n for t in tickers}
+    elif body.baseline == "current":
+        raw_w = [(pos.weight or 1.0) for pos in positions]
+        total_w = sum(raw_w) or 1.0
+        base_weights = {t: w / total_w for t, w in zip(tickers, raw_w)}
+    else:  # "optimizer"
+        # Run a quick optimizer to get base weights
+        today = date.today()
+        start_str = (today - timedelta(days=DEFAULT_LOOKBACK_DAYS)).isoformat()
+        prices_df = fetch_prices(tuple(sorted(tickers)), start_str, today.isoformat())
+        if prices_df is None or prices_df.empty:
+            raise HTTPException(status_code=422, detail="Could not fetch price data for optimizer baseline.")
+        valid = [t for t in tickers if t in prices_df.columns]
+        returns = compute_returns(prices_df[valid])
+        mode = body.optimizer_mode or "min_variance"
+        try:
+            if mode == "equal_weight":
+                opt_dict = optimize_equal_weight(returns)
+            elif mode == "max_sharpe":
+                opt_dict = optimize_max_sharpe(returns)
+            elif mode == "risk_parity":
+                opt_dict = optimize_risk_parity(returns)
+            else:
+                opt_dict = optimize_min_variance(returns)
+        except RuntimeError:
+            opt_dict = {t: 1.0 / len(valid) for t in valid}
+        base_weights = {t: opt_dict.get(t, 0.0) for t in tickers}
+
+    tilt_weights = compute_tilt(
+        base_weights=base_weights,
+        conviction=body.conviction,
+        lam=body.lam,
+        u0=body.u0,
+    )
+
+    return {
+        "tilt_weights": {t: round(v, 4) for t, v in tilt_weights.items()},
+        "base_weights": {t: round(v, 4) for t, v in base_weights.items()},
+        "source": "tilt",
+        "params": {
+            "baseline": body.baseline,
+            "optimizer_mode": body.optimizer_mode,
+            "conviction": body.conviction,
+            "lam": body.lam,
+            "u0": body.u0,
+        },
+    }
+
+
 # ── Analytics ─────────────────────────────────────────────────────────────────
 
 @router.get("/portfolios/{portfolio_id}/analytics")
@@ -587,12 +748,37 @@ def optimize_portfolio(
     if len(returns) < 60:
         warnings.append("Fewer than 60 trading days of history — optimization results may be unreliable.")
 
-    # Compute min_weight for short-capable modes
-    min_w = -body.max_weight if body.allow_short else 0.0
+    # Compute effective min/max bounds
+    n_valid = len(valid_tickers)
+    global_min_w = body.min_weight if not body.allow_short else 0.0
+    min_w = -body.max_weight if body.allow_short else global_min_w
+
     if body.allow_short:
         warnings.append(
             "Short positions enabled. Equal Weight, Risk Parity, and Max Diversification remain long-only."
         )
+
+    # Feasibility guards for global min_weight
+    if global_min_w > 0 and global_min_w * n_valid > 1.0 + 1e-6:
+        raise HTTPException(
+            status_code=422,
+            detail=f"min_weight ({global_min_w:.1%}) × N ({n_valid}) = {global_min_w * n_valid:.2f} > 1.0 — infeasible. Reduce min weight or the number of positions.",
+        )
+    if body.max_weight < 1.0 / n_valid - 1e-6:
+        raise HTTPException(
+            status_code=422,
+            detail=f"max_weight ({body.max_weight:.1%}) < 1/N ({1.0/n_valid:.1%}) — infeasible. Increase max weight.",
+        )
+
+    # Conviction views → delta_mu injection (for return-based optimizers)
+    views_applied = bool(body.conviction_views) and body.mode in {
+        "max_sharpe", "max_sharpe_capm", "max_sortino"
+    }
+    delta_mu: dict[str, float] = {}
+    if views_applied and body.conviction_views:
+        for t in valid_tickers:
+            u = body.conviction_views.get(t, 0.0)
+            delta_mu[t] = body.kappa * u / 100.0  # % per 1% undervaluation → fraction
 
     feasible = True
     try:
@@ -601,19 +787,38 @@ def optimize_portfolio(
         elif body.mode == "min_variance":
             target_dict = optimize_min_variance(returns, max_weight=body.max_weight, min_weight=min_w)
         elif body.mode == "max_sharpe":
-            target_dict = optimize_max_sharpe(returns, max_weight=body.max_weight, min_weight=min_w)
+            # Inject delta_mu by bumping daily mean returns proportionally
+            if delta_mu:
+                bumped = returns.copy()
+                for t, dm in delta_mu.items():
+                    if t in bumped.columns:
+                        bumped[t] = bumped[t] + dm / 252.0
+                target_dict = optimize_max_sharpe(bumped, max_weight=body.max_weight, min_weight=min_w)
+            else:
+                target_dict = optimize_max_sharpe(returns, max_weight=body.max_weight, min_weight=min_w)
         elif body.mode == "max_sharpe_capm":
-            # Reuse the already-fetched prices (includes BENCHMARK)
             capm_returns = compute_returns(prices)
             betas = compute_betas(capm_returns, BENCHMARK)
-            exp_ret = compute_capm_expected_returns(betas, rf=0.0364, mrp=0.05)
+            # Convert conviction_views (%) to fractions for compute_capm_expected_returns
+            capm_views = {t: u / 100.0 for t, u in (body.conviction_views or {}).items()}
+            exp_ret = compute_capm_expected_returns(betas, rf=0.0364, mrp=0.05, views=capm_views)
+            # Also add kappa-based delta_mu on top
+            if delta_mu:
+                exp_ret = {t: v + delta_mu.get(t, 0.0) for t, v in exp_ret.items()}
             target_dict = optimize_max_sharpe_capm(
                 returns, exp_ret, rf=0.0364, max_weight=body.max_weight, min_weight=min_w
             )
         elif body.mode == "risk_parity":
             target_dict = optimize_risk_parity(returns, max_weight=body.max_weight)
         elif body.mode == "max_sortino":
-            target_dict = optimize_max_sortino(returns, max_weight=body.max_weight, min_weight=min_w)
+            if delta_mu:
+                bumped = returns.copy()
+                for t, dm in delta_mu.items():
+                    if t in bumped.columns:
+                        bumped[t] = bumped[t] + dm / 252.0
+                target_dict = optimize_max_sortino(bumped, max_weight=body.max_weight, min_weight=min_w)
+            else:
+                target_dict = optimize_max_sortino(returns, max_weight=body.max_weight, min_weight=min_w)
         elif body.mode == "min_cvar":
             target_dict = optimize_min_cvar(returns, max_weight=body.max_weight, min_weight=min_w)
         elif body.mode == "max_diversification":
@@ -670,6 +875,9 @@ def optimize_portfolio(
         "equity_curves": eq_data,
         "feasible": feasible,
         "mode": body.mode,
+        "min_weight": body.min_weight,
+        "views_applied": views_applied,
+        "delta_mu": {t: round(v, 4) for t, v in delta_mu.items()} if delta_mu else {},
         "warnings": warnings,
         "simulated": True,
         "as_of_date": as_of_date,

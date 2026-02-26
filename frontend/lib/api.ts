@@ -23,6 +23,7 @@ import {
   AlertRule,
   EmailConfig,
   EvaluateResult,
+  ImplementationResult,
   JobRunRecord,
   OpsDigest,
   OpsStatus,
@@ -31,6 +32,7 @@ import {
   PortfolioOptimizeResult,
   PortfolioSummary,
   RuleMetadata,
+  TiltResult,
 } from "@/types/sprint3";
 import {
   CandidateRefreshResponse,
@@ -181,6 +183,9 @@ export const optimizePortfolio = (
   end?: string,
   volTarget?: number,
   allowShort?: boolean,
+  minWeight?: number,
+  convictionViews?: Record<string, number>,
+  kappa?: number,
 ): Promise<PortfolioOptimizeResult> =>
   apiPost<PortfolioOptimizeResult>(`/api/portfolios/${id}/optimize`, {
     mode,
@@ -189,6 +194,9 @@ export const optimizePortfolio = (
     end,
     ...(volTarget !== undefined ? { vol_target: volTarget } : {}),
     ...(allowShort !== undefined ? { allow_short: allowShort } : {}),
+    ...(minWeight !== undefined ? { min_weight: minWeight } : {}),
+    ...(convictionViews !== undefined ? { conviction_views: convictionViews } : {}),
+    ...(kappa !== undefined ? { kappa } : {}),
   });
 
 export const validatePortfolio = (id: string, quick = true): Promise<PortfolioValidationResult> =>
@@ -221,6 +229,28 @@ export const fetchRebalance = (
   targetWeights: Record<string, number>,
 ): Promise<RebalanceResult> =>
   apiPost<RebalanceResult>(`/api/portfolios/${id}/rebalance`, { target_weights: targetWeights });
+
+export const patchPortfolioNotional = (id: string, notionalValue: number | null): Promise<{ id: string; name: string; notional_value: number | null }> =>
+  apiPatch(`/api/portfolios/${id}/notional`, { notional_value: notionalValue });
+
+export const computeImplementation = (
+  id: string,
+  targetWeights: Record<string, number>,
+  source: string,
+): Promise<ImplementationResult> =>
+  apiPost<ImplementationResult>(`/api/portfolios/${id}/implementation`, { target_weights: targetWeights, source });
+
+export const computeTilt = (
+  id: string,
+  body: {
+    baseline: "equal" | "current" | "optimizer";
+    optimizer_mode?: string | null;
+    conviction: Record<string, number>;
+    lam: number;
+    u0: number;
+  },
+): Promise<TiltResult> =>
+  apiPost<TiltResult>(`/api/portfolios/${id}/tilt`, body);
 
 // ── Candidates ────────────────────────────────────────────────────────────────
 
