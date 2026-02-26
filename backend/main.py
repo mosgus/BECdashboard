@@ -14,6 +14,27 @@ from routers import alert_rules, alerts, ops, optimize, portfolio, portfolios, t
 async def lifespan(app: FastAPI):
     # Safety net: create tables if alembic hasn't run yet (e.g. local dev without Docker)
     Base.metadata.create_all(bind=engine)
+
+    # Seed in-memory email config from DB so the evaluator and all email
+    # functions pick it up without needing a DB session at call time.
+    try:
+        from sqlalchemy.orm import Session as SyncSession
+        from db.models import EmailConfig
+        from core.notify.email import set_active_config
+        with SyncSession(engine) as db:
+            ec = db.query(EmailConfig).first()
+            if ec and ec.smtp_host:
+                set_active_config({
+                    "smtp_host":  ec.smtp_host,
+                    "smtp_port":  ec.smtp_port or 587,
+                    "smtp_user":  ec.smtp_user,
+                    "smtp_pass":  ec.smtp_pass,
+                    "email_from": ec.email_from or ec.smtp_user,
+                    "recipients": ec.recipients,
+                })
+    except Exception:
+        pass  # table may not exist yet on first boot before migration
+
     yield
 
 

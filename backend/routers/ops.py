@@ -1,12 +1,14 @@
-"""Ops API — system health, digest, job runs, email test.
+"""Ops API — system health, digest, job runs, email test, email config.
 
 Endpoints:
-  GET  /api/ops/status        — lightweight health summary
-  GET  /api/ops/digest        — overnight digest with portfolio movers + alert summary
-  POST /api/ops/digest/email  — email the digest to ALERT_RECIPIENTS
-  POST /api/ops/job_runs      — record a job run (idempotent: UNIQUE job_name+asof_date)
-  POST /api/ops/email/test    — send a test email
-  GET  /api/ops/job_runs      — list recent job runs
+  GET  /api/ops/status          — lightweight health summary
+  GET  /api/ops/digest          — overnight digest with portfolio movers + alert summary
+  POST /api/ops/digest/email    — email the digest to ALERT_RECIPIENTS
+  POST /api/ops/job_runs        — record a job run (idempotent: UNIQUE job_name+asof_date)
+  POST /api/ops/email/test      — send a test email
+  GET  /api/ops/job_runs        — list recent job runs
+  GET  /api/ops/email/config    — get SMTP settings (password never returned)
+  PUT  /api/ops/email/config    — save SMTP settings (takes effect immediately)
 """
 from __future__ import annotations
 
@@ -19,9 +21,10 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from auth import require_write_key
+from core.notify.email import set_active_config
 from core.ops.data_status import get_ops_status, get_recent_job_runs
 from db.base import get_db
-from db.models import AlertEvent, JobRun, Portfolio, Position
+from db.models import AlertEvent, EmailConfig, JobRun, Portfolio, Position
 
 router = APIRouter()
 
@@ -34,6 +37,15 @@ class JobRunCreate(BaseModel):
     status: str              # success | failure | partial
     duration_ms: Optional[int] = None
     details_json: Optional[dict] = None
+
+
+class EmailConfigUpdate(BaseModel):
+    smtp_host:   Optional[str] = None
+    smtp_port:   int = 587
+    smtp_user:   Optional[str] = None
+    smtp_pass:   Optional[str] = None   # empty string / None = keep existing
+    email_from:  Optional[str] = None
+    recipients:  Optional[str] = None   # comma-separated
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
@@ -282,3 +294,76 @@ def test_email(_: None = Depends(require_write_key)) -> dict:
     from core.notify.email import send_test_email
     sent, reason = send_test_email()
     return {"sent": sent, "reason": reason}
+
+
+# ── Email config CRUD ─────────────────────────────────────────────────────────
+
+def _email_config_response(ec: EmailConfig | None) -> dict:
+    """Build the safe GET response — password is never returned."""
+    if ec is None:
+        return {
+            "smtp_host": None, "smtp_port": 587, "smtp_user": None,
+            "smtp_pass_set": False, "email_from": None,
+            "recipients": None, "updated_at": None,
+        }
+    return {
+        "smtp_host":    ec.smtp_host,
+        "smtp_port":    ec.smtp_port or 587,
+        "smtp_user":    ec.smtp_user,
+        "smtp_pass_set": bool(ec.smtp_pass),
+        "email_from":   ec.email_from,
+        "recipients":   ec.recipients,
+        "updated_at":   ec.updated_at.isoformat() if ec.updated_at else None,
+    }
+
+
+@router.get("/ops/email/config")
+def get_email_config(db: Session = Depends(get_db)) -> dict:
+    """Return current SMTP settings. Password is never included in the response."""
+    ec = db.query(EmailConfig).first()
+    return _email_config_response(ec)
+
+
+@router.put("/ops/email/config")
+def save_email_config(
+    body: EmailConfigUpdate,
+    db: Session = Depends(get_db),
+    _: None = Depends(require_write_key),
+) -> dict:
+    """Save SMTP settings to the DB and activate them immediately (no restart needed).
+
+    If smtp_pass is blank or None, the existing password is preserved.
+    """
+    now = datetime.now(tz=timezone.utc)
+    ec = db.query(EmailConfig).first()
+
+    if ec is None:
+        ec = EmailConfig(id=1)
+        db.add(ec)
+
+    ec.smtp_host  = body.smtp_host
+    ec.smtp_port  = body.smtp_port
+    ec.smtp_user  = body.smtp_user
+    if body.smtp_pass:                 # only overwrite if a new password was provided
+        ec.smtp_pass = body.smtp_pass
+    ec.email_from = body.email_from
+    ec.recipients = body.recipients
+    ec.updated_at = now
+
+    db.commit()
+    db.refresh(ec)
+
+    # Activate immediately — no restart required
+    if ec.smtp_host:
+        set_active_config({
+            "smtp_host":  ec.smtp_host,
+            "smtp_port":  ec.smtp_port or 587,
+            "smtp_user":  ec.smtp_user,
+            "smtp_pass":  ec.smtp_pass,
+            "email_from": ec.email_from or ec.smtp_user,
+            "recipients": ec.recipients,
+        })
+    else:
+        set_active_config(None)
+
+    return _email_config_response(ec)

@@ -41,13 +41,10 @@ def get_ops_status(db: Session) -> dict:
     # Count unacknowledged alert events
     new_events = db.query(AlertEvent).filter(AlertEvent.status == "new").count()
 
-    # Check email config without importing (avoid circular)
+    # Check email config — prefer in-memory override (DB-backed), fall back to env vars
     try:
-        from config import settings
-        email_configured = bool(
-            settings.smtp_host and settings.smtp_user
-            and settings.smtp_pass and settings.alert_recipients
-        )
+        from core.notify.email import is_configured
+        email_configured = is_configured()
     except Exception:
         email_configured = False
 

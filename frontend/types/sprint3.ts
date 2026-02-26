@@ -162,6 +162,16 @@ export interface OpsStatus {
   data_source: string;
 }
 
+export interface EmailConfig {
+  smtp_host: string | null;
+  smtp_port: number;
+  smtp_user: string | null;
+  smtp_pass_set: boolean;
+  email_from: string | null;
+  recipients: string | null;
+  updated_at: string | null;
+}
+
 export interface OpsDigest {
   as_of_date: string;
   portfolio_movers: Array<{ ticker: string; daily_return: number; weight: number }>;

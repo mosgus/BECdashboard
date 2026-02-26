@@ -18,7 +18,8 @@ Sprint 4 tables:
   portfolio_indicator_configs — indicator config per ticker per portfolio
 
 Sprint 5 tables:
-  job_runs — nightly job run history (idempotent: UNIQUE on job_name+asof_date)
+  job_runs     — nightly job run history (idempotent: UNIQUE on job_name+asof_date)
+  email_config — single-row SMTP settings (id always 1), editable via Ops UI
   alert_events columns added: ticker, fingerprint, status, updated_at
 """
 from __future__ import annotations
@@ -196,3 +197,21 @@ class JobRun(Base):
     details_json: Mapped[dict | None]  = mapped_column(JSONB, nullable=True)
 
     __table_args__ = (UniqueConstraint("job_name", "asof_date", name="uq_job_runs_job_name_asof_date"),)
+
+
+class EmailConfig(Base):
+    """Single-row SMTP configuration — id is always 1.
+
+    Loaded at startup into core.notify.email._active_config so all email
+    functions pick it up without needing a DB session at call time.
+    """
+    __tablename__ = "email_config"
+
+    id:         Mapped[int]          = mapped_column(Integer, primary_key=True, default=1)
+    smtp_host:  Mapped[str | None]   = mapped_column(Text, nullable=True)
+    smtp_port:  Mapped[int | None]   = mapped_column(Integer, nullable=True, default=587)
+    smtp_user:  Mapped[str | None]   = mapped_column(Text, nullable=True)
+    smtp_pass:  Mapped[str | None]   = mapped_column(Text, nullable=True)
+    email_from: Mapped[str | None]   = mapped_column(Text, nullable=True)
+    recipients: Mapped[str | None]   = mapped_column(Text, nullable=True)   # comma-separated
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

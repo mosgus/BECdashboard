@@ -21,6 +21,7 @@ import {
   AlertEvent,
   AlertEventStatus,
   AlertRule,
+  EmailConfig,
   EvaluateResult,
   JobRunRecord,
   OpsDigest,
@@ -291,6 +292,18 @@ export const fetchJobRuns = (limit = 10): Promise<{ job_runs: JobRunRecord[] }> 
 
 export const testEmail = (): Promise<{ sent: boolean; reason?: string }> =>
   apiPost("/api/ops/email/test", {});
+
+export const fetchEmailConfig = (): Promise<EmailConfig> =>
+  apiGet<EmailConfig>("/api/ops/email/config");
+
+export const saveEmailConfig = (body: {
+  smtp_host?: string | null;
+  smtp_port?: number;
+  smtp_user?: string | null;
+  smtp_pass?: string;
+  email_from?: string | null;
+  recipients?: string | null;
+}): Promise<EmailConfig> => apiPut<EmailConfig>("/api/ops/email/config", body);
 
 export const emailDigest = (params?: {
   portfolio_id?: string;

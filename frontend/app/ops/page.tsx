@@ -4,14 +4,16 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/useAuth";
 import {
   emailDigest,
+  fetchEmailConfig,
   fetchJobRuns,
   fetchOpsDigest,
   fetchOpsStatus,
   fetchPortfolios,
   fetchWatchlists,
+  saveEmailConfig,
   testEmail,
 } from "@/lib/api";
-import type { JobRunRecord, OpsDigest, OpsStatus } from "@/types/sprint3";
+import type { EmailConfig, JobRunRecord, OpsDigest, OpsStatus } from "@/types/sprint3";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -303,6 +305,205 @@ function DigestSection() {
   );
 }
 
+// ── Email Settings ────────────────────────────────────────────────────────────
+
+const PROVIDER_HINTS = [
+  { name: "Gmail",    host: "smtp.gmail.com",           port: 587, note: "Requires an App Password (not your account password)" },
+  { name: "Outlook",  host: "smtp.office365.com",       port: 587, note: "Use your full Outlook/Microsoft email as username" },
+  { name: "SendGrid", host: "smtp.sendgrid.net",         port: 587, note: "Username is always 'apikey', password is your API key" },
+  { name: "AWS SES",  host: "email-smtp.us-east-1.amazonaws.com", port: 587, note: "Use SES SMTP credentials (not IAM keys)" },
+];
+
+function EmailSettingsSection() {
+  const qc = useQueryClient();
+  const [saved, setSaved] = useState(false);
+  const [showHints, setShowHints] = useState(false);
+
+  const { data: cfg, isLoading } = useQuery<EmailConfig>({
+    queryKey: ["email-config"],
+    queryFn: fetchEmailConfig,
+  });
+
+  const [host,       setHost]       = useState("");
+  const [port,       setPort]       = useState(587);
+  const [user,       setUser]       = useState("");
+  const [pass_,      setPass]       = useState("");
+  const [from_,      setFrom]       = useState("");
+  const [recipients, setRecipients] = useState("");
+
+  // Populate form when data loads (once)
+  const [seeded, setSeeded] = useState(false);
+  if (cfg && !seeded) {
+    setHost(cfg.smtp_host ?? "");
+    setPort(cfg.smtp_port ?? 587);
+    setUser(cfg.smtp_user ?? "");
+    setFrom(cfg.email_from ?? "");
+    setRecipients(cfg.recipients ?? "");
+    setSeeded(true);
+  }
+
+  const saveMut = useMutation({
+    mutationFn: () =>
+      saveEmailConfig({
+        smtp_host:  host || null,
+        smtp_port:  port,
+        smtp_user:  user || null,
+        smtp_pass:  pass_ || undefined,   // blank = keep existing
+        email_from: from_ || null,
+        recipients: recipients || null,
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["email-config"] });
+      qc.invalidateQueries({ queryKey: ["ops-status"] });
+      setSaved(true);
+      setPass("");   // clear password field after save
+      setTimeout(() => setSaved(false), 4000);
+    },
+  });
+
+  const inputCls = "w-full rounded-[var(--radius-btn)] border border-[var(--color-border)] px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]";
+  const labelCls = "mb-1 block text-xs font-medium text-[var(--color-muted)]";
+
+  return (
+    <div className="rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] p-5 shadow-sm space-y-4">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div className="flex items-center gap-2">
+          <h2 className="text-sm font-semibold text-[var(--color-text)]">Email Settings</h2>
+          {!isLoading && cfg && (
+            <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+              cfg.smtp_pass_set && cfg.smtp_host
+                ? "bg-green-100 text-green-700"
+                : "bg-gray-100 text-gray-500"
+            }`}>
+              {cfg.smtp_pass_set && cfg.smtp_host ? "Configured" : "Not configured"}
+            </span>
+          )}
+        </div>
+        <button
+          onClick={() => setShowHints((v) => !v)}
+          className="text-xs text-[var(--color-primary)] hover:underline"
+        >
+          {showHints ? "Hide provider hints" : "Common providers"}
+        </button>
+      </div>
+
+      {showHints && (
+        <div className="rounded-[var(--radius-card)] border border-[var(--color-border)] overflow-hidden text-xs">
+          <table className="w-full">
+            <thead className="bg-gray-50 border-b border-[var(--color-border)]">
+              <tr>
+                {["Provider", "SMTP Host", "Port", "Note"].map((h) => (
+                  <th key={h} className="px-3 py-2 text-left font-semibold text-[var(--color-muted)]">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {PROVIDER_HINTS.map((p) => (
+                <tr key={p.name} className="hover:bg-gray-50">
+                  <td className="px-3 py-2 font-medium text-[var(--color-text)]">{p.name}</td>
+                  <td className="px-3 py-2 font-mono text-[var(--color-muted)]">
+                    <button
+                      onClick={() => setHost(p.host)}
+                      className="hover:text-[var(--color-primary)] hover:underline"
+                      title="Click to use"
+                    >
+                      {p.host}
+                    </button>
+                  </td>
+                  <td className="px-3 py-2 text-[var(--color-muted)]">{p.port}</td>
+                  <td className="px-3 py-2 text-[var(--color-muted)]">{p.note}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {isLoading ? (
+        <p className="text-sm text-[var(--color-muted)]">Loading…</p>
+      ) : (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <div>
+            <label className={labelCls}>SMTP Host</label>
+            <input
+              value={host}
+              onChange={(e) => setHost(e.target.value)}
+              placeholder="smtp.gmail.com"
+              className={inputCls}
+            />
+          </div>
+          <div>
+            <label className={labelCls}>Port</label>
+            <input
+              type="number" value={port}
+              onChange={(e) => setPort(+e.target.value)}
+              className={inputCls}
+            />
+          </div>
+          <div>
+            <label className={labelCls}>Username</label>
+            <input
+              value={user}
+              onChange={(e) => setUser(e.target.value)}
+              placeholder="you@gmail.com"
+              className={inputCls}
+            />
+          </div>
+          <div>
+            <label className={labelCls}>
+              Password
+              {cfg?.smtp_pass_set && (
+                <span className="ml-1 text-[var(--color-muted)] font-normal">(set — leave blank to keep)</span>
+              )}
+            </label>
+            <input
+              type="password" value={pass_}
+              onChange={(e) => setPass(e.target.value)}
+              placeholder={cfg?.smtp_pass_set ? "••••••••" : "App password or API key"}
+              className={inputCls}
+            />
+          </div>
+          <div>
+            <label className={labelCls}>From Address <span className="font-normal">(optional)</span></label>
+            <input
+              value={from_}
+              onChange={(e) => setFrom(e.target.value)}
+              placeholder="Defaults to username"
+              className={inputCls}
+            />
+          </div>
+          <div>
+            <label className={labelCls}>Alert Recipients</label>
+            <input
+              value={recipients}
+              onChange={(e) => setRecipients(e.target.value)}
+              placeholder="you@gmail.com, other@example.com"
+              className={inputCls}
+            />
+            <p className="mt-1 text-xs text-[var(--color-muted)]">Separate multiple addresses with commas</p>
+          </div>
+        </div>
+      )}
+
+      <div className="flex items-center gap-3 flex-wrap">
+        <button
+          onClick={() => saveMut.mutate()}
+          disabled={saveMut.isPending || isLoading}
+          className="rounded-[var(--radius-btn)] bg-[var(--color-primary)] px-5 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50 transition-opacity"
+        >
+          {saveMut.isPending ? "Saving…" : "Save Settings"}
+        </button>
+        {saved && (
+          <p className="text-sm text-green-600">✓ Settings saved — use the test button below to verify</p>
+        )}
+        {saveMut.isError && (
+          <p className="text-sm text-[var(--color-negative)]">{(saveMut.error as Error).message}</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── Email Test ────────────────────────────────────────────────────────────────
 
 function EmailTestSection() {
@@ -401,6 +602,7 @@ export default function OpsPage() {
 
       <SystemHealthSection />
       <DigestSection />
+      <EmailSettingsSection />
       <EmailTestSection />
       <JobRunsSection />
     </div>
