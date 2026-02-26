@@ -71,11 +71,11 @@ export default function TechnicalsChart({ data, visibleIndicators = new Set() }:
             <Tooltip labelFormatter={(l) => `Date: ${l}`} />
             <Legend />
 
-            {/* Bollinger bands (rendered as areas below price line) */}
+            {/* Bollinger bands — upper fills down to axis, lower masks with white → band fill between the two lines */}
             {visibleIndicators.has("bollinger") && (
               <>
-                <Area type="monotone" dataKey="bb_upper" stroke="#a78bfa" strokeWidth={1} fill="none" dot={false} name="BB Upper" strokeDasharray="3 2" />
-                <Area type="monotone" dataKey="bb_lower" stroke="#a78bfa" strokeWidth={1} fill="#a78bfa" fillOpacity={0.08} dot={false} name="BB Lower" strokeDasharray="3 2" />
+                <Area type="monotone" dataKey="bb_upper" stroke="#a78bfa" strokeWidth={1} fill="#a78bfa" fillOpacity={0.12} dot={false} name="BB Upper" strokeDasharray="3 2" legendType="none" />
+                <Area type="monotone" dataKey="bb_lower" stroke="#a78bfa" strokeWidth={1} fill="white" fillOpacity={1} dot={false} name="BB Lower" strokeDasharray="3 2" legendType="none" />
               </>
             )}
 
