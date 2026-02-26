@@ -37,6 +37,7 @@ import ForecastGuide from "@/components/ForecastGuide";
 import FanChart from "@/components/FanChart";
 import RiskContributionChart from "@/components/RiskContributionChart";
 import ScenarioGuide from "@/components/ScenarioGuide";
+import TechnicalsGuide from "@/components/TechnicalsGuide";
 import { PortfolioAnalytics, PortfolioOptimizeResult, Position } from "@/types/sprint3";
 import { SignalResult } from "@/types/sprint2";
 import type { CandidateRefreshResponse, IndicatorType, PortfolioIndicatorConfig } from "@/types/sprint4";
@@ -874,10 +875,16 @@ function WatchlistTab({
 // ── Technicals tab ─────────────────────────────────────────────────────────────
 
 const INDICATOR_DEFS: { type: IndicatorType; label: string; defaultParams: Record<string, number> }[] = [
-  { type: "sma",  label: "SMA 20/50",   defaultParams: { fast: 20, slow: 50 } },
-  { type: "rsi",  label: "RSI 14",      defaultParams: { window: 14, oversold: 30, overbought: 70 } },
-  { type: "macd", label: "MACD 12/26/9",defaultParams: { fast: 12, slow: 26, signal_period: 9 } },
-  { type: "atr",  label: "ATR 14",      defaultParams: { window: 14 } },
+  { type: "sma",        label: "SMA 20/50",          defaultParams: { fast: 20, slow: 50 } },
+  { type: "rsi",        label: "RSI 14",             defaultParams: { window: 14, oversold: 30, overbought: 70 } },
+  { type: "macd",       label: "MACD 12/26/9",       defaultParams: { fast: 12, slow: 26, signal_period: 9 } },
+  { type: "atr",        label: "ATR 14",             defaultParams: { window: 14 } },
+  { type: "ema",        label: "EMA 20/50",          defaultParams: { fast: 20, slow: 50 } },
+  { type: "bollinger",  label: "Bollinger (20, 2σ)", defaultParams: { window: 20, num_std: 2 } },
+  { type: "adx",        label: "ADX 14",             defaultParams: { window: 14 } },
+  { type: "donchian",   label: "Donchian (20)",      defaultParams: { window: 20 } },
+  { type: "stochastic", label: "Stochastic (14,3)",  defaultParams: { k: 14, d: 3, smooth_k: 3 } },
+  { type: "obv",        label: "OBV",                defaultParams: {} },
 ];
 
 function TechnicalsTab({
@@ -901,6 +908,7 @@ function TechnicalsTab({
   const [end, setEnd] = useState(today);
   const [chartParams, setChartParams] = useState<{ ticker: string; start: string; end: string } | null>(null);
   const [visibleIndicators, setVisibleIndicators] = useState<Set<string>>(new Set());
+  const [showGuide, setShowGuide] = useState(false);
   const includeParam = Array.from(visibleIndicators).join(",");
 
   function toggleIndicator(key: string) {
@@ -1002,7 +1010,15 @@ function TechnicalsTab({
                 {label}
               </label>
             ))}
+            <button
+              onClick={() => setShowGuide(true)}
+              className="ml-auto flex items-center gap-1 text-xs text-[var(--color-primary)] hover:underline"
+            >
+              <BookOpen size={13} />
+              Technicals Guide
+            </button>
           </div>
+          {showGuide && <TechnicalsGuide onClose={() => setShowGuide(false)} />}
 
           {/* Chart */}
           {chartData && (

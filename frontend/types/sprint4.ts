@@ -16,7 +16,17 @@ export interface CandidateRefreshResponse {
   data_source: string;
 }
 
-export type IndicatorType = "sma" | "rsi" | "macd" | "atr";
+export type IndicatorType =
+  | "sma"
+  | "rsi"
+  | "macd"
+  | "atr"
+  | "ema"
+  | "bollinger"
+  | "adx"
+  | "donchian"
+  | "stochastic"
+  | "obv";
 
 export interface PortfolioIndicatorConfig {
   id: string;
