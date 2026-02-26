@@ -16,6 +16,10 @@ Sprint 2 tables:
 Sprint 4 tables:
   portfolio_candidates       — tickers being considered for a portfolio
   portfolio_indicator_configs — indicator config per ticker per portfolio
+
+Sprint 5 tables:
+  job_runs — nightly job run history (idempotent: UNIQUE on job_name+asof_date)
+  alert_events columns added: ticker, fingerprint, status, updated_at
 """
 from __future__ import annotations
 
@@ -138,11 +142,16 @@ class AlertRule(Base):
 class AlertEvent(Base):
     __tablename__ = "alert_events"
 
-    id:           Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    alert_id:     Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("alerts.id", ondelete="CASCADE"), nullable=False)
-    triggered_at: Mapped[datetime]  = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    asof_date:    Mapped[date]      = mapped_column(Date, nullable=False)
-    payload_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    id:           Mapped[uuid.UUID]    = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    alert_id:     Mapped[uuid.UUID]    = mapped_column(UUID(as_uuid=True), ForeignKey("alerts.id", ondelete="CASCADE"), nullable=False)
+    triggered_at: Mapped[datetime]     = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    asof_date:    Mapped[date]         = mapped_column(Date, nullable=False)
+    payload_json: Mapped[dict | None]  = mapped_column(JSONB, nullable=True)
+    # Sprint 5 additions
+    ticker:       Mapped[str | None]   = mapped_column(Text, nullable=True, index=True)
+    fingerprint:  Mapped[str | None]   = mapped_column(Text, nullable=True)
+    status:       Mapped[str]          = mapped_column(Text, nullable=False, default="new")  # new|ack|snoozed|resolved
+    updated_at:   Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 # ── Sprint 4 (portfolio workspace) ────────────────────────────────────────────
@@ -169,3 +178,21 @@ class PortfolioIndicatorConfig(Base):
     created_at:     Mapped[datetime]     = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     __table_args__ = (UniqueConstraint("portfolio_id", "ticker", "indicator_type", name="uq_pic_portfolio_ticker_indicator"),)
+
+
+# ── Sprint 5 (ops + nightly jobs) ─────────────────────────────────────────────
+
+class JobRun(Base):
+    """Nightly job run history. UNIQUE(job_name, asof_date) ensures idempotency."""
+    __tablename__ = "job_runs"
+
+    id:           Mapped[uuid.UUID]    = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    job_name:     Mapped[str]          = mapped_column(Text, nullable=False)
+    asof_date:    Mapped[date]         = mapped_column(Date, nullable=False)
+    status:       Mapped[str]          = mapped_column(Text, nullable=False)   # success | failure | partial
+    started_at:   Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at:  Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    duration_ms:  Mapped[int | None]   = mapped_column(Integer, nullable=True)
+    details_json: Mapped[dict | None]  = mapped_column(JSONB, nullable=True)
+
+    __table_args__ = (UniqueConstraint("job_name", "asof_date", name="uq_job_runs_job_name_asof_date"),)

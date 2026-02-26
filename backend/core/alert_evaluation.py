@@ -2,12 +2,13 @@
 
 Contains:
   - resolve_tickers: scope → ticker list
-  - in_cooldown: cooldown window check
+  - fingerprint_in_cooldown: fingerprint + cooldown window check (Sprint 5)
   - evaluate_signal: rule_type → signal fn → evidence dict
   - evaluate_all_enabled: full evaluate_now orchestration
 """
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import date, datetime, timedelta, timezone
 
@@ -18,9 +19,23 @@ from core.cache import fetch_prices
 from core.signals import signal_macd_cross, signal_rsi_threshold, signal_sma_cross
 from db.models import AlertEvent, AlertRule, Position, WatchlistItem
 
+# Email import is lazy to avoid circular imports at module load time
+def _try_send_alert_email(events: list[dict]) -> None:
+    try:
+        from core.notify.email import is_configured, send_alert_email
+        if is_configured() and events:
+            send_alert_email(events)
+    except Exception as exc:
+        logger.error("alert_eval: email dispatch failed — %s", exc)
+
+logger = logging.getLogger(__name__)
+
 DATA_SOURCE = "Yahoo Finance"
 MAX_EVALUATE_RULES = 50
 LOOKBACK_DAYS = 400
+
+# Entry rule types have direction 'up'; exit have 'dn'
+ENTRY_RULES = frozenset({"sma_cross_up", "rsi_rebound", "macd_cross_up", "price_cross_above"})
 
 DEFAULT_PARAMS: dict[str, dict] = {
     "sma_cross_up":      {"fast": 20, "slow": 50},
@@ -32,6 +47,12 @@ DEFAULT_PARAMS: dict[str, dict] = {
     "price_cross_above": {"threshold": 0.0},
     "price_cross_below": {"threshold": 0.0},
 }
+
+
+def make_fingerprint(rule: AlertRule, ticker: str) -> str:
+    """Stable dedup key: alert_id:ticker:rule_type:direction."""
+    direction = "up" if rule.rule_type in ENTRY_RULES else "dn"
+    return f"{rule.id}:{ticker}:{rule.rule_type}:{direction}"
 
 
 def resolve_tickers(db: Session, rule: AlertRule) -> list[str]:
@@ -53,20 +74,40 @@ def resolve_tickers(db: Session, rule: AlertRule) -> list[str]:
     return []
 
 
-def in_cooldown(db: Session, rule: AlertRule) -> bool:
-    """Return True if a trigger event for this rule was written within cooldown_days."""
+def fingerprint_in_cooldown(db: Session, rule: AlertRule, fingerprint: str) -> bool:
+    """Return True if this fingerprint was triggered within cooldown_days OR
+    if there is an unresolved (non-'resolved') event for this fingerprint.
+
+    This prevents re-spamming the same alert until the user resolves it.
+    """
     if rule.cooldown_days <= 0:
         return False
+
     cutoff = datetime.now(tz=timezone.utc) - timedelta(days=rule.cooldown_days)
-    event = (
+
+    # Check 1: any event for this fingerprint within cooldown window
+    recent = (
         db.query(AlertEvent)
         .filter(
-            AlertEvent.alert_id == rule.id,
+            AlertEvent.fingerprint == fingerprint,
             AlertEvent.triggered_at >= cutoff,
         )
         .first()
     )
-    return event is not None
+    if recent is not None:
+        return True
+
+    # Check 2: unresolved event for this fingerprint (regardless of age)
+    unresolved = (
+        db.query(AlertEvent)
+        .filter(
+            AlertEvent.fingerprint == fingerprint,
+            AlertEvent.status != "resolved",
+        )
+        .order_by(AlertEvent.triggered_at.desc())
+        .first()
+    )
+    return unresolved is not None
 
 
 def evaluate_signal(rule_type: str, params: dict, prices_ser: pd.Series) -> dict | None:
@@ -119,10 +160,11 @@ def evaluate_signal(rule_type: str, params: dict, prices_ser: pd.Series) -> dict
 def evaluate_all_enabled(db: Session) -> dict:
     """Evaluate all enabled alert rules as-of today.
 
-    Resolves tickers per rule from scope, deduplicates price fetches, checks cooldown,
-    evaluates signal, and writes AlertEvent rows for triggered rules.
+    Resolves tickers per rule from scope, deduplicates price fetches, checks
+    fingerprint-based cooldown + unresolved dedup, evaluates signal, and writes
+    AlertEvent rows (with ticker + fingerprint + status='new') for triggered rules.
 
-    Returns {evaluated, triggered, skipped, as_of_date, data_source, events}.
+    Returns {evaluated, triggered, skipped, warnings, as_of_date, data_source, events}.
     """
     rules = (
         db.query(AlertRule)
@@ -150,24 +192,39 @@ def evaluate_all_enabled(db: Session) -> dict:
             for t in all_tickers:
                 if t in prices_df.columns:
                     prices_map[t] = prices_df[t].dropna()
+                else:
+                    logger.warning("alert_eval: no price data for ticker=%s", t)
+        else:
+            logger.warning("alert_eval: fetch_prices returned None for tickers=%s", all_tickers)
 
     evaluated = 0
     triggered = 0
     skipped = 0
+    warnings: list[str] = []
     new_events: list[dict] = []
 
     for rule, ticker in pairs:
         if ticker not in prices_map or len(prices_map[ticker]) < 2:
             skipped += 1
+            warnings.append(f"No price data for {ticker} — skipped rule {rule.id}")
             continue
 
-        if in_cooldown(db, rule):
+        fingerprint = make_fingerprint(rule, ticker)
+
+        if fingerprint_in_cooldown(db, rule, fingerprint):
             skipped += 1
             continue
 
         evaluated += 1
         params = rule.params_json or DEFAULT_PARAMS.get(rule.rule_type, {})
-        evidence = evaluate_signal(rule.rule_type, params, prices_map[ticker])
+
+        try:
+            evidence = evaluate_signal(rule.rule_type, params, prices_map[ticker])
+        except Exception as exc:
+            logger.error("alert_eval: error evaluating %s for %s: %s", rule.rule_type, ticker, exc)
+            skipped += 1
+            warnings.append(f"Evaluation error for {ticker} ({rule.rule_type}): {exc}")
+            continue
 
         if evidence is not None:
             triggered += 1
@@ -183,16 +240,24 @@ def evaluate_all_enabled(db: Session) -> dict:
                 triggered_at=datetime.now(tz=timezone.utc),
                 asof_date=today,
                 payload_json=payload,
+                ticker=ticker,
+                fingerprint=fingerprint,
+                status="new",
             )
             db.add(event)
             new_events.append(payload)
 
     db.commit()
 
+    # Send alert email if configured and events were triggered
+    if new_events:
+        _try_send_alert_email(new_events)
+
     return {
         "evaluated": evaluated,
         "triggered": triggered,
         "skipped": skipped,
+        "warnings": warnings,
         "as_of_date": end_str,
         "data_source": DATA_SOURCE,
         "events": new_events,

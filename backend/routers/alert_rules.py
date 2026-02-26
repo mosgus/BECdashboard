@@ -12,6 +12,7 @@ Evaluation logic lives in core/alert_evaluation.py.
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -31,6 +32,74 @@ VALID_RULE_TYPES = frozenset({
     "macd_cross_up", "macd_cross_down",
     "price_cross_above", "price_cross_below",
 })
+
+# Static metadata for UI tooltips — no DB call needed
+RULE_METADATA = [
+    {
+        "rule_type": "sma_cross_up",
+        "direction": "entry",
+        "label": "SMA Cross Up",
+        "description": "Triggers when SMA20 crosses above SMA50 — a classic golden-cross bullish entry signal.",
+        "required_indicators": ["SMA20", "SMA50"],
+        "default_params": {"fast": 20, "slow": 50},
+    },
+    {
+        "rule_type": "sma_cross_down",
+        "direction": "exit",
+        "label": "SMA Cross Down",
+        "description": "Triggers when SMA20 crosses below SMA50 — a death-cross bearish exit signal.",
+        "required_indicators": ["SMA20", "SMA50"],
+        "default_params": {"fast": 20, "slow": 50},
+    },
+    {
+        "rule_type": "rsi_rebound",
+        "direction": "entry",
+        "label": "RSI Rebound",
+        "description": "Triggers when RSI(14) is in oversold territory (< 30), signalling a potential mean-reversion entry.",
+        "required_indicators": ["RSI14"],
+        "default_params": {"window": 14, "oversold": 30},
+    },
+    {
+        "rule_type": "rsi_fade",
+        "direction": "exit",
+        "label": "RSI Fade",
+        "description": "Triggers when RSI(14) is in overbought territory (> 70), signalling momentum exhaustion and a potential exit.",
+        "required_indicators": ["RSI14"],
+        "default_params": {"window": 14, "overbought": 70},
+    },
+    {
+        "rule_type": "macd_cross_up",
+        "direction": "entry",
+        "label": "MACD Cross Up",
+        "description": "Triggers when the MACD line crosses above the signal line, confirming bullish momentum.",
+        "required_indicators": ["MACD", "Signal"],
+        "default_params": {"fast": 12, "slow": 26, "signal_period": 9},
+    },
+    {
+        "rule_type": "macd_cross_down",
+        "direction": "exit",
+        "label": "MACD Cross Down",
+        "description": "Triggers when the MACD line crosses below the signal line, confirming bearish momentum.",
+        "required_indicators": ["MACD", "Signal"],
+        "default_params": {"fast": 12, "slow": 26, "signal_period": 9},
+    },
+    {
+        "rule_type": "price_cross_above",
+        "direction": "entry",
+        "label": "Price Cross Above",
+        "description": "Triggers when the closing price crosses above a fixed threshold — useful for breakout entry signals.",
+        "required_indicators": ["Close"],
+        "default_params": {"threshold": 0.0},
+    },
+    {
+        "rule_type": "price_cross_below",
+        "direction": "exit",
+        "label": "Price Cross Below",
+        "description": "Triggers when the closing price falls below a fixed threshold — useful for stop-loss exit signals.",
+        "required_indicators": ["Close"],
+        "default_params": {"threshold": 0.0},
+    },
+]
 
 # ── Pydantic schemas ──────────────────────────────────────────────────────────
 
@@ -77,6 +146,17 @@ class AlertRuleUpdate(BaseModel):
         return v
 
 
+class AlertEventStatusUpdate(BaseModel):
+    status: str
+
+    @field_validator("status")
+    @classmethod
+    def valid_status(cls, v: str) -> str:
+        if v not in {"new", "ack", "snoozed", "resolved"}:
+            raise ValueError("status must be one of: new, ack, snoozed, resolved")
+        return v
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _rule_dict(r: AlertRule) -> dict:
@@ -100,6 +180,11 @@ def _event_dict(e: AlertEvent) -> dict:
         "triggered_at": e.triggered_at.isoformat(),
         "as_of_date": e.asof_date.isoformat(),
         "payload_json": e.payload_json,
+        # Sprint 5 fields
+        "ticker": e.ticker,
+        "fingerprint": e.fingerprint,
+        "status": e.status,
+        "updated_at": e.updated_at.isoformat() if e.updated_at else None,
     }
 
 
@@ -112,6 +197,17 @@ def _get_rule_or_404(db: Session, rule_id: str) -> AlertRule:
     if not r:
         raise HTTPException(status_code=404, detail="Alert rule not found.")
     return r
+
+
+def _get_event_or_404(db: Session, event_id: str) -> AlertEvent:
+    try:
+        eid = uuid.UUID(event_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Alert event not found.")
+    e = db.query(AlertEvent).filter(AlertEvent.id == eid).first()
+    if not e:
+        raise HTTPException(status_code=404, detail="Alert event not found.")
+    return e
 
 
 # ── Alert Rule CRUD ───────────────────────────────────────────────────────────
@@ -156,15 +252,41 @@ def create_rule(
     return _rule_dict(r)
 
 
+@router.get("/alert_rules/rule_metadata")
+def get_rule_metadata() -> dict:
+    """Return static metadata for all rule types — used by UI for tooltips and forms."""
+    return {"metadata": RULE_METADATA}
+
+
 @router.get("/alert_rules/events")
-def list_events(limit: int = 50, db: Session = Depends(get_db)) -> dict:
-    events = (
-        db.query(AlertEvent)
-        .order_by(AlertEvent.triggered_at.desc())
-        .limit(min(limit, 200))
-        .all()
-    )
+def list_events(
+    limit: int = 50,
+    status: Optional[str] = None,
+    ticker: Optional[str] = None,
+    db: Session = Depends(get_db),
+) -> dict:
+    q = db.query(AlertEvent).order_by(AlertEvent.triggered_at.desc())
+    if status:
+        q = q.filter(AlertEvent.status == status)
+    if ticker:
+        q = q.filter(AlertEvent.ticker == ticker.upper())
+    events = q.limit(min(limit, 200)).all()
     return {"events": [_event_dict(e) for e in events]}
+
+
+@router.patch("/alert_rules/events/{event_id}")
+def update_event_status(
+    event_id: str,
+    body: AlertEventStatusUpdate,
+    db: Session = Depends(get_db),
+    _: None = Depends(require_write_key),
+) -> dict:
+    """Update the status of an alert event (ack / snoozed / resolved)."""
+    e = _get_event_or_404(db, event_id)
+    e.status = body.status
+    e.updated_at = datetime.now(tz=timezone.utc)
+    db.commit()
+    return _event_dict(e)
 
 
 @router.post("/alert_rules/evaluate_now")

@@ -11,10 +11,12 @@ import {
   fetchAlertEvents,
   fetchAlertRules,
   fetchPortfolios,
+  fetchRuleMetadata,
   fetchWatchlists,
+  updateAlertEventStatus,
   updateAlertRule,
 } from "@/lib/api";
-import { AlertRule, AlertRuleType, EvaluateResult } from "@/types/sprint3";
+import { AlertEvent, AlertEventStatus, AlertRule, AlertRuleType, EvaluateResult, RuleMetadata } from "@/types/sprint3";
 import UniverseTickerPicker from "@/components/UniverseTickerPicker";
 
 type Tab = "rules" | "inbox" | "quick";
@@ -328,47 +330,228 @@ function RulesTab() {
   );
 }
 
+// ── Inbox helpers ─────────────────────────────────────────────────────────────
+
+const STATUS_BADGE: Record<AlertEventStatus, string> = {
+  new:      "bg-blue-100 text-blue-700",
+  ack:      "bg-amber-100 text-amber-700",
+  snoozed:  "bg-gray-100 text-gray-600",
+  resolved: "bg-green-100 text-green-700",
+};
+
+const STATUS_LABEL: Record<AlertEventStatus, string> = {
+  new:      "New",
+  ack:      "Acknowledged",
+  snoozed:  "Snoozed",
+  resolved: "Resolved",
+};
+
+type StatusFilter = "all" | AlertEventStatus;
+
+// ── Evidence Drawer ────────────────────────────────────────────────────────────
+
+function EvidenceDrawer({
+  event,
+  metadata,
+  onClose,
+}: {
+  event: AlertEvent;
+  metadata: RuleMetadata[];
+  onClose: () => void;
+}) {
+  const p = event.payload_json ?? {};
+  const ruleType = (event.payload_json?.rule_type ?? "") as string;
+  const meta = metadata.find((m) => m.rule_type === ruleType);
+
+  const SKIP_KEYS = new Set(["ticker", "rule_type", "scope", "state", "label", "signal", "params"]);
+  const evidence = Object.entries(p).filter(([k]) => !SKIP_KEYS.has(k));
+
+  return (
+    <div className="fixed inset-0 z-50 flex justify-end">
+      {/* backdrop */}
+      <div className="absolute inset-0 bg-black/30" onClick={onClose} />
+      <div className="relative z-10 flex w-full max-w-md flex-col bg-[var(--color-surface)] shadow-xl">
+        <div className="flex items-center justify-between border-b border-[var(--color-border)] px-5 py-4">
+          <h3 className="text-sm font-semibold text-[var(--color-text)]">Event Detail</h3>
+          <button onClick={onClose} className="text-[var(--color-muted)] hover:text-[var(--color-text)] text-lg leading-none">×</button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-5 space-y-5">
+          {/* Header */}
+          <div className="space-y-1">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="font-mono text-base font-bold text-[var(--color-text)]">
+                {event.ticker ?? (p.ticker as string) ?? "—"}
+              </span>
+              <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700">
+                {ruleType.replace(/_/g, " ")}
+              </span>
+              <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_BADGE[event.status]}`}>
+                {STATUS_LABEL[event.status]}
+              </span>
+            </div>
+            <p className="text-xs text-[var(--color-muted)]">
+              as-of {event.as_of_date} · triggered {new Date(event.triggered_at).toLocaleString()}
+            </p>
+          </div>
+
+          {/* Rule description */}
+          {meta && (
+            <div className="rounded-[var(--radius-card)] border border-[var(--color-border)] bg-gray-50 p-3 space-y-1">
+              <p className="text-xs font-semibold text-[var(--color-text)]">{meta.label}</p>
+              <p className="text-xs text-[var(--color-muted)]">{meta.description}</p>
+              <p className="text-xs text-[var(--color-muted)]">
+                Direction: <span className={meta.direction === "bullish" ? "text-green-600" : "text-red-600"}>{meta.direction}</span>
+                {" · "}Indicators: {meta.required_indicators.join(", ")}
+              </p>
+            </div>
+          )}
+
+          {/* Evidence values */}
+          {evidence.length > 0 && (
+            <div>
+              <p className="mb-2 text-xs font-semibold text-[var(--color-muted)] uppercase tracking-wide">Evidence</p>
+              <div className="rounded-[var(--radius-card)] border border-[var(--color-border)] overflow-hidden">
+                <table className="w-full text-xs">
+                  <tbody className="divide-y divide-gray-100">
+                    {evidence.map(([k, v]) => (
+                      <tr key={k} className="hover:bg-gray-50">
+                        <td className="px-3 py-2 font-medium text-[var(--color-muted)] font-mono">{k}</td>
+                        <td className="px-3 py-2 text-right font-mono text-[var(--color-text)]">
+                          {typeof v === "number" ? v.toFixed(4) : String(v)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* Raw payload */}
+          <details className="text-xs text-[var(--color-muted)]">
+            <summary className="cursor-pointer font-medium hover:text-[var(--color-text)]">Raw payload JSON</summary>
+            <pre className="mt-2 overflow-x-auto rounded-[var(--radius-btn)] border border-[var(--color-border)] bg-gray-50 p-3 text-xs">
+              {JSON.stringify(p, null, 2)}
+            </pre>
+          </details>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Inbox tab ─────────────────────────────────────────────────────────────────
 
 function InboxTab() {
+  const qc = useQueryClient();
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [selected, setSelected] = useState<AlertEvent | null>(null);
+
+  const { data: metaData } = useQuery({
+    queryKey: ["rule-metadata"],
+    queryFn: fetchRuleMetadata,
+    staleTime: Infinity,
+  });
+  const metadata = metaData?.metadata ?? [];
+
   const { data, isLoading, refetch } = useQuery({
-    queryKey: ["alert-events"],
-    queryFn: () => fetchAlertEvents(100),
+    queryKey: ["alert-events", statusFilter],
+    queryFn: () =>
+      fetchAlertEvents(100, statusFilter !== "all" ? { status: statusFilter } : undefined),
+  });
+
+  const patchMut = useMutation({
+    mutationFn: ({ id, status }: { id: string; status: AlertEventStatus }) =>
+      updateAlertEventStatus(id, status),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["alert-events"] });
+      qc.invalidateQueries({ queryKey: ["ops-status"] });
+      // Update selected drawer if open
+      setSelected((prev) =>
+        prev ? { ...prev, status: patchMut.variables?.status ?? prev.status } : null
+      );
+    },
   });
 
   const events = data?.events ?? [];
 
+  const STATUS_FILTERS: { key: StatusFilter; label: string }[] = [
+    { key: "all",      label: "All" },
+    { key: "new",      label: "New" },
+    { key: "ack",      label: "Acknowledged" },
+    { key: "snoozed",  label: "Snoozed" },
+    { key: "resolved", label: "Resolved" },
+  ];
+
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      {selected && (
+        <EvidenceDrawer
+          event={selected}
+          metadata={metadata}
+          onClose={() => setSelected(null)}
+        />
+      )}
+
+      <div className="flex items-center justify-between flex-wrap gap-2">
         <h3 className="text-sm font-semibold text-[var(--color-text)]">Alert Events (most recent first)</h3>
         <button onClick={() => refetch()} className="text-xs text-[var(--color-primary)] hover:underline">Refresh</button>
+      </div>
+
+      {/* Status filter */}
+      <div className="flex gap-1 flex-wrap">
+        {STATUS_FILTERS.map(({ key, label }) => (
+          <button
+            key={key}
+            onClick={() => setStatusFilter(key)}
+            className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+              statusFilter === key
+                ? "bg-[var(--color-primary)] text-white"
+                : "bg-[var(--color-border)] text-[var(--color-muted)] hover:text-[var(--color-text)]"
+            }`}
+          >
+            {label}
+          </button>
+        ))}
       </div>
 
       {isLoading ? (
         <p className="text-sm text-[var(--color-muted)]">Loading events…</p>
       ) : events.length === 0 ? (
         <div className="rounded-[var(--radius-card)] border border-dashed border-[var(--color-border)] bg-[var(--color-surface)] p-8 text-center text-sm text-[var(--color-muted)]">
-          No alert events yet. Click "Evaluate Now" in the Rules tab.
+          {statusFilter === "all"
+            ? 'No alert events yet. Click "Evaluate Now" in the Rules tab.'
+            : `No ${statusFilter} events.`}
         </div>
       ) : (
         <div className="space-y-2">
           {events.map((e) => {
             const p = e.payload_json ?? {};
-            const ticker = p.ticker as string | undefined;
-            const ruleType = p.rule_type as string | undefined;
+            const ticker = e.ticker ?? (p.ticker as string | undefined);
+            const ruleType = (p.rule_type as string | undefined) ?? "";
             const state = p.state as string | undefined;
+            const meta = metadata.find((m) => m.rule_type === ruleType);
+            const isPending = patchMut.isPending && patchMut.variables?.id === e.id;
+
             return (
-              <div key={e.id} className="rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-sm">
+              <div
+                key={e.id}
+                className="rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-sm"
+              >
                 <div className="flex items-start justify-between gap-4">
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2">
+                  <div className="space-y-1.5 flex-1 min-w-0">
+                    {/* Title row */}
+                    <div className="flex items-center gap-2 flex-wrap">
                       {ticker && (
                         <span className="font-mono text-sm font-bold text-[var(--color-text)]">{ticker}</span>
                       )}
                       {ruleType && (
-                        <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700">
-                          {ruleType.replace(/_/g, " ")}
+                        <span
+                          className="rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700 cursor-help"
+                          title={meta?.description ?? ruleType}
+                        >
+                          {meta?.label ?? ruleType.replace(/_/g, " ")}
                         </span>
                       )}
                       {state && (
@@ -378,17 +561,65 @@ function InboxTab() {
                           "bg-gray-100 text-gray-600"
                         }`}>{state}</span>
                       )}
+                      <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_BADGE[e.status]}`}>
+                        {STATUS_LABEL[e.status]}
+                      </span>
                     </div>
+
+                    {/* Timestamp */}
                     <p className="text-xs text-[var(--color-muted)]">
                       as-of {e.as_of_date} · triggered {new Date(e.triggered_at).toLocaleString()}
                     </p>
-                    {/* Evidence */}
-                    <div className="text-xs text-[var(--color-muted)] font-mono">
+
+                    {/* Evidence summary (compact) */}
+                    <div className="text-xs text-[var(--color-muted)] font-mono truncate">
                       {Object.entries(p)
                         .filter(([k]) => !["ticker", "rule_type", "scope", "state", "label", "signal", "params"].includes(k))
+                        .slice(0, 4)
                         .map(([k, v]) => (
-                          <span key={k} className="mr-3">{k}: {typeof v === "number" ? v.toFixed(4) : String(v)}</span>
+                          <span key={k} className="mr-3">
+                            {k}: {typeof v === "number" ? v.toFixed(4) : String(v)}
+                          </span>
                         ))}
+                    </div>
+                  </div>
+
+                  {/* Action buttons */}
+                  <div className="flex flex-col items-end gap-2 shrink-0">
+                    <button
+                      onClick={() => setSelected(e)}
+                      className="text-xs text-[var(--color-primary)] hover:underline"
+                    >
+                      Details
+                    </button>
+                    <div className="flex gap-1.5">
+                      {e.status !== "ack" && e.status !== "resolved" && (
+                        <button
+                          onClick={() => patchMut.mutate({ id: e.id, status: "ack" })}
+                          disabled={isPending}
+                          className="rounded px-2 py-1 text-xs font-medium bg-amber-50 text-amber-700 hover:bg-amber-100 disabled:opacity-50 transition-colors"
+                        >
+                          Ack
+                        </button>
+                      )}
+                      {e.status !== "snoozed" && e.status !== "resolved" && (
+                        <button
+                          onClick={() => patchMut.mutate({ id: e.id, status: "snoozed" })}
+                          disabled={isPending}
+                          className="rounded px-2 py-1 text-xs font-medium bg-gray-100 text-gray-600 hover:bg-gray-200 disabled:opacity-50 transition-colors"
+                        >
+                          Snooze
+                        </button>
+                      )}
+                      {e.status !== "resolved" && (
+                        <button
+                          onClick={() => patchMut.mutate({ id: e.id, status: "resolved" })}
+                          disabled={isPending}
+                          className="rounded px-2 py-1 text-xs font-medium bg-green-50 text-green-700 hover:bg-green-100 disabled:opacity-50 transition-colors"
+                        >
+                          Resolve
+                        </button>
+                      )}
                     </div>
                   </div>
                 </div>

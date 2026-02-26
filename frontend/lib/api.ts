@@ -19,12 +19,17 @@ import {
 } from "@/types/sprint2";
 import {
   AlertEvent,
+  AlertEventStatus,
   AlertRule,
   EvaluateResult,
+  JobRunRecord,
+  OpsDigest,
+  OpsStatus,
   PortfolioAnalytics,
   PortfolioDetail,
   PortfolioOptimizeResult,
   PortfolioSummary,
+  RuleMetadata,
 } from "@/types/sprint3";
 import {
   CandidateRefreshResponse,
@@ -254,5 +259,46 @@ export const deleteAlertRule = (id: string): Promise<void> =>
 export const evaluateNow = (): Promise<EvaluateResult> =>
   apiPost<EvaluateResult>("/api/alert_rules/evaluate_now", {});
 
-export const fetchAlertEvents = (limit = 50): Promise<{ events: AlertEvent[] }> =>
-  apiGet("/api/alert_rules/events", { limit });
+export const fetchAlertEvents = (
+  limit = 50,
+  filters?: { status?: string; ticker?: string },
+): Promise<{ events: AlertEvent[] }> =>
+  apiGet("/api/alert_rules/events", { limit, ...filters });
+
+export const updateAlertEventStatus = (
+  id: string,
+  status: AlertEventStatus,
+): Promise<AlertEvent> =>
+  apiPatch<AlertEvent>(`/api/alert_rules/events/${id}`, { status });
+
+export const fetchRuleMetadata = (): Promise<{ metadata: RuleMetadata[] }> =>
+  apiGet("/api/alert_rules/rule_metadata");
+
+// ── Ops ───────────────────────────────────────────────────────────────────────
+
+export const fetchOpsStatus = (): Promise<OpsStatus> =>
+  apiGet<OpsStatus>("/api/ops/status");
+
+export const fetchOpsDigest = (params?: {
+  portfolio_id?: string;
+  watchlist_id?: string;
+  asof?: string;
+}): Promise<OpsDigest> =>
+  apiGet<OpsDigest>("/api/ops/digest", params ?? {});
+
+export const fetchJobRuns = (limit = 10): Promise<{ job_runs: JobRunRecord[] }> =>
+  apiGet("/api/ops/job_runs", { limit });
+
+export const testEmail = (): Promise<{ sent: boolean; reason?: string }> =>
+  apiPost("/api/ops/email/test", {});
+
+export const emailDigest = (params?: {
+  portfolio_id?: string;
+  watchlist_id?: string;
+  asof?: string;
+}): Promise<{ sent: boolean; as_of_date?: string; reason?: string }> => {
+  const qs = params
+    ? "?" + new URLSearchParams(Object.entries(params ?? {}).filter(([, v]) => v) as [string, string][]).toString()
+    : "";
+  return apiPost(`/api/ops/digest/email${qs}`, {});
+};

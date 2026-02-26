@@ -5,6 +5,7 @@ import Link from "next/link";
 import Image from "next/image";
 import Providers from "@/components/Providers";
 import AuthNav from "@/components/AuthNav";
+import OpsStatusBadge from "@/components/OpsStatusBadge";
 
 const outfit = Outfit({
   subsets: ["latin"],
@@ -29,6 +30,7 @@ const NAV = [
   { href: "/universe",   label: "Universe"   },
   { href: "/portfolios", label: "Portfolios" },
   { href: "/alerts",     label: "Alerts"     },
+  { href: "/ops",        label: "Ops"        },
 ];
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -57,6 +59,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 </Link>
 
                 <nav className="flex items-center gap-1">
+                  <OpsStatusBadge />
                   {NAV.map(({ href, label }) => (
                     <Link
                       key={href}

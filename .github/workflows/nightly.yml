@@ -1,0 +1,43 @@
+name: Nightly Alert Evaluation
+
+on:
+  # Runs at 9:30 PM UTC (≈ 4:30 PM ET) on weekdays — after US market close
+  schedule:
+    - cron: '30 21 * * 1-5'
+
+  # Allow manual trigger from GitHub UI (Actions tab → Run workflow)
+  workflow_dispatch:
+    inputs:
+      asof_date:
+        description: 'Override as-of date (YYYY-MM-DD, leave blank for last trading day)'
+        required: false
+        default: ''
+
+jobs:
+  nightly:
+    name: Run nightly evaluation
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Run nightly job
+        env:
+          API_BASE_URL: ${{ secrets.API_BASE_URL }}
+          CLASS_WRITE_KEY: ${{ secrets.CLASS_WRITE_KEY }}
+        run: |
+          if [ -n "${{ github.event.inputs.asof_date }}" ]; then
+            python jobs/run_nightly.py --asof "${{ github.event.inputs.asof_date }}"
+          else
+            python jobs/run_nightly.py
+          fi

@@ -100,12 +100,19 @@ export interface AlertRule {
   created_at: string;
 }
 
+export type AlertEventStatus = "new" | "ack" | "snoozed" | "resolved";
+
 export interface AlertEvent {
   id: string;
   alert_id: string;
   triggered_at: string;
   as_of_date: string;
   payload_json: Record<string, unknown> | null;
+  // S5 additions
+  ticker: string | null;
+  fingerprint: string | null;
+  status: AlertEventStatus;
+  updated_at: string | null;
 }
 
 export interface EvaluateResult {
@@ -115,4 +122,64 @@ export interface EvaluateResult {
   as_of_date: string;
   data_source?: string;
   events: Array<Record<string, unknown>>;
+  warnings?: string[];
+}
+
+export interface RuleMetadata {
+  rule_type: string;
+  direction: string;
+  label: string;
+  description: string;
+  required_indicators: string[];
+  default_params: Record<string, number>;
+}
+
+export interface JobRunRecord {
+  id: string;
+  job_name: string;
+  asof_date: string;
+  status: string;
+  started_at: string | null;
+  finished_at: string | null;
+  duration_ms: number | null;
+  details_json: Record<string, unknown> | null;
+}
+
+export interface OpsStatus {
+  as_of_date: string;
+  last_job_run: {
+    id: string;
+    job_name: string;
+    asof_date: string;
+    status: string;
+    started_at: string | null;
+    finished_at: string | null;
+    duration_ms: number | null;
+  } | null;
+  alert_rules_enabled: number;
+  alert_events_new: number;
+  email_configured: boolean;
+  data_source: string;
+}
+
+export interface OpsDigest {
+  as_of_date: string;
+  portfolio_movers: Array<{ ticker: string; daily_return: number; weight: number }>;
+  watchlist_movers: Array<{ ticker: string; daily_return: number }>;
+  alerts_triggered: { entry: number; exit: number };
+  new_alert_events: Array<{
+    id: string;
+    ticker: string;
+    rule_type: string | null;
+    triggered_at: string;
+    status: string;
+  }>;
+  job_run: {
+    job_name: string;
+    asof_date: string;
+    status: string;
+    duration_ms: number | null;
+    finished_at: string | null;
+  } | null;
+  digest_text: string;
 }
