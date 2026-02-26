@@ -54,7 +54,7 @@ import {
   ResponsiveContainer,
 } from "recharts";
 
-type Tab = "holdings" | "watchlist" | "technicals" | "analytics" | "optimize" | "validation" | "forecast" | "health" | "scenarios";
+type Tab = "holdings" | "watchlist" | "technicals" | "analytics" | "optimize" | "validation" | "forecast" | "scenarios";
 
 // ── Quick Technicals accordion per holding row ────────────────────────────────
 
@@ -326,18 +326,55 @@ function HoldingsTab({
 
 function MetricCards({ metrics }: { metrics: PortfolioAnalytics["metrics"] }) {
   const items = [
-    { label: "CAGR", value: fmtPct(metrics.cagr), color: colorForValue(metrics.cagr) },
-    { label: "Volatility", value: fmtPct(metrics.vol), color: "" },
-    { label: "Sharpe", value: fmtNum(metrics.sharpe), color: colorForValue(metrics.sharpe) },
-    { label: "Max Drawdown", value: fmtPct(metrics.max_dd), color: colorForValue(metrics.max_dd) },
-    ...(metrics.beta != null ? [{ label: "Beta (vs SPY)", value: fmtNum(metrics.beta), color: "" }] : []),
-    ...(metrics.alpha != null ? [{ label: "Alpha", value: fmtPct(metrics.alpha), color: colorForValue(metrics.alpha) }] : []),
+    {
+      label: "CAGR",
+      value: fmtPct(metrics.cagr),
+      color: colorForValue(metrics.cagr),
+      tooltip: "Compound Annual Growth Rate — annualised total return. The constant rate at which $1 invested would have grown to the ending value over the period.",
+    },
+    {
+      label: "Volatility",
+      value: fmtPct(metrics.vol),
+      color: "",
+      tooltip: "Annualised portfolio volatility: daily standard deviation of returns × √252. Measures the magnitude of return swings — higher vol means wider outcome ranges and greater drawdown risk.",
+    },
+    {
+      label: "Sharpe",
+      value: fmtNum(metrics.sharpe),
+      color: colorForValue(metrics.sharpe),
+      tooltip: "Risk-adjusted return: CAGR ÷ Volatility (Rf = 0). Sharpe > 1.0 is broadly acceptable; > 2.0 is excellent. Negative Sharpe means the strategy lost money on a risk-adjusted basis.",
+    },
+    {
+      label: "Max Drawdown",
+      value: fmtPct(metrics.max_dd),
+      color: colorForValue(metrics.max_dd),
+      tooltip: "Largest peak-to-trough decline in the simulated equity curve. The primary measure of downside risk — how much capital was lost from a high-water mark before recovery began.",
+    },
+    ...(metrics.beta != null
+      ? [{
+          label: "Beta (vs SPY)",
+          value: fmtNum(metrics.beta),
+          color: "",
+          tooltip: "OLS market beta vs SPY over the lookback period. β = 1 moves in lockstep with the market; β > 1 amplifies market swings; β < 1 dampens them. Negative β implies counter-cyclical exposure.",
+        }]
+      : []),
+    ...(metrics.alpha != null
+      ? [{
+          label: "Alpha",
+          value: fmtPct(metrics.alpha),
+          color: colorForValue(metrics.alpha),
+          tooltip: "Jensen's Alpha: annualised excess return above what the CAPM model predicts given this portfolio's beta. Positive alpha suggests return sources beyond plain market exposure.",
+        }]
+      : []),
   ];
   return (
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-      {items.map(({ label, value, color }) => (
+      {items.map(({ label, value, color, tooltip }) => (
         <div key={label} className="rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] p-3 shadow-sm text-center">
-          <p className="text-xs text-[var(--color-muted)]">{label}</p>
+          <p className="flex items-center justify-center gap-0.5 text-xs text-[var(--color-muted)]">
+            {label}
+            <InfoTooltip text={tooltip} />
+          </p>
           <p className={`mt-0.5 text-base font-bold ${color || "text-[var(--color-text)]"}`}>{value}</p>
         </div>
       ))}
@@ -458,6 +495,15 @@ function AnalyticsTab({ portfolioId }: { portfolioId: string }) {
           })}
         </div>
       ) : null}
+
+      {/* ── Portfolio Health (inline at bottom of Analytics) ─────────────────── */}
+      <div className="border-t border-[var(--color-border)] pt-5">
+        <h2 className="mb-4 text-sm font-semibold text-[var(--color-text)]">
+          Portfolio Health
+          <InfoTooltip text="Concentration, beta, volatility, and per-asset risk contributions computed from current holdings and weights." />
+        </h2>
+        <HealthTab portfolioId={portfolioId} />
+      </div>
     </div>
   );
 }
@@ -1397,7 +1443,6 @@ export default function PortfolioDetailPage({
     { key: "optimize",   label: "Optimize"   },
     { key: "validation", label: "Validation" },
     { key: "forecast",   label: "Forecast"   },
-    { key: "health",     label: "Health"     },
     { key: "scenarios",  label: "Scenarios"  },
   ];
 
@@ -1457,7 +1502,6 @@ export default function PortfolioDetailPage({
       {tab === "optimize" && <OptimizeTab portfolioId={id} />}
       {tab === "validation" && <ValidationTab portfolioId={id} />}
       {tab === "forecast" && <ForecastTab portfolioId={id} />}
-      {tab === "health" && <HealthTab portfolioId={id} />}
       {tab === "scenarios" && <ScenariosTab portfolioId={id} />}
     </div>
   );
@@ -1580,6 +1624,167 @@ function HealthTab({ portfolioId }: { portfolioId: string }) {
   );
 }
 
+
+// ── Scenario Playbook ──────────────────────────────────────────────────────────
+
+function ScenarioPlaybook({ result }: { result: ScenarioResult }) {
+  const items: { icon: string; title: string; body: string }[] = [];
+
+  if (result.scenario_type === "market_shock" && result.portfolio_impact != null) {
+    const impact = result.portfolio_impact;
+    const worstContributor = result.contributions
+      ?.slice().sort((a, b) => a.impact - b.impact)[0];
+
+    if (impact <= -0.15) {
+      items.push({
+        icon: "🛡️",
+        title: "Protective puts / collar strategy",
+        body: "A shock of this magnitude warrants downside protection. Consider buying 3–6 month put options (5–10% OTM) on your top holdings or a broad index ETF. A collar (buy put, sell call) can cap premium cost.",
+      });
+    }
+    if (impact <= -0.10) {
+      items.push({
+        icon: "💵",
+        title: "Raise cash buffer",
+        body: "Trim 5–15% of equity exposure into cash or short-duration T-bills. This provides dry powder to re-enter at lower levels and reduces drawdown depth in a sustained sell-off.",
+      });
+    }
+    if (impact <= -0.08) {
+      items.push({
+        icon: "🔄",
+        title: "Rotate toward defensive sectors",
+        body: "Utilities, consumer staples, healthcare, and dividend-payers tend to outperform in sharp drawdowns. Reducing high-beta growth exposure and adding low-beta names dampens the impact of a market shock.",
+      });
+    }
+    if (worstContributor && worstContributor.impact < -0.03) {
+      items.push({
+        icon: "✂️",
+        title: `Trim concentrated risk in ${worstContributor.ticker}`,
+        body: `${worstContributor.ticker} is your single largest drag in this scenario (${fmtPct(worstContributor.impact)} impact). Consider reducing to a weight where a repeat of this shock leaves the position loss within acceptable per-name limits.`,
+      });
+    }
+    if (impact > 0) {
+      items.push({
+        icon: "📈",
+        title: "Portfolio benefits from this shock",
+        body: "Positive impact in a market downturn suggests meaningful short exposure, inverse ETFs, or defensive positioning. Verify this is intentional and consider whether the hedge should be scaled back in a recovery.",
+      });
+    }
+    items.push({
+      icon: "📊",
+      title: "Stress-test correlation assumptions",
+      body: "In sharp drawdowns, cross-asset correlations spike toward 1. Re-run this scenario with a larger shock (−30%, −40%) to see if any assumed diversification benefits hold under extreme conditions.",
+    });
+  }
+
+  if (result.scenario_type === "vol_shock" && result.shocked_vol != null) {
+    const shockedVol = result.shocked_vol;
+    const scale = result.vol_scale ?? 2;
+
+    items.push({
+      icon: "📐",
+      title: "Rescale position sizes",
+      body: `At ${fmtPct(shockedVol)} annualised vol (${scale}× baseline), standard risk-budgeting would cut position sizes by ~${Math.round((1 - 1 / scale) * 100)}% to keep dollar-vol-per-position constant. Review your largest holdings first.`,
+    });
+    items.push({
+      icon: "🛑",
+      title: "Widen stop-losses proportionally",
+      body: "ATR-based stops set at baseline volatility will trigger prematurely in a high-vol regime. Multiply your current stop distances by the vol scale factor (or use a trailing stop set to 2–3× the shocked ATR).",
+    });
+    if (shockedVol > 0.30) {
+      items.push({
+        icon: "📉",
+        title: "Check margin and leverage headroom",
+        body: "High realised vol often triggers broker margin calls. Ensure leverage is well below maximum thresholds and model your maintenance margin at this vol level to avoid forced liquidation at the worst moment.",
+      });
+    }
+    items.push({
+      icon: "🔀",
+      title: "Consider VIX-linked hedges",
+      body: "If the vol shock is systemic, VIX call spreads or long VIX ETPs (UVIX, VIXY) provide convex upside during volatility spikes. Size small — these decay rapidly in calm markets.",
+    });
+    items.push({
+      icon: "🗓️",
+      title: "Shorten holding periods",
+      body: "High vol environments compress information ratios. Shorter holding periods (days vs weeks) and faster signal turnover can reduce exposure to sustained adverse moves.",
+    });
+  }
+
+  if (result.scenario_type === "historical_replay") {
+    const totalReturn = result.total_return ?? 0;
+    const maxDd = result.max_dd ?? 0;
+    const worstContributor = result.contributors
+      ?.slice().sort((a, b) => a.weighted_contribution - b.weighted_contribution)[0];
+    const bestContributor = result.contributors
+      ?.slice().sort((a, b) => b.weighted_contribution - a.weighted_contribution)[0];
+
+    if (totalReturn < -0.10) {
+      items.push({
+        icon: "🔎",
+        title: "Diagnose the macro regime",
+        body: "This period likely featured a specific regime (rate hike cycle, recession, liquidity crisis). Identify the primary driver and determine whether your current macro environment resembles it — if so, the same repositioning applies now.",
+      });
+    }
+    if (maxDd < -0.20) {
+      items.push({
+        icon: "📏",
+        title: "Implement a drawdown circuit-breaker",
+        body: `A −${Math.abs(Math.round(maxDd * 100))}% drawdown is substantial. Define a portfolio-level stop: if drawdown exceeds −15%, reduce risk by 50%; if it exceeds −25%, move to cash. Systematic rules prevent emotional decision-making in live drawdowns.`,
+      });
+    }
+    if (worstContributor && worstContributor.weighted_contribution < -0.05) {
+      items.push({
+        icon: "⚖️",
+        title: `Reconsider weighting in ${worstContributor.ticker}`,
+        body: `${worstContributor.ticker} was the top drag (${fmtPct(worstContributor.weighted_contribution)} portfolio contribution). If the macro regime that hurt it is plausible again, consider a tighter weight cap or sector hedge.`,
+      });
+    }
+    if (bestContributor && bestContributor.weighted_contribution > 0.03) {
+      items.push({
+        icon: "⭐",
+        title: `${bestContributor.ticker} was your best hedge`,
+        body: `${bestContributor.ticker} added ${fmtPct(bestContributor.weighted_contribution)} in this period. Consider whether increasing its weight (or adding similar uncorrelated names) would provide meaningful protection in a repeat scenario.`,
+      });
+    }
+    items.push({
+      icon: "🌐",
+      title: "Add uncorrelated diversifiers",
+      body: "Historical replays that produce large losses often reflect a single factor dominating the portfolio. Gold, Treasuries, trend-following CTAs, or merger-arb strategies can dampen drawdown without significantly reducing expected return.",
+    });
+    if (result.n_days && result.n_days > 180) {
+      items.push({
+        icon: "🔄",
+        title: "Review rebalancing frequency",
+        body: "In prolonged adverse periods, systematic rebalancing (monthly or quarterly) can reduce drawdown by trimming overexposed winners and averaging into underperformers. Consider whether your current rebalancing cadence held up well in this replay.",
+      });
+    }
+  }
+
+  if (!items.length) return null;
+
+  return (
+    <div className="rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-sm">
+      <h3 className="mb-3 text-sm font-semibold text-[var(--color-text)]">
+        Mitigation Playbook
+        <InfoTooltip text="Suggested preparation and risk-management actions based on this scenario's results. Not investment advice — validate all actions against your investment policy statement." />
+      </h3>
+      <div className="space-y-3">
+        {items.map((item, i) => (
+          <div key={i} className="flex gap-3 rounded-[var(--radius-btn)] border border-[var(--color-border)] bg-[var(--color-bg)] p-3">
+            <span className="text-base leading-none mt-0.5 shrink-0">{item.icon}</span>
+            <div>
+              <p className="text-xs font-semibold text-[var(--color-text)] mb-0.5">{item.title}</p>
+              <p className="text-xs text-[var(--color-muted)] leading-relaxed">{item.body}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+      <p className="mt-3 text-[10px] italic text-[var(--color-muted)]">
+        ⚠ These are general frameworks, not personalised investment advice. All scenario outputs are model-based estimates.
+      </p>
+    </div>
+  );
+}
 
 // ── ScenariosTab ───────────────────────────────────────────────────────────────
 
@@ -1807,6 +2012,9 @@ function ScenariosTab({ portfolioId }: { portfolioId: string }) {
               )}
             </>
           )}
+
+          {/* Mitigation Playbook — always rendered after any result */}
+          <ScenarioPlaybook result={result} />
         </div>
       )}
     </div>
