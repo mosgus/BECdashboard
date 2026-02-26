@@ -2,6 +2,7 @@
 import { use, useState } from "react";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
+import { useSearchParams } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { fetchTickerTechnicals } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
@@ -31,6 +32,11 @@ export default function TickerDetailPage({
   const { symbol } = use(params);
   const ticker = symbol.toUpperCase();
   const { checked } = useAuth();
+  const searchParams = useSearchParams();
+
+  // Smart back link: respect ?from= if provided, fall back to /watchlists
+  const fromPath = searchParams.get("from") || "/watchlists";
+  const backLabel = fromPath.startsWith("/portfolios") ? "Portfolio" : "Watchlists";
 
   const [start, setStart] = useState(ONE_YEAR_AGO);
   const [end, setEnd] = useState(TODAY);
@@ -49,10 +55,10 @@ export default function TickerDetailPage({
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <Link
-            href="/watchlists"
+            href={fromPath}
             className="mb-1 flex items-center gap-1 text-xs text-[var(--color-muted)] hover:text-[var(--color-text)] transition-colors"
           >
-            <ArrowLeft size={12} /> Watchlists
+            <ArrowLeft size={12} /> {backLabel}
           </Link>
           <h1 className="text-2xl font-bold text-[var(--color-text)]">{ticker}</h1>
           {data && (

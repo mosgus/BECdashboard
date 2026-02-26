@@ -30,6 +30,8 @@ import HelpSidebar from "@/components/HelpSidebar";
 import UniverseTickerPicker from "@/components/UniverseTickerPicker";
 import TechnicalsChart from "@/components/TechnicalsChart";
 import OptimizerGuide from "@/components/OptimizerGuide";
+import ValidationGuide from "@/components/ValidationGuide";
+import ForecastGuide from "@/components/ForecastGuide";
 import FanChart from "@/components/FanChart";
 import { PortfolioAnalytics, PortfolioOptimizeResult, Position } from "@/types/sprint3";
 import { SignalResult } from "@/types/sprint2";
@@ -183,7 +185,7 @@ function HoldingsTab({
                   <>
                     <tr key={pos.ticker} className="hover:bg-gray-50">
                       <td className="px-4 py-3 font-mono font-medium">
-                        <Link href={`/ticker/${pos.ticker}`} className="text-[var(--color-primary)] hover:underline">
+                        <Link href={`/ticker/${pos.ticker}?from=/portfolios/${portfolioId}`} className="text-[var(--color-primary)] hover:underline">
                           {pos.ticker}
                         </Link>
                       </td>
@@ -375,7 +377,7 @@ function AnalyticsTab({ portfolioId }: { portfolioId: string }) {
             const byKey = Object.fromEntries(signals.map((s) => [s.signal, s]));
             return (
               <div key={ticker} className="grid grid-cols-[5rem_1fr_1fr_1fr] gap-2 items-center py-1">
-                <Link href={`/ticker/${ticker}`} className="font-mono text-xs font-semibold text-[var(--color-primary)] hover:underline truncate">{ticker}</Link>
+                <Link href={`/ticker/${ticker}?from=/portfolios/${portfolioId}`} className="font-mono text-xs font-semibold text-[var(--color-primary)] hover:underline truncate">{ticker}</Link>
                 {["sma_cross", "rsi_threshold", "macd_cross"].map((k) => {
                   const s = byKey[k];
                   return s
@@ -720,7 +722,7 @@ function WatchlistTab({
                 return (
                   <tr key={row.ticker} className="hover:bg-[var(--color-bg)] transition-colors">
                     <td className="px-4 py-3 font-mono font-semibold text-[var(--color-primary)]">
-                      <Link href={`/ticker/${row.ticker}`} className="hover:underline">{row.ticker}</Link>
+                      <Link href={`/ticker/${row.ticker}?from=/portfolios/${portfolioId}`} className="hover:underline">{row.ticker}</Link>
                     </td>
                     <td className="px-4 py-3 text-right text-[var(--color-muted)]">
                       {row.last_close != null ? `$${fmtNum(row.last_close, 2)}` : "—"}
@@ -969,6 +971,7 @@ const TEST_INTERPRETATIONS: Record<string, string> = {
 function ValidationTab({ portfolioId }: { portfolioId: string }) {
   const [result, setResult] = useState<PortfolioValidationResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [showGuide, setShowGuide] = useState(false);
 
   const valMut = useMutation({
     mutationFn: () => validatePortfolio(portfolioId, true),
@@ -978,8 +981,18 @@ function ValidationTab({ portfolioId }: { portfolioId: string }) {
 
   return (
     <div className="space-y-5">
+      {showGuide && <ValidationGuide onClose={() => setShowGuide(false)} />}
       <div className="rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] p-5 shadow-sm">
-        <h3 className="mb-2 text-sm font-semibold text-[var(--color-text)]">Statistical Validation Suite</h3>
+        <div className="mb-2 flex items-center justify-between gap-3">
+          <h3 className="text-sm font-semibold text-[var(--color-text)]">Statistical Validation Suite</h3>
+          <button
+            onClick={() => setShowGuide(true)}
+            className="flex items-center gap-1 rounded-[var(--radius-btn)] border border-[var(--color-border)] px-3 py-1.5 text-xs text-[var(--color-muted)] hover:bg-[var(--color-border)] hover:text-[var(--color-text)] transition-colors"
+          >
+            <BookOpen size={13} />
+            Validation Guide →
+          </button>
+        </div>
         <p className="mb-4 text-xs text-[var(--color-muted)]">
           Runs 7 statistical tests on the portfolio's simulated daily returns. Quick mode: 500 permutations / 1,000 bootstrap samples (~20–30 s).
         </p>
@@ -1055,6 +1068,7 @@ function ForecastTab({ portfolioId }: { portfolioId: string }) {
   const [horizon, setHorizon] = useState(30);
   const [result, setResult] = useState<PortfolioForecastResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [showGuide, setShowGuide] = useState(false);
 
   const fcMut = useMutation({
     mutationFn: () => forecastPortfolio(portfolioId, method, horizon),
@@ -1064,11 +1078,21 @@ function ForecastTab({ portfolioId }: { portfolioId: string }) {
 
   return (
     <div className="space-y-5">
+      {showGuide && <ForecastGuide onClose={() => setShowGuide(false)} />}
       <div className="rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] p-5 shadow-sm">
-        <h3 className="mb-4 text-sm font-semibold text-[var(--color-text)]">
-          Forecast Settings
-          <InfoTooltip text="Forecasts the simulated portfolio equity curve and rolling volatility using the selected method. Prophet may take 30–60 s." />
-        </h3>
+        <div className="mb-4 flex items-center justify-between gap-3">
+          <h3 className="text-sm font-semibold text-[var(--color-text)]">
+            Forecast Settings
+            <InfoTooltip text="Forecasts the simulated portfolio equity curve and rolling volatility using the selected method. Prophet may take 30–60 s." />
+          </h3>
+          <button
+            onClick={() => setShowGuide(true)}
+            className="flex items-center gap-1 rounded-[var(--radius-btn)] border border-[var(--color-border)] px-3 py-1.5 text-xs text-[var(--color-muted)] hover:bg-[var(--color-border)] hover:text-[var(--color-text)] transition-colors"
+          >
+            <BookOpen size={13} />
+            Forecast Guide →
+          </button>
+        </div>
         <div className="flex flex-wrap items-end gap-4">
           <div>
             <label className="mb-1 block text-xs font-medium text-[var(--color-muted)]">Method</label>
