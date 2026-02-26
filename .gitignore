@@ -27,3 +27,7 @@ Thumbs.db
 .idea/
 .vscode/
 *.swp
+
+# Jupyter
+*.ipynb
+.ipynb_checkpoints/
