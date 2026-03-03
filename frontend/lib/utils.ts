@@ -70,14 +70,17 @@ export async function apiGet<T>(
   path: string,
   params?: Record<string, string | number | boolean | null | undefined>,
 ): Promise<T> {
-  const base = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
-  const url = new URL(`${base}${path}`);
+  const base = process.env.NEXT_PUBLIC_API_URL ?? "";
+  let url = `${base}${path}`;
   if (params) {
-    Object.entries(params).forEach(([k, v]) => {
-      if (v != null) url.searchParams.set(k, String(v));
-    });
+    const qs = new URLSearchParams(
+      Object.entries(params)
+        .filter(([, v]) => v != null)
+        .map(([k, v]) => [k, String(v)]),
+    ).toString();
+    if (qs) url += `?${qs}`;
   }
-  const res = await fetch(url.toString(), {
+  const res = await fetch(url, {
     method: "GET",
     headers: _sharedHeaders(),
   });

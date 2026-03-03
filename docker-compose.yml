@@ -15,11 +15,8 @@ services:
 
   backend:
     build: ./backend
-    ports:
-      - "8001:8000"
-    env_file: .env                    # CLASS_PASSWORD, JWT_SECRET, etc.
+    env_file: .env
     environment:
-      # Override DATABASE_URL so the backend always finds the compose db service
       DATABASE_URL: postgresql://blueeagle:blueeagle@db:5432/blueeagle
     depends_on:
       db:
@@ -34,15 +31,23 @@ services:
     build:
       context: ./frontend
       args:
-        # NEXT_PUBLIC_API_URL is baked into the JS bundle at build time.
-        # For local Docker: http://localhost:8000 (browser calls backend directly).
-        # For production deploy: set NEXT_PUBLIC_API_URL in .env to your backend URL.
-        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://100.108.230.75:8001}
-    ports:
-      - "3000:3000"
+        # Empty string → relative URLs → always calls the same host the browser loaded from.
+        # Nginx proxies /api/* to backend, so no IP is ever baked into the bundle.
+        NEXT_PUBLIC_API_URL: ""
     depends_on:
       backend:
         condition: service_healthy
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "3000:80"   # keep :3000 working during transition
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - backend
+      - frontend
 
 volumes:
   pgdata:
