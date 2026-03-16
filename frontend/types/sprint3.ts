@@ -13,10 +13,12 @@ export interface PortfolioSummary {
 
 export interface Position {
   ticker: string;
-  weight: number | null;
-  shares: number | null;
-  cost_basis: number | null;
+  weight: number | null;       // percentage units (25 = 25 %), always present
+  shares: number | null;       // number of shares; null if weight-only entry
+  cost_basis: number | null;   // per-share cost basis for P&L
   updated_at: string;
+  price?: number | null;        // live last close (enriched by get_portfolio)
+  market_value?: number | null; // shares × price (enriched by get_portfolio)
 }
 
 export interface LastTargetSet {
@@ -100,6 +102,15 @@ export interface PortfolioAnalytics {
   data_source?: string;
 }
 
+export interface ForwardLookingMetrics {
+  /** CAPM-implied portfolio expected return: Σ wᵢ × E[Rᵢ]  (annual) */
+  expected_return: number;
+  /** Portfolio volatility √(wᵀ Σ w) using historical covariance  (annual) */
+  vol: number;
+  /** Forward-looking Sharpe = (expected_return − rf) / vol */
+  sharpe: number;
+}
+
 export interface PortfolioOptimizeResult {
   tickers: string[];
   current_weights: Record<string, number>;
@@ -108,7 +119,11 @@ export interface PortfolioOptimizeResult {
   metrics: {
     current: Record<string, number>;
     optimized: Record<string, number>;
+    /** Only present for max_sharpe_capm mode. Uses CAPM expected returns, not historical actuals. */
+    forward_looking?: ForwardLookingMetrics | null;
   };
+  /** Per-ticker CAPM expected annual returns (rf + β × MRP). Only present for max_sharpe_capm. */
+  capm_expected_returns?: Record<string, number> | null;
   equity_curves: Array<{
     date: string;
     current: number;

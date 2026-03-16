@@ -146,10 +146,21 @@ export const deletePortfolio = (id: string): Promise<void> =>
 export const addPosition = (
   portfolioId: string,
   ticker: string,
-  weight: number | null,
-): Promise<{ ticker: string; weight: number | null }> =>
-  apiPost(`/api/portfolios/${portfolioId}/positions`, { ticker, weight });
+  shares: number,
+  costBasis?: number | null,
+): Promise<{ ticker: string; weight: number | null; shares: number | null }> =>
+  apiPost(`/api/portfolios/${portfolioId}/positions`, { ticker, shares, cost_basis: costBasis ?? null });
 
+/** Update shares (and optional cost basis) for an existing position. Used by Holdings tab. */
+export const updatePositionShares = (
+  portfolioId: string,
+  ticker: string,
+  shares: number,
+  costBasis?: number | null,
+): Promise<{ ticker: string; weight: number | null; shares: number | null }> =>
+  apiPut(`/api/portfolios/${portfolioId}/positions/${ticker}`, { ticker, shares, cost_basis: costBasis ?? null });
+
+/** Update weight only (percentage units). Used by Targets tab when applying optimizer results. */
 export const updatePosition = (
   portfolioId: string,
   ticker: string,
@@ -350,6 +361,11 @@ export const saveEmailConfig = (body: {
   email_from?: string | null;
   recipients?: string | null;
 }): Promise<EmailConfig> => apiPut<EmailConfig>("/api/ops/email/config", body);
+
+// ── NBA Betting Intelligence ──────────────────────────────────────────────────
+
+export const fetchNbaPredictions = (w_xgb: number): Promise<import("@/types/nba").NBAPredictionsResponse> =>
+  apiGet<import("@/types/nba").NBAPredictionsResponse>("/api/nba/predictions", { w_xgb });
 
 export const emailDigest = (params?: {
   portfolio_id?: string;

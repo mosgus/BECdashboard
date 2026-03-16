@@ -14,7 +14,7 @@ import {
 import { fmtNum, fmtPct, colorForValue, downsample } from "@/lib/utils";
 import InfoTooltip from "@/components/InfoTooltip";
 import OptimizerGuide from "@/components/OptimizerGuide";
-import { PortfolioAnalytics, PortfolioOptimizeResult, Position, TiltResult } from "@/types/sprint3";
+import { ForwardLookingMetrics, PortfolioAnalytics, PortfolioOptimizeResult, Position, TiltResult } from "@/types/sprint3";
 import {
   LineChart,
   Line,
@@ -99,6 +99,116 @@ function MetricCards({ metrics }: { metrics: PortfolioAnalytics["metrics"] }) {
           </p>
         </div>
       ))}
+    </div>
+  );
+}
+
+// ── CAPM Forward-Looking Panel ─────────────────────────────────────────────────
+
+function ForwardLookingPanel({
+  metrics,
+  capmReturns,
+}: {
+  metrics: ForwardLookingMetrics;
+  capmReturns: Record<string, number> | null | undefined;
+}) {
+  return (
+    <div className="rounded-[var(--radius-card)] border-2 border-indigo-200 bg-indigo-50 p-5 shadow-sm space-y-4">
+      {/* Header */}
+      <div>
+        <div className="flex items-center gap-2 mb-1">
+          <span className="rounded-full bg-indigo-600 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white">
+            Forward-Looking · CAPM
+          </span>
+        </div>
+        <h3 className="text-sm font-semibold text-indigo-900">
+          Model-Implied Portfolio Projections
+        </h3>
+        <p className="mt-1 text-xs text-indigo-700 leading-relaxed">
+          These figures are derived from the <strong>CAPM expected return model</strong> (E[R<sub>i</sub>]&nbsp;=&nbsp;r<sub>f</sub>&nbsp;+&nbsp;β<sub>i</sub>&nbsp;×&nbsp;MRP),
+          not from backtesting historical prices. They represent what the model{" "}
+          <em>expects going forward</em> given current betas, a 3.64% risk-free rate, and a 5% market risk premium.
+          The in-sample backtest below is shown separately for comparison only — it reflects past realised returns,
+          which were inflated by the 2023–2025 bull market and should not be used as a return forecast.
+        </p>
+      </div>
+
+      {/* Metric cards */}
+      <div className="grid grid-cols-3 gap-3">
+        {[
+          {
+            label: "Expected Return",
+            value: fmtPct(metrics.expected_return),
+            color: colorForValue(metrics.expected_return),
+            tooltip: "Σ wᵢ × E[Rᵢ] — weighted sum of CAPM expected annual returns. This is the forward-looking portfolio return the model targets.",
+          },
+          {
+            label: "Expected Vol",
+            value: fmtPct(metrics.vol),
+            color: "",
+            tooltip: "√(wᵀ Σ w) using the historical covariance matrix as a forward-looking vol estimate (annualised).",
+          },
+          {
+            label: "Forward Sharpe",
+            value: fmtNum(metrics.sharpe),
+            color: colorForValue(metrics.sharpe),
+            tooltip: "(Expected Return − Rf) ÷ Expected Vol. This is the Sharpe ratio the optimizer actually maximised — it uses model returns, not historical actuals.",
+          },
+        ].map(({ label, value, color, tooltip }) => (
+          <div
+            key={label}
+            className="rounded-[var(--radius-card)] border border-indigo-200 bg-white p-3 text-center shadow-sm"
+          >
+            <p className="flex items-center justify-center gap-0.5 text-xs text-indigo-600">
+              {label}
+              <InfoTooltip text={tooltip} />
+            </p>
+            <p className={`mt-0.5 text-base font-bold ${color || "text-indigo-900"}`}>
+              {value}
+            </p>
+          </div>
+        ))}
+      </div>
+
+      {/* Per-ticker CAPM expected returns */}
+      {capmReturns && Object.keys(capmReturns).length > 0 && (
+        <div>
+          <p className="mb-2 text-xs font-semibold text-indigo-800">
+            Per-Ticker CAPM Expected Returns
+            <InfoTooltip text="E[Rᵢ] = rf + βᵢ × MRP for each holding. Beta is estimated via OLS regression against SPY over the lookback window." />
+          </p>
+          <div className="overflow-auto rounded border border-indigo-200 bg-white">
+            <table className="w-full text-xs">
+              <thead className="border-b border-indigo-100 bg-indigo-50">
+                <tr>
+                  {["Ticker", "β (vs SPY)", "E[R] CAPM (annual)"].map((h) => (
+                    <th key={h} className="px-3 py-2 text-left font-semibold text-indigo-700">
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-indigo-50">
+                {Object.entries(capmReturns)
+                  .sort(([, a], [, b]) => b - a)
+                  .map(([ticker, er]) => {
+                    // Back-compute beta: E[R] = rf + β × MRP  →  β = (E[R] - rf) / MRP
+                    const beta = (er - 0.0364) / 0.05;
+                    return (
+                      <tr key={ticker} className="hover:bg-indigo-50">
+                        <td className="px-3 py-1.5 font-mono font-semibold">{ticker}</td>
+                        <td className="px-3 py-1.5 text-indigo-800">{beta.toFixed(2)}</td>
+                        <td className={`px-3 py-1.5 font-semibold ${colorForValue(er)}`}>
+                          {fmtPct(er)}
+                        </td>
+                      </tr>
+                    );
+                  })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -610,38 +720,54 @@ export default function TargetsPage({
             )}
           </div>
 
-          {/* Metrics comparison */}
-          <div className="grid gap-4 sm:grid-cols-2">
-            {(["current", "optimized"] as const).map((key) => {
-              const m = result.metrics[key];
-              return (
-                <div
-                  key={key}
-                  className={`rounded-[var(--radius-card)] border p-4 shadow-sm ${key === "optimized" ? "border-green-200 bg-green-50" : "border-blue-200 bg-blue-50"}`}
-                >
-                  <h4
-                    className={`mb-2 text-sm font-semibold ${key === "optimized" ? "text-green-700" : "text-blue-700"}`}
+          {/* Forward-looking panel — CAPM mode only */}
+          {result.metrics.forward_looking && (
+            <ForwardLookingPanel
+              metrics={result.metrics.forward_looking}
+              capmReturns={result.capm_expected_returns}
+            />
+          )}
+
+          {/* Historical backtest comparison */}
+          <div>
+            <div className="mb-2 flex items-center gap-2">
+              <p className="text-xs font-semibold text-[var(--color-muted)]">
+                In-Sample Backtest (historical prices over lookback window)
+              </p>
+              <InfoTooltip text="These metrics are computed by applying the weights to historical price data — they are NOT forecasts. For CAPM mode, use the Forward-Looking Projections above as the authoritative return estimate." />
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              {(["current", "optimized"] as const).map((key) => {
+                const m = result.metrics[key];
+                return (
+                  <div
+                    key={key}
+                    className={`rounded-[var(--radius-card)] border p-4 shadow-sm ${key === "optimized" ? "border-green-200 bg-green-50" : "border-blue-200 bg-blue-50"}`}
                   >
-                    {key === "optimized"
-                      ? `Optimized (${result.mode.replace(/_/g, " ")})`
-                      : "Current Weights"}
-                  </h4>
-                  <dl className="grid grid-cols-2 gap-2 text-xs">
-                    {[
-                      ["CAGR", fmtPct(m.cagr)],
-                      ["Vol", fmtPct(m.vol)],
-                      ["Sharpe", fmtNum(m.sharpe)],
-                      ["Max DD", fmtPct(m.max_dd)],
-                    ].map(([l, v]) => (
-                      <div key={l}>
-                        <dt className="text-gray-500">{l}</dt>
-                        <dd className="font-semibold text-gray-800">{v}</dd>
-                      </div>
-                    ))}
-                  </dl>
-                </div>
-              );
-            })}
+                    <h4
+                      className={`mb-2 text-sm font-semibold ${key === "optimized" ? "text-green-700" : "text-blue-700"}`}
+                    >
+                      {key === "optimized"
+                        ? `Optimized (${result.mode.replace(/_/g, " ")})`
+                        : "Current Weights"}
+                    </h4>
+                    <dl className="grid grid-cols-2 gap-2 text-xs">
+                      {[
+                        ["CAGR", fmtPct(m.cagr)],
+                        ["Vol", fmtPct(m.vol)],
+                        ["Sharpe", fmtNum(m.sharpe)],
+                        ["Max DD", fmtPct(m.max_dd)],
+                      ].map(([l, v]) => (
+                        <div key={l}>
+                          <dt className="text-gray-500">{l}</dt>
+                          <dd className="font-semibold text-gray-800">{v}</dd>
+                        </div>
+                      ))}
+                    </dl>
+                  </div>
+                );
+              })}
+            </div>
           </div>
 
           {/* Rebalance Plan table (weights only) */}
@@ -739,9 +865,12 @@ export default function TargetsPage({
           {/* Equity curve comparison */}
           {result.equity_curves.length > 0 && (
             <div className="rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-sm">
-              <h3 className="mb-3 text-sm font-semibold text-[var(--color-text)]">
-                Equity Curve: Current vs Optimized
-              </h3>
+              <div className="mb-3 flex flex-wrap items-baseline gap-2">
+                <h3 className="text-sm font-semibold text-[var(--color-text)]">
+                  Equity Curve: Current vs Optimized
+                </h3>
+                <span className="text-xs text-[var(--color-muted)]">(in-sample backtest — not a forecast)</span>
+              </div>
               <ResponsiveContainer width="100%" height={260}>
                 <LineChart
                   data={downsample(result.equity_curves)}

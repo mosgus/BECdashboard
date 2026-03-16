@@ -238,12 +238,11 @@ export default function RebalancePage({
                   const headers = [
                     "ticker",
                     "price",
-                    "current_weight",
-                    "target_weight",
+                    "current_weight_pct",
+                    "target_weight_pct",
                     "current_value",
                     "target_value",
-                    "current_shares_implied",
-                    "target_shares_raw",
+                    "current_shares",
                     "target_shares",
                     "delta_shares",
                     "delta_value",
@@ -252,16 +251,15 @@ export default function RebalancePage({
                   const rows = worksheetResult.rows.map((r) =>
                     [
                       r.ticker,
-                      r.price,
-                      r.current_weight,
-                      r.target_weight,
-                      r.current_value,
-                      r.target_value,
-                      r.current_shares_implied,
-                      r.target_shares_raw,
+                      r.price.toFixed(2),
+                      (r.current_weight * 100).toFixed(2),
+                      (r.target_weight * 100).toFixed(2),
+                      r.current_value.toFixed(2),
+                      r.target_value.toFixed(2),
+                      r.current_shares_implied.toFixed(2),
                       r.target_shares,
                       r.delta_shares,
-                      r.delta_value,
+                      r.delta_value.toFixed(2),
                       r.action,
                     ].join(","),
                   );
@@ -291,6 +289,8 @@ export default function RebalancePage({
                       "Tgt Wt%",
                       "Cur $Val",
                       "Tgt $Val",
+                      "Cur Shs",
+                      "Tgt Shs",
                       "Δ Shares",
                       "Δ $",
                       "Action",
@@ -331,6 +331,12 @@ export default function RebalancePage({
                       </td>
                       <td className="px-3 py-2">
                         ${r.target_value.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                      </td>
+                      <td className="px-3 py-2 font-mono text-[var(--color-muted)]">
+                        {r.current_shares_implied.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+                      </td>
+                      <td className="px-3 py-2 font-mono font-semibold text-[var(--color-text)]">
+                        {r.target_shares.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
                       </td>
                       <td
                         className={`px-3 py-2 font-semibold ${r.delta_shares > 0 ? "text-green-700" : r.delta_shares < 0 ? "text-red-700" : "text-[var(--color-muted)]"}`}

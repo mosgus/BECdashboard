@@ -101,6 +101,40 @@ def compute_betas(returns: pd.DataFrame, market_ticker: str) -> dict[str, float]
     return betas
 
 
+def compute_forward_looking_metrics(
+    weights: dict[str, float],
+    expected_returns: dict[str, float],
+    returns: pd.DataFrame,
+    rf: float = 0.0364,
+) -> dict:
+    """CAPM-implied forward-looking portfolio metrics.
+
+    Uses CAPM expected returns (not historical actuals) for the return estimate,
+    and the historical covariance matrix as the best available vol forecast.
+
+      expected_return = Σ wᵢ × E[Rᵢ]      (annual, from CAPM)
+      vol             = √(wᵀ Σ w)           (annual, from historical cov)
+      sharpe          = (expected_return − rf) / vol
+    """
+    tickers = [t for t in weights if t in expected_returns and t in returns.columns]
+    if not tickers:
+        return {}
+    w = np.array([weights[t] for t in tickers], dtype=float)
+    if w.sum() == 0:
+        return {}
+    w = w / w.sum()
+    exp_ret = np.array([expected_returns[t] for t in tickers], dtype=float)
+    cov_annual = returns[tickers].cov().values * 252
+    portfolio_return = float(np.dot(w, exp_ret))
+    portfolio_vol = float(np.sqrt(max(w @ cov_annual @ w, 0.0)))
+    portfolio_sharpe = (portfolio_return - rf) / portfolio_vol if portfolio_vol > 0 else 0.0
+    return {
+        "expected_return": round(portfolio_return, 6),
+        "vol": round(portfolio_vol, 6),
+        "sharpe": round(portfolio_sharpe, 6),
+    }
+
+
 def compute_capm_expected_returns(
     betas: dict[str, float],
     rf: float = 0.0364,

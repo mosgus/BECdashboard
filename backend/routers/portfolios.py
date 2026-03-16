@@ -24,6 +24,7 @@ from core.portfolio import (
     compute_betas,
     compute_capm_expected_returns,
     compute_equity_curve,
+    compute_forward_looking_metrics,
     compute_metrics,
     compute_returns,
     optimize_equal_weight,
@@ -72,7 +73,9 @@ class PortfolioNotional(BaseModel):
 
 class PositionUpsert(BaseModel):
     ticker: str
-    weight: Optional[float] = None  # 0–1, primary field; shares optional
+    weight: Optional[float] = None      # percentage units (25 = 25%); set by targets page
+    shares: Optional[float] = None      # number of shares; set by holdings page
+    cost_basis: Optional[float] = None  # per-share cost basis for P&L
 
     @field_validator("ticker")
     @classmethod
@@ -234,6 +237,83 @@ def _pos_dict(pos: Position) -> dict:
     }
 
 
+def _recompute_portfolio_from_shares(portfolio_id: uuid.UUID, db: Session) -> None:
+    """Recompute all position weights and portfolio notional from shares × live price.
+
+    Called after any add/update that sets shares. Only acts when at least one
+    position in the portfolio has shares recorded.
+    Weights are stored in percentage units (25.0 = 25 %) so the optimizer
+    and existing analytics code continue to work without changes.
+    """
+    positions = db.query(Position).filter(Position.portfolio_id == portfolio_id).all()
+    share_positions = [p for p in positions if p.shares is not None]
+    if not share_positions:
+        return
+
+    tickers_tuple = tuple(sorted(p.ticker for p in share_positions))
+    today = date.today()
+    start_str = (today - timedelta(days=10)).isoformat()
+    try:
+        prices_df = fetch_prices(tickers_tuple, start_str, today.isoformat())
+    except Exception:
+        prices_df = None
+
+    if prices_df is None or prices_df.empty:
+        return
+
+    # Latest close per ticker
+    latest: dict[str, float] = {}
+    for t in tickers_tuple:
+        if t in prices_df.columns:
+            s = prices_df[t].dropna()
+            if len(s) > 0:
+                latest[t] = float(s.iloc[-1])
+
+    # Market values
+    market_values: dict[str, float] = {}
+    for p in share_positions:
+        if p.ticker in latest:
+            market_values[p.ticker] = p.shares * latest[p.ticker]  # type: ignore[operator]
+
+    total_mv = sum(market_values.values())
+    if total_mv <= 0:
+        return
+
+    # Update weight (%) for share-based positions; leave weight-only positions untouched
+    for p in positions:
+        if p.ticker in market_values:
+            p.weight = round(market_values[p.ticker] / total_mv * 100, 4)
+
+    # Auto-update portfolio notional value to reflect current market value
+    portfolio = db.query(Portfolio).filter(Portfolio.id == portfolio_id).first()
+    if portfolio:
+        portfolio.notional_value = round(total_mv, 2)
+
+    db.commit()
+
+
+def _fetch_position_prices(positions: list[Position]) -> dict[str, float]:
+    """Return {ticker: latest_close} for all tickers in positions list. Never raises."""
+    if not positions:
+        return {}
+    tickers_tuple = tuple(sorted(p.ticker for p in positions))
+    today = date.today()
+    start_str = (today - timedelta(days=10)).isoformat()
+    try:
+        prices_df = fetch_prices(tickers_tuple, start_str, today.isoformat())
+        if prices_df is None or prices_df.empty:
+            return {}
+        out: dict[str, float] = {}
+        for t in tickers_tuple:
+            if t in prices_df.columns:
+                s = prices_df[t].dropna()
+                if len(s) > 0:
+                    out[t] = round(float(s.iloc[-1]), 4)
+        return out
+    except Exception:
+        return {}
+
+
 def _equity_records(
     port_equity: pd.Series, bench_equity: Optional[pd.Series] = None
 ) -> list[dict]:
@@ -280,13 +360,27 @@ def create_portfolio(
 def get_portfolio(portfolio_id: str, db: Session = Depends(get_db)) -> dict:
     p = _get_or_404(db, portfolio_id)
     positions = db.query(Position).filter(Position.portfolio_id == p.id).order_by(Position.ticker).all()
+
+    prices = _fetch_position_prices(positions)
+
+    def enrich(pos: Position) -> dict:
+        d = _pos_dict(pos)
+        price = prices.get(pos.ticker)
+        d["price"] = price
+        d["market_value"] = (
+            round(pos.shares * price, 2)
+            if pos.shares is not None and price is not None
+            else None
+        )
+        return d
+
     return {
         "id": str(p.id),
         "name": p.name,
         "created_at": p.created_at.isoformat(),
         "notional_value": float(p.notional_value) if p.notional_value is not None else None,
         "last_target_set": json.loads(p.last_target_set) if p.last_target_set else None,
-        "positions": [_pos_dict(pos) for pos in positions],
+        "positions": [enrich(pos) for pos in positions],
     }
 
 
@@ -376,11 +470,26 @@ def add_or_update_position(
         Position.portfolio_id == p.id, Position.ticker == body.ticker
     ).first()
     if existing:
-        existing.weight = body.weight
+        if body.shares is not None:
+            existing.shares = body.shares
+        if body.cost_basis is not None:
+            existing.cost_basis = body.cost_basis
+        if body.weight is not None:
+            existing.weight = body.weight
     else:
-        pos = Position(portfolio_id=p.id, ticker=body.ticker, weight=body.weight)
+        pos = Position(
+            portfolio_id=p.id,
+            ticker=body.ticker,
+            weight=body.weight,
+            shares=body.shares,
+            cost_basis=body.cost_basis,
+        )
         db.add(pos)
     db.commit()
+
+    # Recompute all weights from shares whenever shares are touched
+    if body.shares is not None:
+        _recompute_portfolio_from_shares(p.id, db)
 
     pos = db.query(Position).filter(
         Position.portfolio_id == p.id, Position.ticker == body.ticker
@@ -403,8 +512,20 @@ def update_position(
     ).first()
     if not pos:
         raise HTTPException(status_code=404, detail=f"Position {ticker} not found.")
-    pos.weight = body.weight
+    if body.shares is not None:
+        pos.shares = body.shares
+    if body.cost_basis is not None:
+        pos.cost_basis = body.cost_basis
+    if body.weight is not None:
+        pos.weight = body.weight
     db.commit()
+
+    if body.shares is not None:
+        _recompute_portfolio_from_shares(p.id, db)
+
+    pos = db.query(Position).filter(
+        Position.portfolio_id == p.id, Position.ticker == ticker
+    ).first()
     return _pos_dict(pos)
 
 
@@ -819,6 +940,7 @@ def optimize_portfolio(
             delta_mu[t] = body.kappa * u / 100.0  # % per 1% undervaluation → fraction
 
     feasible = True
+    _capm_exp_ret: dict[str, float] = {}   # populated only for max_sharpe_capm
     try:
         if body.mode == "equal_weight":
             target_dict = optimize_equal_weight(returns)
@@ -846,6 +968,7 @@ def optimize_portfolio(
             target_dict = optimize_max_sharpe_capm(
                 returns, exp_ret, rf=0.0364, max_weight=body.max_weight, min_weight=min_w
             )
+            _capm_exp_ret = exp_ret
         elif body.mode == "risk_parity":
             target_dict = optimize_risk_parity(returns, max_weight=body.max_weight)
         elif body.mode == "max_sortino":
@@ -901,6 +1024,22 @@ def optimize_portfolio(
         eq_data.append(row)
 
     as_of_date = str(returns.index[-1].date()) if len(returns) > 0 else end_str
+
+    # Forward-looking metrics only available for CAPM mode (uses model expected returns,
+    # not historical actuals, so the number reflects what the model actually optimised for).
+    forward_looking: dict | None = None
+    capm_expected_returns_out: dict | None = None
+    if _capm_exp_ret:
+        target_weights_dict = {t: round(float(target_w[i]), 4) for i, t in enumerate(valid_tickers)}
+        forward_looking = compute_forward_looking_metrics(
+            target_weights_dict, _capm_exp_ret, returns, rf=0.0364
+        )
+        capm_expected_returns_out = {
+            t: round(float(_capm_exp_ret[t]), 6)
+            for t in valid_tickers
+            if t in _capm_exp_ret
+        }
+
     return {
         "tickers": valid_tickers,
         "current_weights": {t: round(float(curr_w[i]), 4) for i, t in enumerate(valid_tickers)},
@@ -909,7 +1048,9 @@ def optimize_portfolio(
         "metrics": {
             "current": compute_metrics(curr_ret, bench_returns),
             "optimized": compute_metrics(opt_ret, bench_returns),
+            "forward_looking": forward_looking,
         },
+        "capm_expected_returns": capm_expected_returns_out,
         "equity_curves": eq_data,
         "feasible": feasible,
         "mode": body.mode,
