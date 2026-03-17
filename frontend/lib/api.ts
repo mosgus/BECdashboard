@@ -362,11 +362,6 @@ export const saveEmailConfig = (body: {
   recipients?: string | null;
 }): Promise<EmailConfig> => apiPut<EmailConfig>("/api/ops/email/config", body);
 
-// ── NBA Betting Intelligence ──────────────────────────────────────────────────
-
-export const fetchNbaPredictions = (w_xgb: number): Promise<import("@/types/nba").NBAPredictionsResponse> =>
-  apiGet<import("@/types/nba").NBAPredictionsResponse>("/api/nba/predictions", { w_xgb });
-
 export const emailDigest = (params?: {
   portfolio_id?: string;
   watchlist_id?: string;

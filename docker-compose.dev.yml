@@ -61,7 +61,7 @@ services:
       - dev-frontend-modules:/app/node_modules  # named vol populated from image on first run
       - dev-frontend-next:/app/.next            # named vol; avoids macOS<->Linux binary issues
     environment:
-      NEXT_PUBLIC_API_URL: http://100.108.230.75:8001  # read at dev-server start; not baked
+      NEXT_PUBLIC_API_URL: http://localhost:8001  # read at dev-server start; not baked
       NEXT_TELEMETRY_DISABLED: "1"
     depends_on:
       backend:
