@@ -98,6 +98,12 @@ export interface PortfolioAnalytics {
     ticker: string;
     signals: SignalResult[];
   }>;
+  bench_metrics?: {
+    cagr: number;
+    vol: number;
+    sharpe: number;
+    max_dd: number;
+  };
   warnings: string[];
   data_source?: string;
 }

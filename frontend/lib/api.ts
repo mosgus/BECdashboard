@@ -42,6 +42,7 @@ import {
 } from "@/types/sprint4";
 import { PortfolioValidationResult, PortfolioForecastResult } from "@/types/sprint6";
 import type { PortfolioHealthResult, ScenarioResult, ScenarioRequest, RebalanceResult, ExtendedTechnicalsResponse } from "@/types/sprint7";
+import type { CAPMOptimizeRequest, CAPMOptimizeResult, MonteCarloRequest, MonteCarloResult, EfficientFrontierResult } from "@/types/outlook";
 import { apiDelete, apiGet, apiPatch, apiPost, apiPut, apiUpload } from "./utils";
 
 // ── Portfolio & analytics ─────────────────────────────────────────────────────
@@ -372,3 +373,27 @@ export const emailDigest = (params?: {
     : "";
   return apiPost(`/api/ops/digest/email${qs}`, {});
 };
+
+// ── Outlook: CAPM Optimize + Monte Carlo ─────────────────────────────────────
+
+export const capmOptimize = (
+  id: string,
+  body: CAPMOptimizeRequest,
+): Promise<CAPMOptimizeResult> =>
+  apiPost<CAPMOptimizeResult>(`/api/portfolios/${id}/capm_optimize`, body);
+
+export const monteCarloSim = (
+  id: string,
+  body: MonteCarloRequest,
+): Promise<MonteCarloResult> =>
+  apiPost<MonteCarloResult>(`/api/portfolios/${id}/monte_carlo`, body);
+
+export const fetchEfficientFrontier = (
+  id: string,
+  rf = 0.0427,
+  numPoints = 30,
+): Promise<EfficientFrontierResult> =>
+  apiPost<EfficientFrontierResult>(`/api/portfolios/${id}/efficient_frontier`, {
+    num_points: numPoints,
+    rf,
+  });

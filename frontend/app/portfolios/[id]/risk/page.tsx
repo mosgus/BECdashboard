@@ -186,7 +186,64 @@ function PerformanceSection({ portfolioId }: { portfolioId: string }) {
         </div>
       ) : null}
 
-      {analytics?.metrics && <MetricCards metrics={analytics.metrics} />}
+      {/* Comparative metrics: Portfolio vs Benchmark side-by-side */}
+      {analytics?.metrics && (
+        <div className="rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-sm">
+          <h3 className="mb-3 text-sm font-semibold text-[var(--color-text)]">
+            Portfolio vs Benchmark (SPY)
+            <InfoTooltip text="Side-by-side comparison of key metrics. Portfolio metrics are simulated: current weights held constant over the lookback period." />
+          </h3>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b border-[var(--color-border)] text-[var(--color-muted)]">
+                  <th className="py-2 text-left font-medium">Metric</th>
+                  <th className="py-2 text-right font-medium">Portfolio</th>
+                  <th className="py-2 text-right font-medium">SPY</th>
+                  <th className="py-2 text-right font-medium">Diff</th>
+                </tr>
+              </thead>
+              <tbody>
+                {[
+                  { label: "CAGR", port: analytics.metrics.cagr, bench: analytics.bench_metrics?.cagr },
+                  { label: "Volatility", port: analytics.metrics.vol, bench: analytics.bench_metrics?.vol },
+                  { label: "Sharpe", port: analytics.metrics.sharpe, bench: analytics.bench_metrics?.sharpe, isFmt: true },
+                  { label: "Max Drawdown", port: analytics.metrics.max_dd, bench: analytics.bench_metrics?.max_dd },
+                ].map(({ label, port, bench, isFmt }) => {
+                  const diff = bench != null ? port - bench : null;
+                  const fmt = isFmt ? fmtNum : fmtPct;
+                  return (
+                    <tr key={label} className="border-b border-[var(--color-border)]">
+                      <td className="py-2 font-medium text-[var(--color-text)]">{label}</td>
+                      <td className="py-2 text-right font-semibold">{fmt(port)}</td>
+                      <td className="py-2 text-right text-[var(--color-muted)]">{bench != null ? fmt(bench) : "-"}</td>
+                      <td className={`py-2 text-right font-bold ${diff != null && diff > 0 ? "text-[var(--color-positive)]" : diff != null && diff < 0 ? "text-[var(--color-negative)]" : "text-[var(--color-muted)]"}`}>
+                        {diff != null ? (isFmt ? (diff > 0 ? "+" : "") + fmtNum(diff) : fmtPct(diff)) : "-"}
+                      </td>
+                    </tr>
+                  );
+                })}
+                {analytics.metrics.beta != null && (
+                  <tr className="border-b border-[var(--color-border)]">
+                    <td className="py-2 font-medium text-[var(--color-text)]">Beta</td>
+                    <td className="py-2 text-right font-semibold">{fmtNum(analytics.metrics.beta)}</td>
+                    <td className="py-2 text-right text-[var(--color-muted)]">1.00</td>
+                    <td className="py-2 text-right text-[var(--color-muted)]">{fmtNum(analytics.metrics.beta - 1)}</td>
+                  </tr>
+                )}
+                {analytics.metrics.alpha != null && (
+                  <tr className="border-b border-[var(--color-border)]">
+                    <td className="py-2 font-medium text-[var(--color-text)]">Alpha</td>
+                    <td className={`py-2 text-right font-bold ${analytics.metrics.alpha > 0 ? "text-[var(--color-positive)]" : "text-[var(--color-negative)]"}`}>{fmtPct(analytics.metrics.alpha)}</td>
+                    <td className="py-2 text-right text-[var(--color-muted)]">0.00%</td>
+                    <td className="py-2 text-right text-[var(--color-muted)]">-</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {analytics?.equity_curves?.length ? (
         <div className="rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-sm">
@@ -347,6 +404,15 @@ function HealthSection({ portfolioId }: { portfolioId: string }) {
         </div>
       </div>
 
+      {/* ── Mitigation Recommendations ──────────────────────────────────── */}
+      <MitigationPanel
+        hhi={data.concentration.hhi}
+        top5={data.concentration.top5}
+        beta={data.beta}
+        vol={data.vol}
+        portfolioId={portfolioId}
+      />
+
       <p className="text-xs text-[var(--color-muted)]">As of {data.as_of_date} · {data.data_source}</p>
 
       {data.warnings?.length > 0 && (
@@ -359,6 +425,103 @@ function HealthSection({ portfolioId }: { portfolioId: string }) {
     </div>
   );
 }
+
+
+// ── Mitigation Recommendations Panel ─────────────────────────────────────────
+
+function MitigationPanel({
+  hhi, top5, beta, vol, portfolioId,
+}: {
+  hhi: number; top5: number; beta: number | null; vol: number | null; portfolioId: string;
+}) {
+  const recs: { severity: "high" | "medium" | "low"; title: string; body: string; action?: string; link?: string }[] = [];
+
+  if (hhi > 0.15) {
+    recs.push({
+      severity: "high",
+      title: "High concentration risk",
+      body: `HHI of ${hhi.toFixed(3)} indicates a concentrated portfolio. Top 5 holdings account for ${(top5 * 100).toFixed(1)}% of the portfolio.`,
+      action: "Consider using Risk Parity or Max Diversification optimization.",
+      link: `/portfolios/${portfolioId}/targets`,
+    });
+  } else if (hhi > 0.08) {
+    recs.push({
+      severity: "medium",
+      title: "Moderate concentration",
+      body: `HHI of ${hhi.toFixed(3)} — portfolio is moderately concentrated. Consider adding positions to improve diversification.`,
+    });
+  }
+
+  if (beta != null && beta > 1.3) {
+    recs.push({
+      severity: "high",
+      title: "High market sensitivity",
+      body: `Portfolio beta of ${beta.toFixed(2)} amplifies market swings by ${((beta - 1) * 100).toFixed(0)}%.`,
+      action: "Consider adding defensive sectors (XLP, XLV, utilities) or non-correlated assets (GLD, bonds).",
+      link: `/portfolios/${portfolioId}/outlook`,
+    });
+  } else if (beta != null && beta > 1.1) {
+    recs.push({
+      severity: "medium",
+      title: "Above-market sensitivity",
+      body: `Beta of ${beta.toFixed(2)} — portfolio moves more than the market. Run CAPM optimization in the Outlook tab to explore alternatives.`,
+      link: `/portfolios/${portfolioId}/outlook`,
+    });
+  }
+
+  if (vol != null && vol > 0.25) {
+    recs.push({
+      severity: "high",
+      title: "Elevated volatility",
+      body: `Annualised vol of ${(vol * 100).toFixed(1)}% is significantly above typical balanced portfolios (12-18%).`,
+      action: "Consider the Target Volatility optimization mode to scale down to a comfortable vol level.",
+      link: `/portfolios/${portfolioId}/targets`,
+    });
+  } else if (vol != null && vol > 0.20) {
+    recs.push({
+      severity: "medium",
+      title: "Above-average volatility",
+      body: `Annualised vol of ${(vol * 100).toFixed(1)}%. Min Variance optimization can reduce this while staying fully invested.`,
+      link: `/portfolios/${portfolioId}/targets`,
+    });
+  }
+
+  if (recs.length === 0) {
+    recs.push({
+      severity: "low",
+      title: "Portfolio health looks good",
+      body: "No major concentration, beta, or volatility concerns detected. Continue monitoring periodically.",
+    });
+  }
+
+  const severityColors = {
+    high: "border-red-300 bg-red-50 text-red-800",
+    medium: "border-amber-300 bg-amber-50 text-amber-800",
+    low: "border-green-300 bg-green-50 text-green-800",
+  };
+
+  return (
+    <div className="rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-sm space-y-3">
+      <h3 className="text-sm font-semibold text-[var(--color-text)]">
+        Risk Mitigation Recommendations
+        <InfoTooltip text="Actionable suggestions based on current portfolio health metrics. Click links to navigate to relevant tools." />
+      </h3>
+      {recs.map((r, i) => (
+        <div key={i} className={`rounded-[var(--radius-btn)] border px-4 py-3 text-xs ${severityColors[r.severity]}`}>
+          <p className="font-semibold">{r.title}</p>
+          <p className="mt-1">{r.body}</p>
+          {r.action && <p className="mt-1 font-medium">{r.action}</p>}
+          {r.link && (
+            <Link href={r.link} className="mt-1 inline-block font-semibold underline hover:opacity-80">
+              Go to tool →
+            </Link>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 
 // ── Scenario Playbook helper ───────────────────────────────────────────────────
 

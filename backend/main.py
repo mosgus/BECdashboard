@@ -12,7 +12,7 @@ from routers import alert_rules, alerts, ops, optimize, portfolio, portfolios, t
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Safety net: create tables if alembic hasn't run yet (e.g. local dev without Docker)
+    # Safety net: create tables if alembic hasn't run yet
     Base.metadata.create_all(bind=engine)
 
     # Seed in-memory email config from DB so the evaluator and all email

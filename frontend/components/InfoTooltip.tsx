@@ -15,17 +15,18 @@ export default function InfoTooltip({ text }: Props) {
 
   return (
     <span className="relative inline-flex items-center">
-      <button
-        type="button"
+      <span
+        role="img"
+        aria-label="More info"
         onMouseEnter={() => setVisible(true)}
         onMouseLeave={() => setVisible(false)}
         onFocus={() => setVisible(true)}
         onBlur={() => setVisible(false)}
-        className="ml-1 text-[var(--color-muted)] hover:text-[var(--color-text)] transition-colors"
-        aria-label="More info"
+        tabIndex={0}
+        className="ml-1 text-[var(--color-muted)] hover:text-[var(--color-text)] transition-colors cursor-help"
       >
         <Info size={13} />
-      </button>
+      </span>
       {visible && (
         <span className="absolute left-5 top-0 z-50 w-56 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-2 text-xs text-[var(--color-text)] shadow-lg">
           {text}

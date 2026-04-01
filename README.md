@@ -22,56 +22,27 @@ Production-grade portfolio analytics web app for the Emory Practicum cohort.
 
 ---
 
-## Quick Start (Docker — recommended)
+## Quick Start
+
+### Prerequisites
+
+- Python 3.11+
+- Node.js 20+
+- PostgreSQL 16 (local install or hosted)
+
+### 1. Environment
 
 ```bash
 cp .env.example .env
-# Edit .env: set NEXT_PUBLIC_API_URL if not using localhost
-docker compose up --build
+# Edit .env: set DATABASE_URL and NEXT_PUBLIC_API_URL as needed
 ```
 
-- Frontend: `http://localhost:3000`
-- Backend docs: `http://localhost:8000/docs`
-
----
-
-## Dev Mode (No Rebuild Loop)
-
-Use `docker-compose.dev.yml` for local iteration. Source files are bind-mounted into the containers, so editing a `.py` or `.tsx` file hot-reloads instantly — no image rebuild required.
-
-```bash
-# First run (or after changing requirements.txt, package.json, or a Dockerfile)
-docker-compose -f docker-compose.dev.yml up --build
-
-# Normal iteration — source edits hot-reload automatically
-docker-compose -f docker-compose.dev.yml up
-
-# Rebuild only one service (e.g. after adding a new npm package)
-docker-compose -f docker-compose.dev.yml up --build frontend
-docker-compose -f docker-compose.dev.yml up --build backend
-```
-
-**How it works:**
-- **Backend**: bind-mounts `./backend` into `/app`; `uvicorn --reload` watches for `.py` changes. `alembic upgrade head` runs on every start (idempotent). Uses system Python — no venv needed.
-- **Frontend**: builds only the `deps` stage (runs `npm ci`; skips the full Next.js production build). Named volumes shadow `node_modules` and `.next` to prevent macOS↔Linux binary conflicts. On first `up --build`, Docker copies `node_modules` from the image layer into the empty named volume; subsequent starts skip the copy.
-- **Volumes**: `dev-pgdata`, `dev-frontend-modules`, `dev-frontend-next` — distinct from production volume names, so both can coexist on the same host.
-
-**Rebuild required when**: `requirements.txt`, `package.json`, or a `Dockerfile` changes. Not needed for source file edits.
-
----
-
-## Quick Start (Local Dev)
-
-### 1. Backend
-
-Requires Python 3.11 and a running Postgres instance (easiest: `docker compose up db` for just the DB).
+### 2. Backend
 
 ```bash
 cd backend
 python3.11 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-
-export DATABASE_URL=postgresql://blueeagle:blueeagle@localhost:5432/blueeagle
 
 alembic upgrade head          # run migrations
 uvicorn main:app --reload --port 8000
@@ -79,7 +50,7 @@ uvicorn main:app --reload --port 8000
 
 API docs: `http://localhost:8000/docs`
 
-### 2. Frontend
+### 3. Frontend
 
 ```bash
 cd frontend
@@ -105,13 +76,13 @@ No passwords, no JWT. Anyone can use the app:
 
 ## iPad / LAN Access
 
-Set `NEXT_PUBLIC_API_URL` in `.env` to your machine's IP (or Tailscale address) before building:
+Set `NEXT_PUBLIC_API_URL` in `.env` to your machine's IP (or Tailscale address):
 
 ```
 NEXT_PUBLIC_API_URL=http://100.108.230.75:8000
 ```
 
-Then rebuild the frontend image and restart. The value is baked into the JS bundle at build time.
+Then restart the frontend. The value is baked into the JS bundle at build time.
 
 ---
 
@@ -167,8 +138,6 @@ blue-eagle/
 1. Connect GitHub repo, root directory: `frontend`
 2. Environment variable: `NEXT_PUBLIC_API_URL=https://<render-service>.onrender.com`
 
-### Or: Single Docker Compose on Railway / Fly.io
-
 ---
 
 ## CAPM Optimizer
@@ -198,7 +167,7 @@ E[R_i] = rf + β_i × MRP + MRP × view_i
 
 ```bash
 # All 34 unit tests pass
-docker exec blue-eagle-backend-1 python -m pytest tests/ -v
+cd backend && python -m pytest tests/ -v
 
 # Universe endpoint (15 seeded tickers)
 curl http://localhost:8000/api/universe | python3 -m json.tool
@@ -213,12 +182,10 @@ curl "http://localhost:8000/api/ticker/AAPL/technicals?signals=1" \
   -H "X-Actor-Name: demo"
 
 # Sprint 2 tables in DB
-docker exec blue-eagle-db-1 psql -U blueeagle -c \
-  "\dt" | grep -E "universe_tickers|watchlists|portfolios|alerts|positions"
+psql -U blueeagle -c "\dt" | grep -E "universe_tickers|watchlists|portfolios|alerts|positions"
 
 # Actor captured in audit_log
-docker exec blue-eagle-db-1 psql -U blueeagle -c \
-  "SELECT actor, method, path FROM audit_log ORDER BY ts DESC LIMIT 5;"
+psql -U blueeagle -c "SELECT actor, method, path FROM audit_log ORDER BY ts DESC LIMIT 5;"
 ```
 
 ---
@@ -294,11 +261,9 @@ curl -X POST http://localhost:8000/api/alert_rules/evaluate_now \
 # /watchlists/{id} → Add ticker → same filtered dropdown
 # /alerts → Rules tab → scope=ticker → picker instead of raw input
 
-# 6. Dev compose hot reload
-docker-compose -f docker-compose.dev.yml up --build
-# Edit frontend/app/portfolios/page.tsx → browser updates without rebuild
+# 6. Hot reload
+# Edit frontend/app/portfolios/page.tsx → browser updates automatically
 # Edit backend/routers/portfolios.py → uvicorn logs "Detected change in..."
-# Edit frontend/package.json → must rebuild: docker-compose -f docker-compose.dev.yml up --build frontend
 ```
 
 ---

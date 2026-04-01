@@ -184,11 +184,22 @@ def _parse_portfolio_csv(content: str) -> list[dict]:
         except ValueError:
             return None
 
-    if "ticker" in fieldnames:
+    def _row_get(row: dict, *keys: str) -> str:
+        """Case-insensitive lookup across multiple possible column names."""
+        lower_map = {k.lower().strip(): v for k, v in row.items()}
+        for key in keys:
+            val = lower_map.get(key)
+            if val is not None:
+                return val
+        return ""
+
+    if "ticker" in fieldnames or "symbol" in fieldnames:
         return [
             {
-                "ticker": (row.get("ticker") or "").strip().upper(),
-                "weight": _parse_weight(row.get("weight") or ""),
+                "ticker": _row_get(row, "ticker", "symbol").strip().upper(),
+                "weight": _parse_weight(_row_get(row, "weight", "weight_pct", "pct", "allocation")),
+                "shares": _row_get(row, "shares", "quantity", "qty").strip() or None,
+                "cost_basis": _row_get(row, "price", "cost_basis", "cost").strip() or None,
             }
             for row in reader
         ]
@@ -201,6 +212,8 @@ def _parse_portfolio_csv(content: str) -> list[dict]:
         rows.append({
             "ticker": line[0].strip().upper(),
             "weight": _parse_weight(line[1]) if len(line) > 1 else None,
+            "shares": None,
+            "cost_basis": None,
         })
     return rows
 
@@ -579,13 +592,29 @@ def import_portfolio_csv(
     for row in rows:
         ticker = row["ticker"]
         weight = row["weight"]
+        shares_raw = row.get("shares")
+        cost_basis_raw = row.get("cost_basis")
 
-        if not ticker or ticker in ("TICKER", "SYMBOL"):
+        if not ticker or ticker in ("TICKER", "SYMBOL", "CASH"):
             continue
 
         if not _TICKER_RE.match(ticker):
             warnings.append(f"{ticker}: invalid format — skipped")
             continue
+
+        # Parse optional numeric fields
+        shares = None
+        if shares_raw:
+            try:
+                shares = int(float(shares_raw))
+            except (ValueError, TypeError):
+                pass
+        cost_basis = None
+        if cost_basis_raw:
+            try:
+                cost_basis = float(cost_basis_raw)
+            except (ValueError, TypeError):
+                pass
 
         # Ensure ticker is in active universe; auto-add if missing
         ut = db.query(UniverseTicker).filter(UniverseTicker.ticker == ticker).first()
@@ -605,12 +634,21 @@ def import_portfolio_csv(
         ).first()
         if existing:
             existing.weight = weight
+            if shares is not None:
+                existing.shares = shares
+            if cost_basis is not None:
+                existing.cost_basis = cost_basis
             positions_updated += 1
         else:
-            db.add(Position(portfolio_id=p.id, ticker=ticker, weight=weight))
+            db.add(Position(portfolio_id=p.id, ticker=ticker, weight=weight,
+                            shares=shares, cost_basis=cost_basis))
             positions_added += 1
 
     db.commit()
+
+    # Recompute weights + notional from shares × live price (needed for Rebalance tab)
+    _recompute_portfolio_from_shares(p.id, db)
+
     return {
         "positions_added": positions_added,
         "positions_updated": positions_updated,
@@ -827,6 +865,7 @@ def get_analytics(
     eq_data = _equity_records(port_equity, bench_equity)
 
     metrics = compute_metrics(port_returns, bench_returns)
+    bench_metrics = compute_metrics(bench_returns) if bench_returns is not None else {}
 
     # Exit signals per ticker (last 400 trading days of price)
     signals_by_ticker = []
@@ -847,6 +886,7 @@ def get_analytics(
         "tickers": valid_tickers,
         "weights": {t: round(float(valid_weights[i]), 4) for i, t in enumerate(valid_tickers)},
         "metrics": metrics,
+        "bench_metrics": bench_metrics,
         "equity_curves": eq_data,
         "signals_by_ticker": signals_by_ticker,
         "warnings": warnings,
@@ -1509,3 +1549,493 @@ def compute_portfolio_rebalance(
     result["as_of_date"] = date.today().isoformat()
     result["warnings"] = []
     return result
+
+
+# ── CAPM Optimize (Outlook tab — notebook replication) ────────────────────────
+
+class TickerConfig(BaseModel):
+    freeze: bool = False
+    view: float = 0.0          # undervaluation % as fraction (-0.5 to 1.0)
+    min_pct: float = 0.0
+    max_pct: float = 100.0
+
+class CAPMOptimizeRequest(BaseModel):
+    target_value: float = 1_000_000
+    rf: float = 0.0364
+    mrp: float = 0.05
+    market_ticker: str = "VT"
+    ticker_configs: dict[str, TickerConfig] = {}
+    start: Optional[str] = None
+    end: Optional[str] = None
+
+
+@router.post("/portfolios/{portfolio_id}/capm_optimize")
+def capm_optimize(
+    portfolio_id: str,
+    body: CAPMOptimizeRequest,
+    db: Session = Depends(get_db),
+    _: None = Depends(require_write_key),
+) -> dict:
+    """CAPM-based optimization with freeze/view controls, action table, VaR, and CAL data.
+
+    Replicates the Colab notebook logic: computes betas via OLS, CAPM expected returns
+    with analyst views, runs Max-Sharpe optimisation, then maps weights to share quantities.
+    """
+    from scipy.stats import norm as sp_norm
+
+    p = _get_or_404(db, portfolio_id)
+    positions = db.query(Position).filter(Position.portfolio_id == p.id).order_by(Position.ticker).all()
+    if len(positions) < 2:
+        raise HTTPException(status_code=422, detail="Need at least 2 positions to optimize.")
+
+    tickers = [pos.ticker for pos in positions]
+    shares_map = {pos.ticker: float(pos.shares or 0) for pos in positions}
+
+    today = date.today()
+    end_str = body.end or today.isoformat()
+    start_str = body.start or (today - timedelta(days=DEFAULT_LOOKBACK_DAYS)).isoformat()
+
+    # Fetch prices for holdings + market ticker
+    all_tickers = tuple(sorted(set(tickers + [body.market_ticker])))
+    prices = fetch_prices(all_tickers, start_str, end_str)
+    if prices is None or prices.empty:
+        raise HTTPException(status_code=422, detail="Could not fetch price data.")
+
+    valid_tickers = [t for t in tickers if t in prices.columns]
+    if len(valid_tickers) < 2:
+        raise HTTPException(status_code=422, detail="Need price data for at least 2 tickers.")
+
+    # Latest prices for share calculations
+    latest_prices = {t: float(prices[t].dropna().iloc[-1]) for t in valid_tickers}
+
+    # Current portfolio state
+    current_values = {t: shares_map.get(t, 0) * latest_prices.get(t, 0) for t in valid_tickers}
+    current_total = sum(current_values.values()) or 1.0
+    current_pcts = {t: v / current_total for t, v in current_values.items()}
+
+    # Compute returns and betas
+    returns = compute_returns(prices)
+    betas = compute_betas(returns, body.market_ticker)
+
+    # Build views and bounds from ticker_configs
+    views: dict[str, float] = {}
+    asset_bounds: dict[str, tuple[float, float]] = {}
+
+    for t in valid_tickers:
+        cfg = body.ticker_configs.get(t, TickerConfig())
+        views[t] = cfg.view
+
+        if cfg.freeze:
+            # Lock at current allocation
+            frozen_w = current_pcts.get(t, 0.0)
+            asset_bounds[t] = (frozen_w, frozen_w)
+        else:
+            asset_bounds[t] = (cfg.min_pct / 100.0, cfg.max_pct / 100.0)
+
+    # CAPM expected returns with views
+    exp_ret = compute_capm_expected_returns(betas, rf=body.rf, mrp=body.mrp, views=views)
+
+    # Optimise
+    try:
+        target_dict = optimize_max_sharpe_capm(
+            returns, exp_ret, rf=body.rf,
+            max_weight=1.0, min_weight=0.0,
+            asset_bounds=asset_bounds,
+        )
+    except RuntimeError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+    # ── Action Table ──────────────────────────────────────────────────────────
+    target_value = body.target_value
+    action_table = []
+    for t in valid_tickers:
+        price = latest_prices[t]
+        cur_shares = shares_map.get(t, 0)
+        cur_val = cur_shares * price
+        cur_pct = current_pcts.get(t, 0.0)
+
+        opt_w = target_dict.get(t, 0.0)
+        tgt_val = opt_w * target_value
+        tgt_shares = tgt_val / price if price > 0 else 0
+        tgt_shares_int = int(tgt_shares)
+
+        action_shares = tgt_shares_int - cur_shares
+        action_dollars = action_shares * price
+        action_pct = opt_w - cur_pct
+
+        action_table.append({
+            "ticker": t,
+            "price": round(price, 2),
+            "current_shares": int(cur_shares),
+            "current_value": round(cur_val, 2),
+            "current_pct": round(cur_pct * 100, 4),
+            "target_shares": tgt_shares_int,
+            "target_value": round(tgt_shares_int * price, 2),
+            "target_pct": round(opt_w * 100, 4),
+            "action_shares": int(action_shares),
+            "action_dollars": round(action_dollars, 2),
+            "action_pct": round(action_pct * 100, 4),
+        })
+
+    action_table.sort(key=lambda r: r["target_pct"], reverse=True)
+
+    # ── Portfolio Metrics ─────────────────────────────────────────────────────
+    opt_weights_arr = np.array([target_dict.get(t, 0.0) for t in valid_tickers])
+    exp_ret_arr = np.array([exp_ret.get(t, body.rf) for t in valid_tickers])
+    cov_annual = returns[valid_tickers].cov().values * 252
+
+    port_ret = float(np.dot(opt_weights_arr, exp_ret_arr))
+    port_vol = float(np.sqrt(opt_weights_arr @ cov_annual @ opt_weights_arr))
+    port_sharpe = (port_ret - body.rf) / port_vol if port_vol > 0 else 0.0
+    port_beta = float(np.sum([betas.get(t, 0.0) * target_dict.get(t, 0.0) for t in valid_tickers]))
+
+    # ── VaR (95% parametric) ──────────────────────────────────────────────────
+    z95 = float(sp_norm.ppf(0.05))
+    var_95 = {
+        "daily": round(port_ret / 252 + z95 * port_vol / np.sqrt(252), 6),
+        "weekly": round(port_ret / 52 + z95 * port_vol / np.sqrt(52), 6),
+        "monthly": round(port_ret / 12 + z95 * port_vol / np.sqrt(12), 6),
+        "quarterly": round(port_ret / 4 + z95 * port_vol / np.sqrt(4), 6),
+        "annual": round(port_ret + z95 * port_vol, 6),
+    }
+
+    # ── CAPM Details ──────────────────────────────────────────────────────────
+    capm_details = []
+    for t in valid_tickers:
+        beta_val = betas.get(t, 0.0)
+        capm_ret = body.rf + beta_val * body.mrp
+        adj_ret = exp_ret.get(t, capm_ret)
+        capm_details.append({
+            "ticker": t,
+            "beta": round(beta_val, 4),
+            "capm_return": round(capm_ret, 6),
+            "view": views.get(t, 0.0),
+            "adj_return": round(adj_ret, 6),
+            "opt_weight": round(target_dict.get(t, 0.0), 6),
+        })
+
+    # ── CAL Data (for Risk vs Return chart) ───────────────────────────────────
+    asset_vols = np.sqrt(np.diag(cov_annual))
+    assets_cal = []
+    for i, t in enumerate(valid_tickers):
+        orig_ret = body.rf + betas.get(t, 0.0) * body.mrp
+        assets_cal.append({
+            "ticker": t,
+            "vol": round(float(asset_vols[i]), 6),
+            "orig_return": round(orig_ret, 6),
+            "adj_return": round(exp_ret.get(t, orig_ret), 6),
+        })
+
+    cal_data = {
+        "rf": body.rf,
+        "optimal": {"vol": round(port_vol, 6), "ret": round(port_ret, 6)},
+        "leverage_2x": {
+            "vol": round(2 * port_vol, 6),
+            "ret": round(body.rf + 2 * (port_ret - body.rf), 6),
+        },
+        "leverage_3x": {
+            "vol": round(3 * port_vol, 6),
+            "ret": round(body.rf + 3 * (port_ret - body.rf), 6),
+        },
+        "assets": assets_cal,
+    }
+
+    return {
+        "portfolio_id": portfolio_id,
+        "action_table": action_table,
+        "metrics": {
+            "expected_return": round(port_ret, 6),
+            "expected_vol": round(port_vol, 6),
+            "expected_sharpe": round(port_sharpe, 4),
+            "portfolio_beta": round(port_beta, 4),
+        },
+        "var_95": var_95,
+        "capm_details": capm_details,
+        "cal_data": cal_data,
+        "as_of_date": end_str,
+    }
+
+
+# ── Monte Carlo Simulation ───────────────────────────────────────────────────
+
+class MonteCarloRequest(BaseModel):
+    num_simulations: int = 1000
+    horizon_days: int = 252
+    initial_value: float = 1_000_000
+    start: Optional[str] = None
+    end: Optional[str] = None
+
+
+@router.post("/portfolios/{portfolio_id}/monte_carlo")
+def monte_carlo_sim(
+    portfolio_id: str,
+    body: MonteCarloRequest,
+    db: Session = Depends(get_db),
+) -> dict:
+    """Monte Carlo simulation of portfolio forward returns using GBM."""
+    p = _get_or_404(db, portfolio_id)
+    positions = db.query(Position).filter(Position.portfolio_id == p.id).order_by(Position.ticker).all()
+    if len(positions) < 1:
+        raise HTTPException(status_code=422, detail="No positions in portfolio.")
+
+    tickers = [pos.ticker for pos in positions]
+    raw_w = [(pos.weight or 1.0) for pos in positions]
+    total_w = sum(raw_w) or 1.0
+    weights = np.array([w / total_w for w in raw_w])
+
+    today = date.today()
+    end_str = body.end or today.isoformat()
+    start_str = body.start or (today - timedelta(days=DEFAULT_LOOKBACK_DAYS)).isoformat()
+
+    prices = fetch_prices(tuple(sorted(tickers)), start_str, end_str)
+    if prices is None or prices.empty:
+        raise HTTPException(status_code=422, detail="Could not fetch price data.")
+
+    valid = [t for t in tickers if t in prices.columns]
+    if not valid:
+        raise HTTPException(status_code=422, detail="No price data for any holding.")
+
+    vw = np.array([weights[tickers.index(t)] for t in valid])
+    vw = vw / vw.sum()
+
+    returns = compute_returns(prices[valid])
+    port_returns = (returns * vw).sum(axis=1)
+
+    mu = float(port_returns.mean())
+    sigma = float(port_returns.std())
+
+    rng = np.random.default_rng(42)
+    simulations = np.zeros((body.num_simulations, body.horizon_days + 1))
+    simulations[:, 0] = body.initial_value
+
+    for t in range(1, body.horizon_days + 1):
+        z = rng.standard_normal(body.num_simulations)
+        daily_ret = mu + sigma * z
+        simulations[:, t] = simulations[:, t - 1] * (1 + daily_ret)
+
+    # Percentile paths
+    percentiles = [5, 25, 50, 75, 95]
+    paths_summary = []
+    for t in range(0, body.horizon_days + 1, max(1, body.horizon_days // 60)):
+        row = {"day": t}
+        for p_val in percentiles:
+            row[f"p{p_val}"] = round(float(np.percentile(simulations[:, t], p_val)), 2)
+        paths_summary.append(row)
+    # Always include final day
+    if paths_summary[-1]["day"] != body.horizon_days:
+        row = {"day": body.horizon_days}
+        for p_val in percentiles:
+            row[f"p{p_val}"] = round(float(np.percentile(simulations[:, body.horizon_days], p_val)), 2)
+        paths_summary.append(row)
+
+    terminal = simulations[:, -1]
+    terminal_returns = terminal / body.initial_value - 1
+
+    return {
+        "portfolio_id": portfolio_id,
+        "paths_summary": paths_summary,
+        "terminal_stats": {
+            "mean": round(float(terminal.mean()), 2),
+            "median": round(float(np.median(terminal)), 2),
+            "p5": round(float(np.percentile(terminal, 5)), 2),
+            "p25": round(float(np.percentile(terminal, 25)), 2),
+            "p75": round(float(np.percentile(terminal, 75)), 2),
+            "p95": round(float(np.percentile(terminal, 95)), 2),
+            "prob_loss": round(float((terminal < body.initial_value).mean()), 4),
+            "mean_return": round(float(terminal_returns.mean()), 6),
+            "median_return": round(float(np.median(terminal_returns)), 6),
+        },
+        "horizon_days": body.horizon_days,
+        "num_simulations": body.num_simulations,
+        "initial_value": body.initial_value,
+        "as_of_date": end_str,
+        "brier_scoring": _compute_brier_scoring(port_returns, mu, sigma, body.horizon_days, body.num_simulations, body.initial_value),
+    }
+
+
+def _compute_brier_scoring(
+    port_returns: pd.Series,
+    mu: float,
+    sigma: float,
+    horizon: int,
+    num_sims: int,
+    initial_value: float,
+) -> dict:
+    """Hold-out calibration: simulate from split point forward and compare vs actuals."""
+    n = len(port_returns)
+    if n < horizon + 60:
+        return {"brier_score": None, "coverage_50": None, "coverage_90": None, "interpretation": "insufficient_data"}
+
+    split = n - horizon
+    actual_returns = port_returns.iloc[split:].values
+    actual_path = initial_value * np.cumprod(1 + actual_returns)
+
+    # Train on first 'split' days
+    train = port_returns.iloc[:split]
+    train_mu = float(train.mean())
+    train_sigma = float(train.std())
+
+    rng = np.random.default_rng(99)
+    sims = np.zeros((num_sims, horizon))
+    sims[:, 0] = initial_value * (1 + train_mu + train_sigma * rng.standard_normal(num_sims))
+    for t in range(1, horizon):
+        z = rng.standard_normal(num_sims)
+        sims[:, t] = sims[:, t - 1] * (1 + train_mu + train_sigma * z)
+
+    # Check coverage: what fraction of actuals fell within predicted bands
+    in_50 = 0
+    in_90 = 0
+    brier_sum = 0.0
+    check_points = min(len(actual_path), horizon)
+
+    for t in range(check_points):
+        col = sims[:, t]
+        p25, p75 = np.percentile(col, [25, 75])
+        p5, p95 = np.percentile(col, [5, 95])
+        actual = actual_path[t]
+
+        if p25 <= actual <= p75:
+            in_50 += 1
+        if p5 <= actual <= p95:
+            in_90 += 1
+
+        # Brier-style: probability of being above actual
+        prob_above = float((col >= actual).mean())
+        outcome = 1.0  # actual is a realized point
+        brier_sum += (prob_above - 0.5) ** 2
+
+    coverage_50 = round(in_50 / check_points, 4) if check_points > 0 else None
+    coverage_90 = round(in_90 / check_points, 4) if check_points > 0 else None
+    brier_score = round(brier_sum / check_points, 4) if check_points > 0 else None
+
+    # Interpretation
+    if coverage_90 is not None:
+        if 0.85 <= coverage_90 <= 0.95:
+            interp = "well_calibrated"
+        elif coverage_90 < 0.85:
+            interp = "overconfident"
+        else:
+            interp = "underconfident"
+    else:
+        interp = "insufficient_data"
+
+    return {
+        "brier_score": brier_score,
+        "coverage_50": coverage_50,
+        "coverage_90": coverage_90,
+        "interpretation": interp,
+    }
+
+
+# ── Efficient Frontier ───────────────────────────────────────────────────────
+
+class EfficientFrontierRequest(BaseModel):
+    num_points: int = 30
+    rf: float = 0.0427
+    start: Optional[str] = None
+    end: Optional[str] = None
+
+
+@router.post("/portfolios/{portfolio_id}/efficient_frontier")
+def efficient_frontier(
+    portfolio_id: str,
+    body: EfficientFrontierRequest,
+    db: Session = Depends(get_db),
+) -> dict:
+    """Compute the mean-variance efficient frontier for a portfolio's holdings."""
+    from scipy.optimize import minimize
+
+    p = _get_or_404(db, portfolio_id)
+    positions = db.query(Position).filter(Position.portfolio_id == p.id).order_by(Position.ticker).all()
+    if len(positions) < 2:
+        raise HTTPException(status_code=422, detail="Need at least 2 positions.")
+
+    tickers = [pos.ticker for pos in positions]
+    raw_w = [(pos.weight or 1.0) for pos in positions]
+    total_w = sum(raw_w) or 1.0
+    current_weights = np.array([w / total_w for w in raw_w])
+
+    today = date.today()
+    end_str = body.end or today.isoformat()
+    start_str = body.start or (today - timedelta(days=DEFAULT_LOOKBACK_DAYS)).isoformat()
+
+    prices = fetch_prices(tuple(sorted(tickers)), start_str, end_str)
+    if prices is None or prices.empty:
+        raise HTTPException(status_code=422, detail="Could not fetch price data.")
+
+    valid = [t for t in tickers if t in prices.columns]
+    if len(valid) < 2:
+        raise HTTPException(status_code=422, detail="Need price data for at least 2 tickers.")
+
+    vw = np.array([current_weights[tickers.index(t)] for t in valid])
+    vw = vw / vw.sum()
+    n = len(valid)
+
+    returns = compute_returns(prices[valid])
+    mean_ret = returns.mean().values * 252
+    cov_annual = returns.cov().values * 252
+
+    # Current portfolio metrics
+    cur_ret = float(np.dot(vw, mean_ret))
+    cur_vol = float(np.sqrt(vw @ cov_annual @ vw))
+
+    # Sweep target returns for min-variance frontier
+    # Use a feasible range: from the min-variance portfolio return to the max single-asset return
+    # First find the unconstrained min-variance point
+    def _pv(w: np.ndarray) -> float:
+        return float(np.sqrt(w @ cov_annual @ w))
+    mv_res = minimize(_pv, np.ones(n) / n, method="SLSQP",
+                      bounds=tuple((0.0, 1.0) for _ in range(n)),
+                      constraints=[{"type": "eq", "fun": lambda w: w.sum() - 1.0}],
+                      options={"ftol": 1e-10, "maxiter": 1000})
+    mv_ret = float(np.dot(mv_res.x, mean_ret)) if mv_res.success else float(mean_ret.min())
+    max_ret_val = float(mean_ret.max())
+    target_rets = np.linspace(mv_ret, max_ret_val, body.num_points)
+
+    frontier = []
+    min_var_point = None
+    max_sharpe_point = None
+    best_sharpe = -999.0
+
+    for tr in target_rets:
+        def port_vol_obj(w: np.ndarray) -> float:
+            return float(np.sqrt(w @ cov_annual @ w))
+
+        constraints = [
+            {"type": "eq", "fun": lambda w: w.sum() - 1.0},
+            {"type": "eq", "fun": lambda w, _tr=tr: np.dot(w, mean_ret) - _tr},
+        ]
+        bounds = tuple((0.0, 1.0) for _ in range(n))
+        x0 = np.ones(n) / n
+
+        try:
+            result = minimize(port_vol_obj, x0, method="SLSQP", bounds=bounds,
+                            constraints=constraints, options={"ftol": 1e-10, "maxiter": 1000})
+            if result.success:
+                vol = float(np.sqrt(result.x @ cov_annual @ result.x))
+                ret = float(np.dot(result.x, mean_ret))
+                frontier.append({"vol": round(vol, 6), "ret": round(ret, 6)})
+
+                # Track min variance
+                if min_var_point is None or vol < min_var_point["vol"]:
+                    min_var_point = {"vol": round(vol, 6), "ret": round(ret, 6)}
+
+                # Track max Sharpe
+                sharpe = (ret - body.rf) / vol if vol > 0 else 0
+                if sharpe > best_sharpe:
+                    best_sharpe = sharpe
+                    max_sharpe_point = {"vol": round(vol, 6), "ret": round(ret, 6)}
+        except Exception:
+            continue
+
+    # Sort by vol
+    frontier.sort(key=lambda p: p["vol"])
+
+    return {
+        "portfolio_id": portfolio_id,
+        "frontier": frontier,
+        "current_portfolio": {"vol": round(cur_vol, 6), "ret": round(cur_ret, 6)},
+        "max_sharpe": max_sharpe_point,
+        "min_variance": min_var_point,
+        "as_of_date": end_str,
+    }
