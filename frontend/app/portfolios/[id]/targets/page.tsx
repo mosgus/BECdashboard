@@ -508,23 +508,13 @@ export default function TargetsPage({
             <button
               onClick={() => applyOptMut.mutate(result.target_weights)}
               disabled={applyOptMut.isPending}
-              className="rounded-[var(--radius-btn)] bg-green-600 px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50 transition-opacity"
+              className="rounded-[var(--radius-btn)] bg-green-600 px-5 py-2.5 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50 transition-opacity"
             >
               {applyOptMut.isPending ? "Applying…" : "Apply to Portfolio"}
             </button>
-            <button
-              onClick={async () => {
-                await applyOptMut.mutateAsync(result.target_weights);
-                router.push(`/portfolios/${portfolioId}/rebalance`);
-              }}
-              disabled={applyOptMut.isPending}
-              className="rounded-[var(--radius-btn)] border border-green-600 px-4 py-2 text-sm font-semibold text-green-700 hover:bg-green-50 disabled:opacity-50 transition-colors"
-            >
-              Apply + Open Rebalance
-            </button>
             {applySuccess && (
               <span className="rounded-full bg-green-100 px-3 py-1 text-xs font-semibold text-green-700">
-                Targets applied — Holdings updated.
+                Weights saved and applied.
               </span>
             )}
           </div>
@@ -579,97 +569,93 @@ export default function TargetsPage({
             </div>
           </div>
 
-          {/* Rebalance Plan table (weights only) */}
-          <div className="rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-sm">
-            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-              <h3 className="text-sm font-semibold text-[var(--color-text)]">
-                Target Weights
-                <InfoTooltip text="Delta = target weight minus current weight. Positive = buy more; negative = trim. Go to Rebalance for whole-share trade quantities." />
-              </h3>
-              <div className="flex items-center gap-3">
-                {(() => {
-                  const to =
-                    0.5 *
-                    Object.values(result.implied_trades).reduce(
-                      (s, v) => s + Math.abs(v as number),
-                      0,
-                    );
-                  return (
-                    <span className="rounded-full border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-1 text-xs font-semibold text-[var(--color-muted)]">
-                      TO: {(to * 100).toFixed(1)}%
-                    </span>
-                  );
-                })()}
-                <button
-                  className="rounded-[var(--radius-btn)] border border-[var(--color-border)] px-3 py-1 text-xs font-semibold text-[var(--color-text)] hover:bg-[var(--color-bg)] transition-colors"
-                  onClick={() => {
-                    const rows = result.tickers.map((t) => {
-                      const delta = result.implied_trades[t] ?? 0;
-                      return [
-                        t,
-                        result.current_weights[t],
-                        result.target_weights[t],
-                        delta,
-                      ].join(",");
-                    });
-                    const csv = [
-                      "ticker,current_weight,target_weight,delta",
-                      ...rows,
-                    ].join("\n");
-                    const blob = new Blob([csv], { type: "text/csv" });
-                    const url = URL.createObjectURL(blob);
-                    const a = document.createElement("a");
-                    a.href = url;
-                    a.download = "target_weights.csv";
-                    a.click();
-                    URL.revokeObjectURL(url);
-                  }}
-                >
-                  Export CSV
-                </button>
-              </div>
-            </div>
-            <div className="overflow-auto">
-              <table className="w-full text-xs">
-                <thead className="border-b border-[var(--color-border)] bg-gray-50">
-                  <tr>
-                    {["Ticker", "Current", "Target", "Δ (delta)"].map((h) => (
-                      <th
-                        key={h}
-                        className="px-3 py-2 text-left font-semibold text-[var(--color-muted)]"
-                      >
-                        {h}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {result.tickers.map((t) => {
-                    const delta = result.implied_trades[t] ?? 0;
-                    return (
-                      <tr key={t} className="hover:bg-gray-50">
-                        <td className="px-3 py-2 font-mono font-medium">
-                          {t}
-                        </td>
-                        <td className="px-3 py-2">
-                          {fmtPct(result.current_weights[t])}
-                        </td>
-                        <td className="px-3 py-2">
-                          {fmtPct(result.target_weights[t])}
-                        </td>
-                        <td
-                          className={`px-3 py-2 font-semibold ${colorForValue(delta)}`}
-                        >
-                          {delta >= 0 ? "+" : ""}
-                          {fmtPct(delta)}
-                        </td>
+          {/* Action Table (shares, $, %) */}
+          {(() => {
+            const totalValue = (data?.notional_value ?? positions.reduce((s, p) => s + (p.market_value ?? 0), 0)) || 1;
+            const posMap = Object.fromEntries(positions.map((p) => [p.ticker, p]));
+            const actionRows = result.tickers.map((t) => {
+              const pos = posMap[t];
+              const price = pos?.price ?? 0;
+              const curShares = pos?.shares ?? 0;
+              const curVal = curShares * price;
+              const curPct = result.current_weights[t] ?? 0;
+              const tgtPct = result.target_weights[t] ?? 0;
+              const tgtVal = tgtPct * totalValue;
+              const tgtShares = price > 0 ? Math.floor(tgtVal / price) : 0;
+              const actShares = tgtShares - curShares;
+              const actDollars = actShares * price;
+              const actPct = tgtPct - curPct;
+              return { ticker: t, price, curShares, curVal, curPct, tgtShares, tgtVal: tgtShares * price, tgtPct, actShares, actDollars, actPct };
+            }).sort((a, b) => b.tgtPct - a.tgtPct);
+
+            return (
+              <div className="rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-sm">
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                  <h3 className="text-sm font-semibold text-[var(--color-text)]">
+                    Action Table
+                    <InfoTooltip text="Shows recommended trades to move from current holdings to the optimized portfolio. Shares are floored to whole numbers." />
+                  </h3>
+                  <button
+                    className="rounded-[var(--radius-btn)] border border-[var(--color-border)] px-3 py-1 text-xs font-semibold text-[var(--color-text)] hover:bg-[var(--color-bg)] transition-colors"
+                    onClick={() => {
+                      const header = "Ticker,Price,Cur Shares,Cur Value,Cur %,Tgt Shares,Tgt Value,Tgt %,Action Shares,Action $,Action %";
+                      const rows = actionRows.map((r) =>
+                        [r.ticker, r.price.toFixed(2), r.curShares, r.curVal.toFixed(2), (r.curPct * 100).toFixed(2), r.tgtShares, r.tgtVal.toFixed(2), (r.tgtPct * 100).toFixed(2), r.actShares, r.actDollars.toFixed(2), (r.actPct * 100).toFixed(2)].join(",")
+                      );
+                      const blob = new Blob([[header, ...rows].join("\n")], { type: "text/csv" });
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement("a");
+                      a.href = url;
+                      a.download = "action_table.csv";
+                      a.click();
+                      URL.revokeObjectURL(url);
+                    }}
+                  >
+                    Export CSV
+                  </button>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="border-b border-[var(--color-border)] text-[var(--color-muted)]">
+                        <th className="py-2 text-left font-medium">Ticker</th>
+                        <th className="py-2 text-right font-medium">Price</th>
+                        <th className="py-2 text-right font-medium">Cur Shares</th>
+                        <th className="py-2 text-right font-medium">Cur Value</th>
+                        <th className="py-2 text-right font-medium">Cur %</th>
+                        <th className="py-2 text-right font-medium">Tgt Shares</th>
+                        <th className="py-2 text-right font-medium">Tgt Value</th>
+                        <th className="py-2 text-right font-medium">Tgt %</th>
+                        <th className="py-2 text-right font-medium">Action Shs</th>
+                        <th className="py-2 text-right font-medium">Action $</th>
+                        <th className="py-2 text-right font-medium">Action %</th>
                       </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </div>
+                    </thead>
+                    <tbody>
+                      {actionRows.map((r) => {
+                        const color = r.actShares > 0 ? "text-[var(--color-positive)]" : r.actShares < 0 ? "text-[var(--color-negative)]" : "text-[var(--color-muted)]";
+                        return (
+                          <tr key={r.ticker} className="border-b border-[var(--color-border)]">
+                            <td className="py-2 font-medium text-[var(--color-text)]">{r.ticker}</td>
+                            <td className="py-2 text-right">${r.price.toLocaleString("en-US", { minimumFractionDigits: 2 })}</td>
+                            <td className="py-2 text-right">{r.curShares.toLocaleString()}</td>
+                            <td className="py-2 text-right">${r.curVal.toLocaleString("en-US", { maximumFractionDigits: 0 })}</td>
+                            <td className="py-2 text-right">{(r.curPct * 100).toFixed(2)}%</td>
+                            <td className="py-2 text-right">{r.tgtShares.toLocaleString()}</td>
+                            <td className="py-2 text-right">${r.tgtVal.toLocaleString("en-US", { maximumFractionDigits: 0 })}</td>
+                            <td className="py-2 text-right font-semibold">{(r.tgtPct * 100).toFixed(2)}%</td>
+                            <td className={`py-2 text-right font-bold ${color}`}>{r.actShares > 0 ? "+" : ""}{r.actShares.toLocaleString()}</td>
+                            <td className={`py-2 text-right font-bold ${color}`}>{r.actDollars > 0 ? "+$" : r.actDollars < 0 ? "-$" : "$"}{Math.abs(r.actDollars).toLocaleString("en-US", { maximumFractionDigits: 0 })}</td>
+                            <td className={`py-2 text-right font-bold ${color}`}>{r.actPct > 0 ? "+" : ""}{(r.actPct * 100).toFixed(2)}%</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            );
+          })()}
 
           {/* Equity curve comparison */}
           {result.equity_curves.length > 0 && (

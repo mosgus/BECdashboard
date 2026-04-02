@@ -30,6 +30,14 @@ export default function ResearchPage({
 
   return (
     <div className="space-y-4">
+      {/* Research Suite link */}
+      <div className="rounded-[var(--radius-card)] border border-[var(--color-primary)]/30 bg-[var(--color-primary)]/5 px-4 py-2.5 text-xs text-[var(--color-text)]">
+        For the full institutional research suite with optimizer comparison, walk-forward testing, and decision memos:{" "}
+        <a href="/research" className="font-semibold text-[var(--color-primary)] hover:underline">
+          Open Research Suite &rarr;
+        </a>
+      </div>
+
       {/* Disclaimer */}
       <div className="rounded-[var(--radius-card)] border border-[var(--color-border)] bg-amber-50 px-4 py-2.5 text-xs text-amber-700">
         Statistical results are for research purposes only. Past performance and model outputs do not guarantee future results.

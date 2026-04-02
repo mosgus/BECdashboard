@@ -1647,6 +1647,7 @@ def capm_optimize(
 
     # ── Action Table ──────────────────────────────────────────────────────────
     target_value = body.target_value
+    frozen_tickers = {t for t in valid_tickers if body.ticker_configs.get(t, TickerConfig()).freeze}
     action_table = []
     for t in valid_tickers:
         price = latest_prices[t]
@@ -1654,28 +1655,46 @@ def capm_optimize(
         cur_val = cur_shares * price
         cur_pct = current_pcts.get(t, 0.0)
 
-        opt_w = target_dict.get(t, 0.0)
-        tgt_val = opt_w * target_value
-        tgt_shares = tgt_val / price if price > 0 else 0
-        tgt_shares_int = int(tgt_shares)
+        if t in frozen_tickers:
+            # Frozen: keep current shares exactly, no action
+            action_table.append({
+                "ticker": t,
+                "price": round(price, 2),
+                "current_shares": int(cur_shares),
+                "current_value": round(cur_val, 2),
+                "current_pct": round(cur_pct * 100, 4),
+                "target_shares": int(cur_shares),
+                "target_value": round(cur_val, 2),
+                "target_pct": round(cur_pct * 100, 4),
+                "action_shares": 0,
+                "action_dollars": 0.0,
+                "action_pct": 0.0,
+                "frozen": True,
+            })
+        else:
+            opt_w = target_dict.get(t, 0.0)
+            tgt_val = opt_w * target_value
+            tgt_shares = tgt_val / price if price > 0 else 0
+            tgt_shares_int = int(tgt_shares)
 
-        action_shares = tgt_shares_int - cur_shares
-        action_dollars = action_shares * price
-        action_pct = opt_w - cur_pct
+            action_shares = tgt_shares_int - cur_shares
+            action_dollars = action_shares * price
+            action_pct = opt_w - cur_pct
 
-        action_table.append({
-            "ticker": t,
-            "price": round(price, 2),
-            "current_shares": int(cur_shares),
-            "current_value": round(cur_val, 2),
-            "current_pct": round(cur_pct * 100, 4),
-            "target_shares": tgt_shares_int,
-            "target_value": round(tgt_shares_int * price, 2),
-            "target_pct": round(opt_w * 100, 4),
-            "action_shares": int(action_shares),
-            "action_dollars": round(action_dollars, 2),
-            "action_pct": round(action_pct * 100, 4),
-        })
+            action_table.append({
+                "ticker": t,
+                "price": round(price, 2),
+                "current_shares": int(cur_shares),
+                "current_value": round(cur_val, 2),
+                "current_pct": round(cur_pct * 100, 4),
+                "target_shares": tgt_shares_int,
+                "target_value": round(tgt_shares_int * price, 2),
+                "target_pct": round(opt_w * 100, 4),
+                "action_shares": int(action_shares),
+                "action_dollars": round(action_dollars, 2),
+                "action_pct": round(action_pct * 100, 4),
+                "frozen": False,
+            })
 
     action_table.sort(key=lambda r: r["target_pct"], reverse=True)
 
@@ -1929,6 +1948,84 @@ def _compute_brier_scoring(
 
 # ── Efficient Frontier ───────────────────────────────────────────────────────
 
+def _compute_frontier_data(
+    mu: np.ndarray, C: np.ndarray, n: int,
+    x0: np.ndarray, bounds: tuple, num_points: int, rf: float,
+) -> tuple:
+    """Pure-function frontier computation — no closures over mutable state."""
+    from scipy.optimize import minimize as _min
+
+    # Min variance
+    mv = _min(lambda w: float(np.sqrt(w @ C @ w)), x0, method="SLSQP",
+              bounds=bounds,
+              constraints=[{"type": "eq", "fun": lambda w: float(w.sum() - 1.0)}],
+              options={"ftol": 1e-12, "maxiter": 2000})
+    mv_w = mv.x if mv.success else x0
+    mv_vol = float(np.sqrt(mv_w @ C @ mv_w))
+    mv_ret = float(mv_w @ mu)
+    min_var_point = {"vol": round(mv_vol, 6), "ret": round(mv_ret, 6)}
+
+    # Max Sharpe
+    def _neg_sh(w):
+        r = float(w @ mu)
+        v = float(np.sqrt(w @ C @ w))
+        return -(r - rf) / v if v > 1e-8 else 0.0
+    ms = _min(_neg_sh, x0, method="SLSQP", bounds=bounds,
+              constraints=[{"type": "eq", "fun": lambda w: float(w.sum() - 1.0)}],
+              options={"ftol": 1e-12, "maxiter": 2000})
+    ms_w = ms.x if ms.success else x0
+    max_sharpe_point = {"vol": round(float(np.sqrt(ms_w @ C @ ms_w)), 6),
+                        "ret": round(float(ms_w @ mu), 6)}
+
+    # Frontier sweep
+    target_rets = np.linspace(mv_ret, float(mu.max()), num_points)
+    frontier = []
+    for i, tr in enumerate(target_rets):
+        target = float(tr)
+        try:
+            res = _min(
+                lambda w: float(np.sqrt(w @ C @ w)), x0, method="SLSQP",
+                bounds=bounds,
+                constraints=[
+                    {"type": "eq", "fun": lambda w: float(w.sum() - 1.0)},
+                    {"type": "eq", "fun": lambda w, _t=target: float(w @ mu) - _t},
+                ],
+                options={"ftol": 1e-12, "maxiter": 2000},
+            )
+            if res.success:
+                v = float(np.sqrt(res.x @ C @ res.x))
+                r = float(res.x @ mu)
+                if v > 0.005:
+                    frontier.append({"vol": round(v, 6), "ret": round(r, 6)})
+        except Exception:
+            continue
+    frontier.sort(key=lambda p: p["vol"])
+
+    # Random portfolio cloud
+    rng = np.random.default_rng(42)
+    random_portfolios = []
+    for _ in range(500):
+        w = rng.dirichlet(np.ones(n))
+        random_portfolios.append({
+            "vol": round(float(np.sqrt(w @ C @ w)), 6),
+            "ret": round(float(w @ mu), 6),
+        })
+
+    # Risk parity
+    risk_parity_point = None
+    try:
+        inv_vol = 1.0 / np.sqrt(np.diag(C))
+        rp_w = inv_vol / inv_vol.sum()
+        risk_parity_point = {
+            "vol": round(float(np.sqrt(rp_w @ C @ rp_w)), 6),
+            "ret": round(float(rp_w @ mu), 6),
+        }
+    except Exception:
+        pass
+
+    return frontier, min_var_point, max_sharpe_point, risk_parity_point, random_portfolios
+
+
 class EfficientFrontierRequest(BaseModel):
     num_points: int = 30
     rf: float = 0.0427
@@ -1972,64 +2069,18 @@ def efficient_frontier(
     n = len(valid)
 
     returns = compute_returns(prices[valid])
-    mean_ret = returns.mean().values * 252
-    cov_annual = returns.cov().values * 252
+    mu = np.array(returns.mean().values * 252, dtype=np.float64)
+    C = np.array(returns.cov().values * 252, dtype=np.float64)
 
     # Current portfolio metrics
-    cur_ret = float(np.dot(vw, mean_ret))
-    cur_vol = float(np.sqrt(vw @ cov_annual @ vw))
+    cur_ret = float(vw @ mu)
+    cur_vol = float(np.sqrt(vw @ C @ vw))
 
-    # Sweep target returns for min-variance frontier
-    # Use a feasible range: from the min-variance portfolio return to the max single-asset return
-    # First find the unconstrained min-variance point
-    def _pv(w: np.ndarray) -> float:
-        return float(np.sqrt(w @ cov_annual @ w))
-    mv_res = minimize(_pv, np.ones(n) / n, method="SLSQP",
-                      bounds=tuple((0.0, 1.0) for _ in range(n)),
-                      constraints=[{"type": "eq", "fun": lambda w: w.sum() - 1.0}],
-                      options={"ftol": 1e-10, "maxiter": 1000})
-    mv_ret = float(np.dot(mv_res.x, mean_ret)) if mv_res.success else float(mean_ret.min())
-    max_ret_val = float(mean_ret.max())
-    target_rets = np.linspace(mv_ret, max_ret_val, body.num_points)
+    bounds = tuple((0.0, 1.0) for _ in range(n))
+    x0 = np.ones(n) / n
 
-    frontier = []
-    min_var_point = None
-    max_sharpe_point = None
-    best_sharpe = -999.0
-
-    for tr in target_rets:
-        def port_vol_obj(w: np.ndarray) -> float:
-            return float(np.sqrt(w @ cov_annual @ w))
-
-        constraints = [
-            {"type": "eq", "fun": lambda w: w.sum() - 1.0},
-            {"type": "eq", "fun": lambda w, _tr=tr: np.dot(w, mean_ret) - _tr},
-        ]
-        bounds = tuple((0.0, 1.0) for _ in range(n))
-        x0 = np.ones(n) / n
-
-        try:
-            result = minimize(port_vol_obj, x0, method="SLSQP", bounds=bounds,
-                            constraints=constraints, options={"ftol": 1e-10, "maxiter": 1000})
-            if result.success:
-                vol = float(np.sqrt(result.x @ cov_annual @ result.x))
-                ret = float(np.dot(result.x, mean_ret))
-                frontier.append({"vol": round(vol, 6), "ret": round(ret, 6)})
-
-                # Track min variance
-                if min_var_point is None or vol < min_var_point["vol"]:
-                    min_var_point = {"vol": round(vol, 6), "ret": round(ret, 6)}
-
-                # Track max Sharpe
-                sharpe = (ret - body.rf) / vol if vol > 0 else 0
-                if sharpe > best_sharpe:
-                    best_sharpe = sharpe
-                    max_sharpe_point = {"vol": round(vol, 6), "ret": round(ret, 6)}
-        except Exception:
-            continue
-
-    # Sort by vol
-    frontier.sort(key=lambda p: p["vol"])
+    frontier, min_var_point, max_sharpe_point, risk_parity_point, random_portfolios = \
+        _compute_frontier_data(mu, C, n, x0, bounds, body.num_points, body.rf)
 
     return {
         "portfolio_id": portfolio_id,
@@ -2037,5 +2088,7 @@ def efficient_frontier(
         "current_portfolio": {"vol": round(cur_vol, 6), "ret": round(cur_ret, 6)},
         "max_sharpe": max_sharpe_point,
         "min_variance": min_var_point,
+        "risk_parity": risk_parity_point,
+        "random_portfolios": random_portfolios,
         "as_of_date": end_str,
     }

@@ -202,6 +202,26 @@ class JobRun(Base):
     __table_args__ = (UniqueConstraint("job_name", "asof_date", name="uq_job_runs_job_name_asof_date"),)
 
 
+# ── Sprint 6 (research suite) ─────────────────────────────────────────────────
+
+class DecisionMemo(Base):
+    """Research Suite decision memo — stores GO/NO-GO recommendation + scorecard."""
+    __tablename__ = "decision_memos"
+
+    id:              Mapped[uuid.UUID]      = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    portfolio_id:    Mapped[uuid.UUID]      = mapped_column(UUID(as_uuid=True), ForeignKey("portfolios.id", ondelete="CASCADE"), nullable=False, index=True)
+    status:          Mapped[str]            = mapped_column(Text, nullable=False, default="draft")          # draft | approved | rejected
+    composite_score: Mapped[float | None]   = mapped_column(Float, nullable=True)
+    recommendation:  Mapped[str | None]     = mapped_column(Text, nullable=True)                            # GO | NO-GO | CONDITIONAL
+    rationale:       Mapped[str | None]     = mapped_column(Text, nullable=True)
+    red_flags:       Mapped[dict | None]    = mapped_column(JSONB, nullable=True)                           # [{flag, severity, detail}]
+    scorecard_json:  Mapped[dict | None]    = mapped_column(JSONB, nullable=True)                           # full scorecard snapshot
+    monitoring_plan: Mapped[str | None]     = mapped_column(Text, nullable=True)
+    created_by:      Mapped[str | None]     = mapped_column(Text, nullable=True)
+    created_at:      Mapped[datetime]       = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at:      Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class EmailConfig(Base):
     """Single-row SMTP configuration — id is always 1.
 

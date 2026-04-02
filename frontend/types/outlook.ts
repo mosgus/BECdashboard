@@ -33,6 +33,7 @@ export interface ActionRow {
   action_shares: number;
   action_dollars: number;
   action_pct: number;
+  frozen?: boolean;
 }
 
 export interface CAPMMetrics {
@@ -146,5 +147,7 @@ export interface EfficientFrontierResult {
   current_portfolio: FrontierPoint;
   max_sharpe: FrontierPoint | null;
   min_variance: FrontierPoint | null;
+  risk_parity: FrontierPoint | null;
+  random_portfolios: FrontierPoint[];
   as_of_date: string;
 }

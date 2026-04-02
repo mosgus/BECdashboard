@@ -292,10 +292,13 @@ function CAPMSection({ portfolioId, positions }: { portfolioId: string; position
                 </thead>
                 <tbody>
                   {result.action_table.map((row: ActionRow) => {
-                    const actionColor = row.action_shares > 0 ? "text-[var(--color-positive)]" : row.action_shares < 0 ? "text-[var(--color-negative)]" : "text-[var(--color-muted)]";
+                    const actionColor = row.frozen ? "text-gray-400" : row.action_shares > 0 ? "text-[var(--color-positive)]" : row.action_shares < 0 ? "text-[var(--color-negative)]" : "text-[var(--color-muted)]";
                     return (
-                      <tr key={row.ticker} className="border-b border-[var(--color-border)]">
-                        <td className="py-2 font-medium text-[var(--color-text)]">{row.ticker}</td>
+                      <tr key={row.ticker} className={`border-b border-[var(--color-border)] ${row.frozen ? "bg-gray-50 opacity-70" : ""}`}>
+                        <td className="py-2 font-medium text-[var(--color-text)]">
+                          {row.ticker}
+                          {row.frozen && <span className="ml-1 text-[10px] text-gray-400">FROZEN</span>}
+                        </td>
                         <td className="py-2 text-right">${row.price.toLocaleString("en-US", { minimumFractionDigits: 2 })}</td>
                         <td className="py-2 text-right">{row.current_shares.toLocaleString()}</td>
                         <td className="py-2 text-right">${row.current_value.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</td>
@@ -363,7 +366,7 @@ function CAPMSection({ portfolioId, positions }: { portfolioId: string; position
           </div>
 
           {/* Apply Buttons */}
-          <div className="flex flex-wrap gap-3">
+          <div className="flex flex-wrap items-center gap-3">
             <button
               onClick={() => {
                 const weights: Record<string, number> = {};
@@ -371,24 +374,12 @@ function CAPMSection({ portfolioId, positions }: { portfolioId: string; position
                 applyMut.mutate(weights);
               }}
               disabled={applyMut.isPending}
-              className="rounded-[var(--radius-btn)] bg-[var(--color-primary)] px-5 py-2.5 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50 transition-opacity"
+              className="rounded-[var(--radius-btn)] bg-green-600 px-5 py-2.5 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50 transition-opacity"
             >
               {applyMut.isPending ? "Applying..." : "Apply to Portfolio"}
             </button>
-            <button
-              onClick={async () => {
-                const weights: Record<string, number> = {};
-                result.action_table.forEach((r) => { weights[r.ticker] = r.target_pct / 100; });
-                await applyMut.mutateAsync(weights);
-                router.push(`/portfolios/${portfolioId}/rebalance`);
-              }}
-              disabled={applyMut.isPending}
-              className="rounded-[var(--radius-btn)] border border-[var(--color-primary)] px-5 py-2.5 text-sm font-semibold text-[var(--color-primary)] hover:bg-[var(--color-primary)] hover:text-white disabled:opacity-50 transition-colors"
-            >
-              Apply + Open Rebalance
-            </button>
             {applySuccess && (
-              <span className="self-center text-xs font-medium text-[var(--color-positive)]">
+              <span className="rounded-full bg-green-100 px-3 py-1 text-xs font-semibold text-green-700">
                 Weights saved and applied.
               </span>
             )}
@@ -564,7 +555,7 @@ function MonteCarloSection({ portfolioId }: { portfolioId: string }) {
             Efficient Frontier
             <InfoTooltip text="The curve shows the best risk-return tradeoff for your holdings. Your current portfolio is the orange dot. Closer to the frontier = more efficient use of risk." />
           </h3>
-          <ResponsiveContainer width="100%" height={350}>
+          <ResponsiveContainer width="100%" height={420}>
             <ScatterChart margin={{ top: 10, right: 20, bottom: 30, left: 20 }}>
               <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
               <XAxis dataKey="vol" type="number" name="Volatility"
@@ -576,9 +567,14 @@ function MonteCarloSection({ portfolioId }: { portfolioId: string }) {
                 label={{ value: "Annualised Return", angle: -90, position: "insideLeft", style: { fontSize: 11 } }}
                 tick={{ fontSize: 10 }} domain={["auto", "auto"]} />
               <Tooltip formatter={(v: number) => `${(v * 100).toFixed(2)}%`} />
+              {/* Random portfolio cloud (shadow scatter) — render first so it's behind everything */}
+              {frontierQuery.data.random_portfolios?.length > 0 && (
+                <Scatter name="Random Portfolios" data={frontierQuery.data.random_portfolios}
+                  fill="#cbd5e1" fillOpacity={0.35} shape="circle" legendType="circle" />
+              )}
               {/* Frontier curve */}
               <Scatter name="Frontier" data={frontierQuery.data.frontier} fill="none"
-                line={{ stroke: "#3b82f6", strokeWidth: 2 }} shape={() => null} legendType="line" />
+                line={{ stroke: "#3b82f6", strokeWidth: 2.5 }} shape={() => null} legendType="line" />
               {/* Current portfolio */}
               <Scatter name="Current Portfolio" data={[frontierQuery.data.current_portfolio]}
                 fill="#f97316" shape="circle" legendType="circle" />
@@ -591,6 +587,11 @@ function MonteCarloSection({ portfolioId }: { portfolioId: string }) {
               {frontierQuery.data.min_variance && (
                 <Scatter name="Min Variance" data={[frontierQuery.data.min_variance]}
                   fill="#22c55e" shape="diamond" legendType="diamond" />
+              )}
+              {/* Risk Parity */}
+              {frontierQuery.data.risk_parity && (
+                <Scatter name="Risk Parity" data={[frontierQuery.data.risk_parity]}
+                  fill="#8b5cf6" shape="triangle" legendType="triangle" />
               )}
               <Legend wrapperStyle={{ fontSize: 10 }} />
             </ScatterChart>

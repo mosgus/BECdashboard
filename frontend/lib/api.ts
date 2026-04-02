@@ -43,6 +43,22 @@ import {
 import { PortfolioValidationResult, PortfolioForecastResult } from "@/types/sprint6";
 import type { PortfolioHealthResult, ScenarioResult, ScenarioRequest, RebalanceResult, ExtendedTechnicalsResponse } from "@/types/sprint7";
 import type { CAPMOptimizeRequest, CAPMOptimizeResult, MonteCarloRequest, MonteCarloResult, EfficientFrontierResult } from "@/types/outlook";
+import type {
+  OptimizerComparisonRequest,
+  OptimizerComparisonResult,
+  WalkForwardRequest,
+  WalkForwardResult,
+  CorrelationResult,
+  CompositeScoreResult,
+  DecisionMemo,
+  DecisionMemoCreate,
+  UniverseAuditRequest,
+  UniverseAuditResponse,
+  UniverseScreenRequest,
+  UniverseScreenResponse,
+  UniverseStatsResult,
+  AssetResearchResult,
+} from "@/types/research";
 import { apiDelete, apiGet, apiPatch, apiPost, apiPut, apiUpload } from "./utils";
 
 // ── Portfolio & analytics ─────────────────────────────────────────────────────
@@ -397,3 +413,60 @@ export const fetchEfficientFrontier = (
     num_points: numPoints,
     rf,
   });
+
+// ── Research Suite ──────────────────────────────────────────────────────────
+
+export const fetchOptimizerComparison = (
+  portfolioId: string,
+  body: OptimizerComparisonRequest = {},
+): Promise<OptimizerComparisonResult> =>
+  apiPost<OptimizerComparisonResult>(`/api/research/${portfolioId}/optimizer_comparison`, body);
+
+export const fetchWalkForward = (
+  portfolioId: string,
+  body: WalkForwardRequest = {},
+): Promise<WalkForwardResult> =>
+  apiPost<WalkForwardResult>(`/api/research/${portfolioId}/walk_forward`, body);
+
+export const fetchCorrelation = (
+  portfolioId: string,
+): Promise<CorrelationResult> =>
+  apiGet<CorrelationResult>(`/api/research/${portfolioId}/correlation`);
+
+export const fetchCompositeScore = (
+  portfolioId: string,
+): Promise<CompositeScoreResult> =>
+  apiGet<CompositeScoreResult>(`/api/research/${portfolioId}/composite_score`);
+
+export const saveDecisionMemo = (
+  body: DecisionMemoCreate,
+): Promise<DecisionMemo> =>
+  apiPost<DecisionMemo>("/api/research/decision_memos", body);
+
+export const fetchDecisionMemos = (
+  portfolioId: string,
+): Promise<{ memos: DecisionMemo[] }> =>
+  apiGet<{ memos: DecisionMemo[] }>(`/api/research/${portfolioId}/decision_memos`);
+
+// ── Research Suite: Universe ────────────────────────────────────────────────
+
+export const fetchUniverseStats = (): Promise<UniverseStatsResult> =>
+  apiGet<UniverseStatsResult>("/api/research/universe/stats");
+
+export const runUniverseAudit = (
+  body: UniverseAuditRequest = {},
+): Promise<UniverseAuditResponse> =>
+  apiPost<UniverseAuditResponse>("/api/research/universe/audit", body);
+
+export const runUniverseScreen = (
+  body: UniverseScreenRequest,
+): Promise<UniverseScreenResponse> =>
+  apiPost<UniverseScreenResponse>("/api/research/universe/screen", body);
+
+// ── Research Suite: Asset ───────────────────────────────────────────────────
+
+export const fetchAssetResearch = (
+  portfolioId: string,
+  ticker: string,
+): Promise<AssetResearchResult> =>
+  apiGet<AssetResearchResult>(`/api/research/${portfolioId}/asset/${ticker}`);

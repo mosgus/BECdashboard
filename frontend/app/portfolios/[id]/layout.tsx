@@ -10,10 +10,9 @@ const TABS = [
   { slug: "holdings",  label: "Holdings"    },
   { slug: "targets",   label: "Historical"  },
   { slug: "outlook",   label: "Outlook"     },
-  { slug: "rebalance", label: "Rebalance"   },
   { slug: "monitor",   label: "Monitor"     },
   { slug: "risk",      label: "Risk & Perf" },
-  { slug: "research",  label: "Research"    },
+  { slug: "research",  label: "Validation"  },
 ];
 
 export default function PortfolioLayout({
