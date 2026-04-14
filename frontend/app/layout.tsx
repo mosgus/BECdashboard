@@ -3,6 +3,7 @@ import { Outfit, DM_Sans } from "next/font/google";
 import "./globals.css";
 import Link from "next/link";
 import Image from "next/image";
+import { Settings } from "lucide-react";
 import Providers from "@/components/Providers";
 import AuthNav from "@/components/AuthNav";
 import OpsStatusBadge from "@/components/OpsStatusBadge";
@@ -30,8 +31,6 @@ const NAV = [
   { href: "/universe",   label: "Universe"   },
   { href: "/portfolios", label: "Portfolios" },
   { href: "/research",   label: "Research"   },
-  { href: "/alerts",     label: "Alerts"     },
-  { href: "/ops",        label: "Ops"        },
 ];
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -70,6 +69,13 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                       {label}
                     </Link>
                   ))}
+                  <Link
+                    href="/ops"
+                    className="rounded-[var(--radius-btn)] p-1.5 text-[var(--color-muted)] hover:bg-[var(--color-border)] hover:text-[var(--color-text)] transition-colors"
+                    title="Settings & Ops"
+                  >
+                    <Settings size={16} />
+                  </Link>
                   <AuthNav />
                 </nav>
               </div>

@@ -18,8 +18,9 @@ from core.asset_research import (
     compute_asset_correlation,
     compute_asset_profile,
     compute_fama_french_exposure,
+    compute_portfolio_attribution,
 )
-from core.cache import fetch_prices
+from core.cache import fetch_prices_hybrid as fetch_prices
 from core.portfolio import (
     compute_metrics,
     compute_portfolio_returns,
@@ -36,7 +37,7 @@ from db.models import DecisionMemo, Portfolio, Position, UniverseTicker
 router = APIRouter()
 
 BENCHMARK = "SPY"
-DEFAULT_LOOKBACK_DAYS = 730
+DEFAULT_LOOKBACK_DAYS = 1825  # 5 calendar years
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -265,6 +266,184 @@ def correlation_matrix(
 
 
 # ── Composite Score ──────────────────────────────────────────────────────────
+
+@router.get("/research/{portfolio_id}/tearsheet_data")
+def tearsheet_data(
+    portfolio_id: str,
+    lookback_days: int = 252,
+    db: Session = Depends(get_db),
+):
+    """One-shot aggregator for the PDF tear sheet.
+
+    Combines: portfolio metadata, composite score, analytics summary,
+    health/concentration, attribution, top holdings with role classification,
+    and latest decision memo. Frontend renders all of this into a PDF.
+    """
+    from core.portfolio import compute_metrics
+    from core.risk import compute_portfolio_health
+    from datetime import datetime as dt_inner
+
+    portfolio, positions = _load_portfolio(portfolio_id, db)
+    weights = _weights_from_positions(positions)
+    tickers = list(weights.keys())
+    returns = _fetch_returns(tickers, lookback_days=lookback_days)
+    available = [t for t in tickers if t in returns.columns]
+    if not available:
+        raise HTTPException(400, "No price data for portfolio tickers")
+
+    # Alignment
+    w_aligned = {t: weights.get(t, 0) for t in available}
+    total = sum(w_aligned.values())
+    if total > 0:
+        w_aligned = {t: w / total for t, w in w_aligned.items()}
+    w_arr = np.array([w_aligned[t] for t in available])
+
+    # Portfolio returns + metrics
+    port_ret = compute_portfolio_returns(returns[available], w_arr)
+    if len(port_ret) > lookback_days:
+        port_ret = port_ret.iloc[-lookback_days:]
+    metrics = compute_metrics(port_ret)
+
+    # Validation suite
+    val = run_validation_suite(port_ret.values, quick=True)
+    validation_score = val["n_passing"] / val["n_total"]
+
+    # Concentration + health
+    conc = compute_concentration(w_aligned)
+    n_assets = len(available)
+    min_hhi = 1.0 / n_assets if n_assets > 0 else 1.0
+    concentration_score = max(0.0, 1.0 - (conc["hhi"] - min_hhi) / (1.0 - min_hhi)) if n_assets > 1 else 0.0
+
+    sharpe = metrics.get("sharpe", 0.0)
+    performance_score = min(1.0, max(0.0, (sharpe + 0.5) / 2.0))
+    max_dd = metrics.get("max_dd", -1.0)
+    drawdown_score = min(1.0, max(0.0, 1.0 + max_dd * 2.0))
+
+    composite = (
+        0.30 * validation_score
+        + 0.25 * concentration_score
+        + 0.25 * performance_score
+        + 0.20 * drawdown_score
+    )
+    total_score = round(composite * 100, 1)
+
+    # Attribution
+    attribution = compute_portfolio_attribution(port_ret)
+
+    # Health (beta, vol, RCs) — needs benchmark prices
+    try:
+        bench_prices = fetch_prices((BENCHMARK,),
+                                    (datetime.now() - timedelta(days=int(lookback_days * 1.6))).strftime("%Y-%m-%d"),
+                                    datetime.now().strftime("%Y-%m-%d"))
+        health = compute_portfolio_health(returns[available].dropna().to_frame() if len(available) == 1 else
+                                          (returns[available] + 1).cumprod().dropna(),
+                                          w_aligned,
+                                          bench_prices if bench_prices is not None else returns[available[:1]],
+                                          lookback=lookback_days)
+    except Exception:
+        health = {"concentration": conc, "beta": None, "vol": None, "risk_contributions": [], "warnings": []}
+
+    # Top 10 holdings
+    sorted_holdings = sorted(w_aligned.items(), key=lambda kv: -kv[1])[:10]
+    top_holdings = [
+        {"ticker": t, "weight_pct": round(w * 100, 2)}
+        for t, w in sorted_holdings
+    ]
+
+    # Latest decision memo
+    memo = (
+        db.query(DecisionMemo)
+        .filter(DecisionMemo.portfolio_id == portfolio_id)
+        .order_by(DecisionMemo.created_at.desc())
+        .first()
+    )
+    memo_dict = None
+    if memo:
+        memo_dict = {
+            "recommendation": memo.recommendation,
+            "rationale": memo.rationale,
+            "red_flags": memo.red_flags,
+            "monitoring_plan": memo.monitoring_plan,
+            "created_by": memo.created_by,
+            "created_at": memo.created_at.isoformat() if memo.created_at else None,
+        }
+
+    return {
+        "portfolio": {
+            "id": portfolio_id,
+            "name": portfolio.name,
+            "notional_value": float(portfolio.notional_value) if portfolio.notional_value else None,
+            "created_at": portfolio.created_at.isoformat() if portfolio.created_at else None,
+            "n_holdings": len(available),
+        },
+        "as_of_date": dt_inner.now().strftime("%Y-%m-%d"),
+        "lookback_days": lookback_days,
+        "composite_score": {
+            "total": total_score,
+            "categories": {
+                "validation":    {"score": round(validation_score, 3),    "detail": f"{val['n_passing']}/{val['n_total']} tests passed", "weight": 0.30},
+                "concentration": {"score": round(concentration_score, 3), "detail": f"HHI={conc['hhi']:.3f}, N_eff={conc['n_eff']:.1f}", "weight": 0.25},
+                "performance":   {"score": round(performance_score, 3),   "detail": f"Sharpe={sharpe:.2f}", "weight": 0.25},
+                "drawdown":      {"score": round(drawdown_score, 3),      "detail": f"Max DD={max_dd:.1%}", "weight": 0.20},
+            },
+            "go_decision": val["go_decision"],
+        },
+        "metrics": {
+            "cagr": metrics.get("cagr"),
+            "vol": metrics.get("vol"),
+            "sharpe": metrics.get("sharpe"),
+            "max_dd": metrics.get("max_dd"),
+        },
+        "health": {
+            "hhi": conc["hhi"],
+            "n_eff": conc["n_eff"],
+            "top5": conc["top5"],
+            "beta": health.get("beta"),
+            "vol": health.get("vol"),
+        },
+        "attribution": attribution,
+        "top_holdings": top_holdings,
+        "latest_memo": memo_dict,
+    }
+
+
+@router.get("/research/{portfolio_id}/attribution")
+def portfolio_attribution(
+    portfolio_id: str,
+    lookback_days: int = 252,
+    db: Session = Depends(get_db),
+):
+    """Fama-French 3-factor decomposition of portfolio return over the lookback window.
+
+    Regresses portfolio excess returns on [Mkt-RF, SMB, HML] and breaks the
+    total period return into alpha + market + SMB + HML + residual contributions.
+    """
+    portfolio, positions = _load_portfolio(portfolio_id, db)
+    weights = _weights_from_positions(positions)
+    tickers = list(weights.keys())
+    returns = _fetch_returns(tickers, lookback_days=lookback_days)
+
+    available = [t for t in tickers if t in returns.columns]
+    if not available:
+        raise HTTPException(400, "No price data for portfolio tickers")
+
+    w_aligned = {t: weights.get(t, 0) for t in available}
+    total = sum(w_aligned.values())
+    if total > 0:
+        w_aligned = {t: w / total for t, w in w_aligned.items()}
+
+    w_arr = np.array([w_aligned[t] for t in available])
+    port_ret = compute_portfolio_returns(returns[available], w_arr)
+
+    # Trim to lookback window
+    if len(port_ret) > lookback_days:
+        port_ret = port_ret.iloc[-lookback_days:]
+
+    result = compute_portfolio_attribution(port_ret)
+    result["portfolio_id"] = portfolio_id
+    result["lookback_days"] = lookback_days
+    return result
+
 
 @router.get("/research/{portfolio_id}/composite_score")
 def composite_score(

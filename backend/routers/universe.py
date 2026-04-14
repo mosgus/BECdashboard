@@ -234,6 +234,38 @@ def enrich_universe_ticker(
     return _ticker_dict(obj)
 
 
+@router.post("/universe/enrich_all")
+def enrich_all_universe_tickers(
+    db: Session = Depends(get_db),
+    _: None = Depends(require_write_key),
+) -> dict:
+    """Re-fetch yfinance metadata for every active universe ticker.
+
+    Runs in-line; takes ~20-60s for 40 tickers. Returns refreshed/total counts
+    and any per-ticker errors (non-fatal).
+    """
+    tickers = (
+        db.query(UniverseTicker)
+        .filter(UniverseTicker.active == True)
+        .order_by(UniverseTicker.ticker)
+        .all()
+    )
+    refreshed = 0
+    errors: list[str] = []
+    for t in tickers:
+        try:
+            _enrich(t)
+            refreshed += 1
+        except Exception as exc:
+            errors.append(f"{t.ticker}: {str(exc)[:100]}")
+    db.commit()
+    return {
+        "refreshed": refreshed,
+        "total": len(tickers),
+        "errors": errors,
+    }
+
+
 @router.patch("/universe/{ticker}")
 def update_universe_ticker(
     ticker: str,

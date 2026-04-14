@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { actor } from "@/lib/auth";
+import { actor, auth } from "@/lib/auth";
 
 interface AuthState {
   checked: boolean;
@@ -11,7 +11,7 @@ interface AuthState {
 
 /**
  * Call at the top of every protected page.
- * - Redirects to /login if no actor name is set.
+ * - Redirects to /login if no actor name or password not verified.
  * - Returns { checked } — render null until checked is true to avoid flash.
  */
 export function useAuth(): AuthState {
@@ -19,7 +19,7 @@ export function useAuth(): AuthState {
   const [checked, setChecked] = useState(false);
 
   useEffect(() => {
-    if (!actor.hasActor()) {
+    if (!actor.hasActor() || !auth.isVerified()) {
       router.replace("/login");
     } else {
       setChecked(true);
@@ -31,6 +31,7 @@ export function useAuth(): AuthState {
     actor: actor.get(),
     logout: () => {
       actor.clear();
+      auth.clear();
       router.replace("/login");
     },
   };

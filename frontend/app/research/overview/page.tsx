@@ -8,6 +8,8 @@ import {
   fetchPortfolioHealth,
 } from "@/lib/api";
 import { fmtPct, fmtNum } from "@/lib/utils";
+import TearsheetPDF from "@/components/research/TearsheetPDF";
+import { actor } from "@/lib/auth";
 
 // ── Score gauge ─────────────────────────────────────────────────────────────
 
@@ -112,6 +114,11 @@ export default function OverviewPage() {
 
   return (
     <div className="space-y-6">
+      {/* Export row */}
+      <div className="flex items-center justify-end">
+        <TearsheetPDF portfolioId={portfolioId} createdBy={actor.get()} />
+      </div>
+
       {/* Composite Score + Recommendation */}
       <div className="flex flex-wrap items-start gap-6">
         <div className="rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] p-6 shadow-sm">

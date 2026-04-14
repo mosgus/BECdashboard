@@ -34,6 +34,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     Numeric,
     String,
@@ -128,36 +129,6 @@ class Position(Base):
     updated_at:   Mapped[datetime]     = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
 
-class AlertRule(Base):
-    """Alert rule definition. Table name 'alerts' matches Sprint 2 spec."""
-    __tablename__ = "alerts"
-
-    id:           Mapped[uuid.UUID]    = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    scope:        Mapped[str]          = mapped_column(Text, nullable=False)          # 'watchlist' | 'portfolio' | 'ticker'
-    scope_id:     Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
-    ticker:       Mapped[str | None]   = mapped_column(Text, nullable=True)
-    rule_type:    Mapped[str]          = mapped_column(Text, nullable=False)          # 'sma_cross' | 'rsi_threshold' | etc.
-    params_json:  Mapped[dict | None]  = mapped_column(JSONB, nullable=True)
-    enabled:      Mapped[bool]         = mapped_column(Boolean, nullable=False, default=True)
-    cooldown_days: Mapped[int]         = mapped_column(Integer, nullable=False, default=1)
-    created_at:   Mapped[datetime]     = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-
-
-class AlertEvent(Base):
-    __tablename__ = "alert_events"
-
-    id:           Mapped[uuid.UUID]    = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    alert_id:     Mapped[uuid.UUID]    = mapped_column(UUID(as_uuid=True), ForeignKey("alerts.id", ondelete="CASCADE"), nullable=False)
-    triggered_at: Mapped[datetime]     = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    asof_date:    Mapped[date]         = mapped_column(Date, nullable=False)
-    payload_json: Mapped[dict | None]  = mapped_column(JSONB, nullable=True)
-    # Sprint 5 additions
-    ticker:       Mapped[str | None]   = mapped_column(Text, nullable=True, index=True)
-    fingerprint:  Mapped[str | None]   = mapped_column(Text, nullable=True)
-    status:       Mapped[str]          = mapped_column(Text, nullable=False, default="new")  # new|ack|snoozed|resolved
-    updated_at:   Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-
-
 # ── Sprint 4 (portfolio workspace) ────────────────────────────────────────────
 
 class PortfolioCandidate(Base):
@@ -222,19 +193,22 @@ class DecisionMemo(Base):
     updated_at:      Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
-class EmailConfig(Base):
-    """Single-row SMTP configuration — id is always 1.
+# ── Sprint 6 (price history) ──────────────────────────────────────────────────
 
-    Loaded at startup into core.notify.email._active_config so all email
-    functions pick it up without needing a DB session at call time.
-    """
-    __tablename__ = "email_config"
+class PriceBar(Base):
+    """Daily OHLCV bar per ticker. Populated by jobs/refresh_prices.py."""
+    __tablename__ = "price_history"
 
-    id:         Mapped[int]          = mapped_column(Integer, primary_key=True, default=1)
-    smtp_host:  Mapped[str | None]   = mapped_column(Text, nullable=True)
-    smtp_port:  Mapped[int | None]   = mapped_column(Integer, nullable=True, default=587)
-    smtp_user:  Mapped[str | None]   = mapped_column(Text, nullable=True)
-    smtp_pass:  Mapped[str | None]   = mapped_column(Text, nullable=True)
-    email_from: Mapped[str | None]   = mapped_column(Text, nullable=True)
-    recipients: Mapped[str | None]   = mapped_column(Text, nullable=True)   # comma-separated
-    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    ticker:     Mapped[str]              = mapped_column(Text, ForeignKey("universe_tickers.ticker", ondelete="CASCADE"), primary_key=True)
+    date:       Mapped[date]             = mapped_column(Date, primary_key=True)
+    open:       Mapped[float | None]     = mapped_column(Float, nullable=True)
+    high:       Mapped[float | None]     = mapped_column(Float, nullable=True)
+    low:        Mapped[float | None]     = mapped_column(Float, nullable=True)
+    close:      Mapped[float | None]     = mapped_column(Float, nullable=True)
+    adj_close:  Mapped[float | None]     = mapped_column(Float, nullable=True)
+    volume:     Mapped[int | None]       = mapped_column(BigInteger, nullable=True)
+    created_at: Mapped[datetime]         = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        Index("ix_price_history_date", "date"),
+    )

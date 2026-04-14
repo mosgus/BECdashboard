@@ -44,43 +44,31 @@ def fetch_ff3_factors() -> Optional[pd.DataFrame]:
         resp = urllib.request.urlopen(_FF3_URL, timeout=30)
         zdata = resp.read()
         with zipfile.ZipFile(io.BytesIO(zdata)) as zf:
-            csv_name = [n for n in zf.namelist() if n.endswith(".CSV")][0]
-            raw = zf.read(csv_name).decode("utf-8")
+            # yfinance uses lowercase .csv; be case-insensitive + tolerant
+            csv_candidates = [n for n in zf.namelist() if n.lower().endswith(".csv")]
+            if not csv_candidates:
+                return None
+            raw = zf.read(csv_candidates[0]).decode("utf-8")
 
-        # Parse: skip header rows, find the daily data section
-        lines = raw.strip().split("\n")
-        start_idx = None
-        for i, line in enumerate(lines):
-            stripped = line.strip()
-            # Daily data starts after a blank line following header text
-            if stripped and stripped[0].isdigit() and len(stripped.split(",")) >= 4:
-                if start_idx is None:
-                    start_idx = i
-            elif start_idx is not None:
-                # Hit a non-data row after data started — end of daily section
-                end_idx = i
-                break
-        else:
-            end_idx = len(lines)
-
-        if start_idx is None:
-            return None
-
-        data_lines = lines[start_idx:end_idx]
+        # Parse: find rows that start with an 8-digit date (YYYYMMDD)
+        # and have 4+ numeric fields after it. Handles CRLF line endings.
         rows = []
-        for line in data_lines:
-            parts = line.strip().split(",")
+        for line in raw.splitlines():
+            stripped = line.strip()
+            if not stripped:
+                continue
+            parts = [p.strip() for p in stripped.split(",")]
             if len(parts) < 5:
                 continue
+            date_str = parts[0]
+            if len(date_str) != 8 or not date_str.isdigit():
+                continue
             try:
-                date_str = parts[0].strip()
-                if len(date_str) != 8:
-                    continue
                 dt = pd.Timestamp(f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:8]}")
-                mkt_rf = float(parts[1].strip()) / 100
-                smb = float(parts[2].strip()) / 100
-                hml = float(parts[3].strip()) / 100
-                rf = float(parts[4].strip()) / 100
+                mkt_rf = float(parts[1]) / 100
+                smb = float(parts[2]) / 100
+                hml = float(parts[3]) / 100
+                rf = float(parts[4]) / 100
                 rows.append({"date": dt, "Mkt-RF": mkt_rf, "SMB": smb, "HML": hml, "RF": rf})
             except (ValueError, IndexError):
                 continue
@@ -252,6 +240,109 @@ def compute_fama_french_exposure(returns: pd.Series) -> dict:
         },
         "residual_vol": round(residual_vol, 4),
         "n_obs": n_obs,
+    }
+
+
+# ── Portfolio-level FF3 decomposition ─────────────────────────────────────────
+
+def compute_portfolio_attribution(port_returns: pd.Series) -> dict:
+    """Fama-French 3-factor decomposition of a portfolio return series.
+
+    Regresses portfolio excess returns on [Mkt-RF, SMB, HML] and attributes
+    the total period return to: alpha + market + SMB + HML + residual.
+
+    Returns a dict with factor betas, alpha, R^2, significance, and a
+    factor_contributions sub-dict whose values sum to period_return_pct.
+    """
+    ff3 = fetch_ff3_factors()
+    if ff3 is None:
+        return {"error": "Could not fetch Fama-French factors"}
+
+    common = port_returns.index.intersection(ff3.index)
+    if len(common) < 60:
+        return {"error": f"Insufficient overlapping data ({len(common)} days, need 60+)"}
+
+    p = port_returns.loc[common]
+    factors = ff3.loc[common]
+    rf = factors["RF"]
+    y = p - rf
+    X = factors[["Mkt-RF", "SMB", "HML"]].copy()
+    X_with_const = X.copy()
+    X_with_const.insert(0, "const", 1.0)
+
+    X_mat = X_with_const.values
+    y_vec = y.values
+
+    try:
+        beta, _, _, _ = np.linalg.lstsq(X_mat, y_vec, rcond=None)
+    except Exception as exc:
+        return {"error": f"OLS failed: {str(exc)[:100]}"}
+
+    y_hat = X_mat @ beta
+    ss_res = float(np.sum((y_vec - y_hat) ** 2))
+    ss_tot = float(np.sum((y_vec - y_vec.mean()) ** 2))
+    r_squared = 1 - ss_res / ss_tot if ss_tot > 0 else 0.0
+
+    n_obs = len(y_vec)
+    k = X_mat.shape[1]
+    mse = ss_res / (n_obs - k) if n_obs > k else 0.0
+    try:
+        cov_beta = mse * np.linalg.inv(X_mat.T @ X_mat)
+        se = np.sqrt(np.diag(cov_beta))
+        t_stats = beta / se
+    except Exception:
+        t_stats = np.zeros(k)
+
+    alpha_daily = float(beta[0])
+    beta_mkt = float(beta[1])
+    beta_smb = float(beta[2])
+    beta_hml = float(beta[3])
+
+    # Period return attribution — compound the factor contributions
+    # Total period return: (1 + p).prod() - 1
+    period_return = float((1 + p).prod() - 1)
+
+    # Sum of daily factor contributions (simple additive approximation,
+    # accurate for short periods; for long periods there's compounding slack
+    # captured by residual)
+    mkt_contrib_daily = (beta_mkt * factors["Mkt-RF"]).sum()
+    smb_contrib_daily = (beta_smb * factors["SMB"]).sum()
+    hml_contrib_daily = (beta_hml * factors["HML"]).sum()
+    alpha_contrib_daily = alpha_daily * n_obs
+    rf_sum = float(factors["RF"].sum())
+
+    # Contributions in period-return space
+    market_pct = float(mkt_contrib_daily)
+    smb_pct = float(smb_contrib_daily)
+    hml_pct = float(hml_contrib_daily)
+    alpha_pct = float(alpha_contrib_daily)
+    rf_pct = rf_sum
+    explained = alpha_pct + market_pct + smb_pct + hml_pct + rf_pct
+    residual_pct = period_return - explained
+
+    return {
+        "alpha_daily": round(alpha_daily, 6),
+        "alpha_annual": round(float((1 + alpha_daily) ** 252 - 1), 4),
+        "beta_mkt": round(beta_mkt, 4),
+        "beta_smb": round(beta_smb, 4),
+        "beta_hml": round(beta_hml, 4),
+        "r_squared": round(r_squared, 4),
+        "t_stats": {
+            "alpha": round(float(t_stats[0]), 2),
+            "mkt": round(float(t_stats[1]), 2),
+            "smb": round(float(t_stats[2]), 2),
+            "hml": round(float(t_stats[3]), 2),
+        },
+        "n_obs": n_obs,
+        "period_return_pct": round(period_return, 4),
+        "factor_contributions": {
+            "alpha_pct": round(alpha_pct, 4),
+            "market_pct": round(market_pct, 4),
+            "smb_pct": round(smb_pct, 4),
+            "hml_pct": round(hml_pct, 4),
+            "rf_pct": round(rf_pct, 4),
+            "residual_pct": round(residual_pct, 4),
+        },
     }
 
 

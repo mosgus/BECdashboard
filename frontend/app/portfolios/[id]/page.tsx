@@ -1,12 +1,19 @@
-import { redirect } from "next/navigation";
+"use client";
+import { use, useEffect } from "react";
+import { useRouter } from "next/navigation";
 
 // Root portfolio page — immediately redirects to the Holdings tab.
-// The layout.tsx wrapping this route renders the persistent header and tab nav.
-export default async function PortfolioRootPage({
+export default function PortfolioRootPage({
   params,
 }: {
   params: Promise<{ id: string }>;
 }) {
-  const { id } = await params;
-  redirect(`/portfolios/${id}/holdings`);
+  const { id } = use(params);
+  const router = useRouter();
+
+  useEffect(() => {
+    router.replace(`/portfolios/${id}/holdings`);
+  }, [router, id]);
+
+  return null;
 }

@@ -1,11 +1,12 @@
 "use client";
-import { use, useState } from "react";
+import { use, useState, useRef } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { BookOpen } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import {
   fetchPortfolioAnalytics,
+  fetchPortfolioAttribution,
   fetchPortfolioHealth,
   runScenario,
 } from "@/lib/api";
@@ -13,6 +14,7 @@ import { fmtNum, fmtPct, colorForValue, downsample } from "@/lib/utils";
 import InfoTooltip from "@/components/InfoTooltip";
 import HelpSidebar from "@/components/HelpSidebar";
 import SignalBadge from "@/components/SignalBadge";
+import ChartExportButtons from "@/components/ChartExportButtons";
 import RiskContributionChart from "@/components/RiskContributionChart";
 import ScenarioGuide from "@/components/ScenarioGuide";
 import type { PortfolioAnalytics } from "@/types/sprint3";
@@ -28,7 +30,7 @@ import {
   ResponsiveContainer,
 } from "recharts";
 
-type RiskSection = "performance" | "health" | "scenarios";
+type RiskSection = "performance" | "health" | "attribution" | "scenarios";
 
 function MetricCards({ metrics }: { metrics: PortfolioAnalytics["metrics"] }) {
   const items = [
@@ -106,6 +108,7 @@ export default function RiskPage({
         {([
           { key: "performance", label: "Performance" },
           { key: "health",      label: "Health" },
+          { key: "attribution", label: "Attribution" },
           { key: "scenarios",   label: "Scenarios" },
         ] as { key: RiskSection; label: string }[]).map(({ key, label }) => (
           <button
@@ -124,6 +127,7 @@ export default function RiskPage({
 
       {section === "performance" && <PerformanceSection portfolioId={portfolioId} />}
       {section === "health"      && <HealthSection portfolioId={portfolioId} />}
+      {section === "attribution" && <AttributionSection portfolioId={portfolioId} />}
       {section === "scenarios"   && <ScenariosSection portfolioId={portfolioId} />}
     </div>
   );
@@ -135,6 +139,7 @@ function PerformanceSection({ portfolioId }: { portfolioId: string }) {
   const [start, setStart] = useState("");
   const [end, setEnd] = useState("");
   const [queryParams, setQueryParams] = useState<{ start?: string; end?: string }>({});
+  const equityChartRef = useRef<HTMLDivElement>(null);
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["portfolio-analytics", portfolioId, queryParams],
@@ -247,21 +252,30 @@ function PerformanceSection({ portfolioId }: { portfolioId: string }) {
 
       {analytics?.equity_curves?.length ? (
         <div className="rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-sm">
-          <h3 className="mb-3 text-sm font-semibold text-[var(--color-text)]">
-            Equity Curve
-            <InfoTooltip text="Simulated: current weights assumed constant over the lookback period. Not actual trade history." />
-          </h3>
+          <div className="mb-3 flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-[var(--color-text)]">
+              Equity Curve
+              <InfoTooltip text="Simulated: current weights assumed constant over the lookback period. Not actual trade history." />
+            </h3>
+            <ChartExportButtons
+              chartRef={equityChartRef}
+              csvData={analytics.equity_curves as unknown as Record<string, unknown>[]}
+              filename="equity_curve"
+            />
+          </div>
+          <div ref={equityChartRef}>
           <ResponsiveContainer width="100%" height={280}>
             <LineChart data={downsample(analytics.equity_curves)} margin={{ top: 4, right: 16, bottom: 0, left: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
               <XAxis dataKey="date" tickFormatter={(d) => d.slice(0, 7)} tick={{ fontSize: 11 }} minTickGap={60} />
               <YAxis tickFormatter={(v) => `${((v - 1) * 100).toFixed(0)}%`} tick={{ fontSize: 11 }} width={52} />
-              <Tooltip formatter={(v: number | undefined) => v != null ? `${((v - 1) * 100).toFixed(2)}%` : "—"} labelFormatter={(l) => `Date: ${l}`} />
+              <Tooltip formatter={(v: unknown) => v != null ? `${((Number(v) - 1) * 100).toFixed(2)}%` : "—"} labelFormatter={(l) => `Date: ${l}`} />
               <Legend />
               <Line type="monotone" dataKey="portfolio" stroke="#3b82f6" strokeWidth={2} dot={false} name="Portfolio" />
               <Line type="monotone" dataKey="benchmark" stroke="#f59e0b" strokeWidth={1.5} dot={false} strokeDasharray="5 3" name="SPY" />
             </LineChart>
           </ResponsiveContainer>
+          </div>
         </div>
       ) : null}
 
@@ -422,6 +436,185 @@ function HealthSection({ portfolioId }: { portfolioId: string }) {
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+
+// ── Attribution section (FF3 performance decomposition) ─────────────────────
+
+function AttributionSection({ portfolioId }: { portfolioId: string }) {
+  const [lookbackDays, setLookbackDays] = useState(252);
+  const { data, isLoading, error } = useQuery({
+    queryKey: ["portfolio-attribution", portfolioId, lookbackDays],
+    queryFn: () => fetchPortfolioAttribution(portfolioId, lookbackDays),
+  });
+
+  if (isLoading) {
+    return <p className="text-sm text-[var(--color-muted)]">Running Fama-French regression…</p>;
+  }
+  if (error) {
+    return <p className="text-sm text-[var(--color-negative)]">{(error as Error).message}</p>;
+  }
+  if (!data || data.error) {
+    return (
+      <div className="space-y-3">
+        <LookbackPicker value={lookbackDays} onChange={setLookbackDays} />
+        <p className="text-sm text-[var(--color-negative)]">{data?.error ?? "No attribution data available."}</p>
+      </div>
+    );
+  }
+
+  const contribs = data.factor_contributions!;
+  const totalRet = data.period_return_pct ?? 0;
+  const segments = [
+    { key: "alpha",    label: "Alpha",    value: contribs.alpha_pct,    fill: "#8b5cf6" },
+    { key: "market",   label: "Market",   value: contribs.market_pct,   fill: "#3b82f6" },
+    { key: "smb",      label: "Size (SMB)", value: contribs.smb_pct,    fill: "#10b981" },
+    { key: "hml",      label: "Value (HML)", value: contribs.hml_pct,   fill: "#f59e0b" },
+    { key: "rf",       label: "Risk-free",  value: contribs.rf_pct,    fill: "#6b7280" },
+    { key: "residual", label: "Residual",   value: contribs.residual_pct, fill: "#d1d5db" },
+  ];
+
+  const betas = [
+    { name: "β (Market)",     value: data.beta_mkt ?? 0, t: data.t_stats?.mkt ?? 0 },
+    { name: "β (Size, SMB)",  value: data.beta_smb ?? 0, t: data.t_stats?.smb ?? 0 },
+    { name: "β (Value, HML)", value: data.beta_hml ?? 0, t: data.t_stats?.hml ?? 0 },
+  ];
+
+  const sig = (t: number) => Math.abs(t) > 1.96;
+
+  // Build interpretation text
+  const parts: string[] = [];
+  parts.push(`Portfolio returned ${fmtPct(totalRet)} over the last ${data.n_obs ?? "?"} trading days.`);
+  if (Math.abs(data.beta_mkt ?? 0) > 0.1) {
+    parts.push(`Market beta ${(data.beta_mkt ?? 0).toFixed(2)} contributed ${fmtPct(contribs.market_pct)}.`);
+  }
+  if (Math.abs(data.beta_smb ?? 0) > 0.15) {
+    parts.push(`${(data.beta_smb ?? 0) > 0 ? "Small-cap tilt" : "Large-cap tilt"} contributed ${fmtPct(contribs.smb_pct)}.`);
+  }
+  if (Math.abs(data.beta_hml ?? 0) > 0.15) {
+    parts.push(`${(data.beta_hml ?? 0) > 0 ? "Value tilt" : "Growth tilt"} contributed ${fmtPct(contribs.hml_pct)}.`);
+  }
+  parts.push(`Alpha: ${fmtPct(contribs.alpha_pct)} (annualised ${fmtPct(data.alpha_annual ?? 0)}).`);
+
+  return (
+    <div className="space-y-5">
+      <LookbackPicker value={lookbackDays} onChange={setLookbackDays} />
+
+      {/* Summary banner */}
+      <div className="rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-sm">
+        <p className="text-xs font-semibold text-[var(--color-muted)] mb-1">Attribution Summary</p>
+        <p className="text-sm text-[var(--color-text)] leading-6">{parts.join(" ")}</p>
+        <p className="mt-2 text-xs text-[var(--color-muted)]">
+          R² = {fmtNum(data.r_squared)} · {data.n_obs} observations
+        </p>
+      </div>
+
+      {/* Factor loadings */}
+      <div className="rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-sm">
+        <h3 className="mb-3 text-sm font-semibold text-[var(--color-text)]">
+          Factor Loadings (Fama-French 3)
+          <InfoTooltip text="OLS coefficients from regressing portfolio excess returns on Mkt-RF, SMB, and HML. Stars indicate statistical significance (|t| > 1.96)." />
+        </h3>
+        <div className="space-y-2">
+          {betas.map((b) => (
+            <div key={b.name} className="flex items-center gap-3 text-xs">
+              <div className="w-32 text-[var(--color-muted)]">{b.name}</div>
+              <div className="flex-1 relative h-5 bg-[var(--color-bg)] rounded overflow-hidden">
+                <div
+                  className={`absolute top-0 h-full ${b.value >= 0 ? "bg-blue-500" : "bg-red-500"}`}
+                  style={{
+                    left: b.value >= 0 ? "50%" : `${50 + b.value * 40}%`,
+                    width: `${Math.min(40, Math.abs(b.value * 40))}%`,
+                  }}
+                />
+                <div className="absolute top-0 left-1/2 h-full w-[1px] bg-[var(--color-border)]" />
+              </div>
+              <div className="w-16 text-right font-mono">{fmtNum(b.value)}</div>
+              <div className="w-20 text-right text-[var(--color-muted)]">t = {fmtNum(b.t, 2)} {sig(b.t) ? "★" : ""}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Contribution stacked bar */}
+      <div className="rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-sm">
+        <h3 className="mb-3 text-sm font-semibold text-[var(--color-text)]">
+          Return Contribution Breakdown
+          <InfoTooltip text="Period return decomposed into alpha + market + SMB + HML + risk-free + residual. Segments sum to total period return." />
+        </h3>
+        <div className="mb-3 text-xs text-[var(--color-muted)]">
+          Total period return: <strong className="text-[var(--color-text)]">{fmtPct(totalRet)}</strong>
+        </div>
+
+        {/* Horizontal stacked bar */}
+        <div className="relative h-8 w-full rounded overflow-hidden border border-[var(--color-border)]">
+          {(() => {
+            const totalAbs = segments.reduce((s, seg) => s + Math.abs(seg.value), 0) || 1;
+            let offset = 0;
+            return segments.map((seg) => {
+              const width = (Math.abs(seg.value) / totalAbs) * 100;
+              const style = { left: `${offset}%`, width: `${width}%`, backgroundColor: seg.fill };
+              offset += width;
+              return (
+                <div
+                  key={seg.key}
+                  className="absolute top-0 h-full opacity-90 flex items-center justify-center"
+                  style={style}
+                  title={`${seg.label}: ${fmtPct(seg.value)}`}
+                >
+                  {width > 5 && (
+                    <span className="text-[10px] font-semibold text-white drop-shadow">
+                      {(seg.value * 100).toFixed(1)}%
+                    </span>
+                  )}
+                </div>
+              );
+            });
+          })()}
+        </div>
+
+        {/* Legend */}
+        <div className="mt-3 grid gap-2 sm:grid-cols-3">
+          {segments.map((seg) => (
+            <div key={seg.key} className="flex items-center gap-2 text-xs">
+              <span className="inline-block h-3 w-3 rounded" style={{ backgroundColor: seg.fill }} />
+              <span className="text-[var(--color-muted)]">{seg.label}:</span>
+              <span className="font-mono text-[var(--color-text)]">{fmtPct(seg.value)}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function LookbackPicker({ value, onChange }: { value: number; onChange: (n: number) => void }) {
+  return (
+    <div className="flex items-center gap-3">
+      <label className="text-xs font-medium text-[var(--color-muted)]">Lookback:</label>
+      <div className="flex gap-1">
+        {[
+          { label: "6mo", days: 126 },
+          { label: "1Y", days: 252 },
+          { label: "2Y", days: 504 },
+          { label: "3Y", days: 756 },
+          { label: "5Y", days: 1260 },
+        ].map(({ label, days }) => (
+          <button
+            key={days}
+            onClick={() => onChange(days)}
+            className={`rounded-[var(--radius-btn)] px-3 py-1.5 text-xs font-medium transition-colors ${
+              value === days
+                ? "bg-[var(--color-primary)] text-white"
+                : "border border-[var(--color-border)] text-[var(--color-muted)] hover:bg-[var(--color-border)]"
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
@@ -875,7 +1068,7 @@ function ScenariosSection({ portfolioId }: { portfolioId: string }) {
                       <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
                       <XAxis dataKey="date" tick={{ fontSize: 10 }} minTickGap={60} tickFormatter={(d: string) => d.slice(0, 7)} />
                       <YAxis tick={{ fontSize: 10 }} width={48} domain={["auto", "auto"]} tickFormatter={(v: number) => v.toFixed(2)} />
-                      <Tooltip labelFormatter={(l) => `Date: ${l}`} formatter={(v: number | undefined) => [(v ?? 0).toFixed(4), "Portfolio"]} />
+                      <Tooltip labelFormatter={(l) => `Date: ${l}`} formatter={(v: unknown) => [(Number(v) || 0).toFixed(4), "Portfolio"]} />
                       <Line type="monotone" dataKey="value" stroke="var(--color-primary)" strokeWidth={1.5} dot={false} name="Portfolio" />
                     </LineChart>
                   </ResponsiveContainer>

@@ -1,8 +1,8 @@
 "use client";
 import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Upload, Search, ToggleLeft, ToggleRight } from "lucide-react";
-import { addUniverseTicker, fetchUniverse, importUniverseCSV, patchUniverseTicker } from "@/lib/api";
+import { Upload, Search, ToggleLeft, ToggleRight, RefreshCw } from "lucide-react";
+import { addUniverseTicker, enrichAllUniverseTickers, fetchUniverse, importUniverseCSV, patchUniverseTicker } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
 import type { UniverseTicker } from "@/types/sprint2";
 import InfoTooltip from "@/components/InfoTooltip";
@@ -45,6 +45,15 @@ export default function UniversePage() {
     },
   });
 
+  const [enrichAllResult, setEnrichAllResult] = useState<{ refreshed: number; total: number; errors: string[] } | null>(null);
+  const enrichAllMutation = useMutation({
+    mutationFn: enrichAllUniverseTickers,
+    onSuccess: (r) => {
+      setEnrichAllResult(r);
+      qc.invalidateQueries({ queryKey: ["universe"] });
+    },
+  });
+
   const toggleMutation = useMutation({
     mutationFn: ({ ticker, active }: { ticker: string; active: boolean }) =>
       patchUniverseTicker(ticker, active),
@@ -78,14 +87,25 @@ export default function UniversePage() {
             <InfoTooltip text="Only active tickers can be added to portfolio watchlists. Import via CSV to bulk-load tickers." />
           </p>
         </div>
-        <button
-          onClick={() => fileRef.current?.click()}
-          disabled={importMutation.isPending}
-          className="flex items-center gap-2 rounded-[var(--radius-btn)] bg-[var(--color-primary)] px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50 transition-opacity"
-        >
-          <Upload size={14} />
-          {importMutation.isPending ? "Importing…" : "Import CSV"}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => enrichAllMutation.mutate()}
+            disabled={enrichAllMutation.isPending}
+            className="flex items-center gap-2 rounded-[var(--radius-btn)] border border-[var(--color-border)] px-4 py-2 text-sm font-medium text-[var(--color-muted)] hover:bg-[var(--color-border)] hover:text-[var(--color-text)] disabled:opacity-50 transition-colors"
+            title="Re-fetch yfinance metadata (sector, market cap, P/E, dividend yield, 52w highs/lows) for every active ticker."
+          >
+            <RefreshCw size={14} className={enrichAllMutation.isPending ? "animate-spin" : ""} />
+            {enrichAllMutation.isPending ? "Refreshing…" : "Refresh All Metadata"}
+          </button>
+          <button
+            onClick={() => fileRef.current?.click()}
+            disabled={importMutation.isPending}
+            className="flex items-center gap-2 rounded-[var(--radius-btn)] bg-[var(--color-primary)] px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50 transition-opacity"
+          >
+            <Upload size={14} />
+            {importMutation.isPending ? "Importing…" : "Import CSV"}
+          </button>
+        </div>
         <input
           ref={fileRef}
           type="file"
@@ -114,6 +134,29 @@ export default function UniversePage() {
       {importMutation.error && (
         <p className="text-sm text-[var(--color-negative)]">
           {(importMutation.error as Error).message}
+        </p>
+      )}
+
+      {/* Enrich-all result */}
+      {enrichAllResult && (
+        <div className="rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] p-4 text-sm">
+          <p className="font-medium text-[var(--color-text)]">
+            Metadata refresh — <span className="text-green-700">{enrichAllResult.refreshed} refreshed</span>
+            <span className="text-[var(--color-muted)]"> of {enrichAllResult.total}</span>
+            {enrichAllResult.errors.length > 0 && (
+              <span className="text-[var(--color-negative)]"> · {enrichAllResult.errors.length} errors</span>
+            )}
+          </p>
+          {enrichAllResult.errors.length > 0 && (
+            <ul className="mt-2 space-y-0.5 text-xs text-[var(--color-negative)]">
+              {enrichAllResult.errors.slice(0, 5).map((e, i) => <li key={i}>⚠ {e}</li>)}
+            </ul>
+          )}
+        </div>
+      )}
+      {enrichAllMutation.error && (
+        <p className="text-sm text-[var(--color-negative)]">
+          {(enrichAllMutation.error as Error).message}
         </p>
       )}
 

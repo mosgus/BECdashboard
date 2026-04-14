@@ -33,7 +33,7 @@ export interface PortfolioHealthResult {
 
 // ── Scenario Analysis ──────────────────────────────────────────────────────────
 
-export type ScenarioType = "market_shock" | "vol_shock" | "historical_replay";
+export type ScenarioType = "market_shock" | "vol_shock" | "historical_replay" | "factor_replay";
 
 export interface ShockContribution {
   ticker: string;
@@ -78,6 +78,46 @@ export interface ScenarioResult {
   n_days?: number;
   start?: string;
   end?: string;
+
+  // factor_replay (projection tab) — present when scenario_type is "factor_replay"
+  current_betas?: {
+    alpha_daily: number;
+    beta_mkt: number;
+    beta_smb: number;
+    beta_hml: number;
+    r_squared: number;
+    residual_vol_daily: number;
+    n_obs: number;
+  };
+  regime_factors?: {
+    mkt_rf: number;
+    smb: number;
+    hml: number;
+    rf: number;
+    n_days: number;
+  };
+  projection_point?: {
+    total_pct: number;
+    market_pct: number;
+    smb_pct: number;
+    hml_pct: number;
+    alpha_pct: number;
+    rf_pct: number;
+  };
+  projection_mc?: {
+    p5: number;
+    p25: number;
+    p50: number;
+    p75: number;
+    p95: number;
+    mean: number;
+    prob_loss_gt_20: number;
+    prob_loss_gt_10: number;
+    prob_loss: number;
+    n_paths: number;
+  };
+  projection_paths?: { day: number; p5: number; p25: number; p50: number; p75: number; p95: number }[];
+  projection_error?: string;
 }
 
 export interface ScenarioRequest {

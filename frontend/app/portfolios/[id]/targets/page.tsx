@@ -127,7 +127,7 @@ function ForwardLookingPanel({
         <p className="mt-1 text-xs text-indigo-700 leading-relaxed">
           These figures are derived from the <strong>CAPM expected return model</strong> (E[R<sub>i</sub>]&nbsp;=&nbsp;r<sub>f</sub>&nbsp;+&nbsp;β<sub>i</sub>&nbsp;×&nbsp;MRP),
           not from backtesting historical prices. They represent what the model{" "}
-          <em>expects going forward</em> given current betas, a 3.64% risk-free rate, and a 5% market risk premium.
+          <em>expects going forward</em> given current betas, the live 10Y Treasury rate, and a 5% market risk premium.
           The in-sample backtest below is shown separately for comparison only — it reflects past realised returns,
           which were inflated by the 2023–2025 bull market and should not be used as a return forecast.
         </p>
@@ -233,6 +233,7 @@ export default function TargetsPage({
   const positions: Position[] = data?.positions ?? [];
 
   const [mode, setMode] = useState("min_variance");
+  const [lookbackDays, setLookbackDays] = useState(1825);
   const [maxWeight, setMaxWeight] = useState(1.0);
   const [minWeight, setMinWeight] = useState(0.0);
   const [volTarget, setVolTarget] = useState(0.1);
@@ -297,7 +298,7 @@ export default function TargetsPage({
         portfolioId,
         mode,
         maxWeight,
-        undefined,
+        new Date(Date.now() - lookbackDays * 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
         undefined,
         mode === "target_volatility" ? volTarget : undefined,
         allowShort,
@@ -377,6 +378,32 @@ export default function TargetsPage({
               <option value="max_diversification">Max Diversification</option>
               <option value="target_volatility">Target Volatility</option>
             </select>
+          </div>
+          <div>
+            <label className="mb-1 flex items-center gap-1 text-xs font-medium text-[var(--color-muted)]">
+              Lookback
+              <InfoTooltip text="Historical data window used for return estimation, covariance, and beta computation." />
+            </label>
+            <div className="flex gap-1">
+              {[
+                { label: "1Y", days: 365 },
+                { label: "2Y", days: 730 },
+                { label: "3Y", days: 1095 },
+                { label: "5Y", days: 1825 },
+              ].map(({ label, days }) => (
+                <button
+                  key={days}
+                  onClick={() => setLookbackDays(days)}
+                  className={`flex-1 rounded-[var(--radius-btn)] px-2 py-2 text-xs font-medium transition-colors ${
+                    lookbackDays === days
+                      ? "bg-[var(--color-primary)] text-white"
+                      : "border border-[var(--color-border)] text-[var(--color-muted)] hover:bg-[var(--color-border)]"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
           </div>
           <div>
             <label className="mb-1 block text-xs font-medium text-[var(--color-muted)]">
@@ -686,9 +713,9 @@ export default function TargetsPage({
                     width={52}
                   />
                   <Tooltip
-                    formatter={(v: number | undefined) =>
+                    formatter={(v: unknown) =>
                       v != null
-                        ? `${((v - 1) * 100).toFixed(2)}%`
+                        ? `${((Number(v) - 1) * 100).toFixed(2)}%`
                         : "—"
                     }
                     labelFormatter={(l) => `Date: ${l}`}

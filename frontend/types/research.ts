@@ -263,3 +263,66 @@ export interface AssetResearchResult {
   correlations: AssetCorrelations;
   role: PortfolioRole;
 }
+
+// ── Tear Sheet ───────────────────────────────────────────────────────────────
+
+export interface TearsheetData {
+  portfolio: {
+    id: string;
+    name: string;
+    notional_value: number | null;
+    created_at: string | null;
+    n_holdings: number;
+  };
+  as_of_date: string;
+  lookback_days: number;
+  composite_score: CompositeScoreResult;
+  metrics: {
+    cagr: number;
+    vol: number;
+    sharpe: number;
+    max_dd: number;
+  };
+  health: {
+    hhi: number;
+    n_eff: number;
+    top5: number;
+    beta: number | null;
+    vol: number | null;
+  };
+  attribution: AttributionResult;
+  top_holdings: { ticker: string; weight_pct: number }[];
+  latest_memo: {
+    recommendation: string | null;
+    rationale: string | null;
+    red_flags: { flag: string; severity: string; detail: string }[] | null;
+    monitoring_plan: string | null;
+    created_by: string | null;
+    created_at: string | null;
+  } | null;
+}
+
+// ── Performance Attribution ─────────────────────────────────────────────────
+
+export interface AttributionResult {
+  portfolio_id: string;
+  lookback_days: number;
+  alpha_daily?: number;
+  alpha_annual?: number;
+  beta_mkt?: number;
+  beta_smb?: number;
+  beta_hml?: number;
+  r_squared?: number;
+  t_stats?: { alpha: number; mkt: number; smb: number; hml: number };
+  n_obs?: number;
+  period_return_pct?: number;
+  factor_contributions?: {
+    alpha_pct: number;
+    market_pct: number;
+    smb_pct: number;
+    hml_pct: number;
+    rf_pct: number;
+    residual_pct: number;
+  };
+  error?: string;
+}

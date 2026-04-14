@@ -16,7 +16,7 @@ from pydantic import BaseModel, field_validator
 from sqlalchemy.orm import Session
 
 from auth import require_write_key
-from core.cache import fetch_prices
+from core.cache import fetch_prices_hybrid as fetch_prices
 from core.rebalance import compute_implementation
 from core.tilt import compute_tilt
 from routers.universe import _TICKER_RE, _enrich
@@ -37,6 +37,7 @@ from core.portfolio import (
     optimize_risk_parity,
     optimize_target_volatility,
 )
+from core.rates import fetch_risk_free_rate
 from core.signals import compute_all_signals
 from core.stats import run_validation_suite
 from core.forecast import (
@@ -54,7 +55,7 @@ from db.models import Portfolio, PortfolioCandidate, PortfolioIndicatorConfig, P
 router = APIRouter()
 
 BENCHMARK = "SPY"
-DEFAULT_LOOKBACK_DAYS = 730  # 2 years
+DEFAULT_LOOKBACK_DAYS = 1825  # 5 calendar years
 
 
 # ── Pydantic schemas ──────────────────────────────────────────────────────────
@@ -119,7 +120,7 @@ class PortfolioForecastRequest(BaseModel):
 
 
 class ScenarioRequest(BaseModel):
-    scenario_type: Literal["market_shock", "vol_shock", "historical_replay"]
+    scenario_type: Literal["market_shock", "vol_shock", "historical_replay", "factor_replay"]
     shock_pct: Optional[float] = None
     vol_scale: Optional[float] = None
     start_date: Optional[str] = None
@@ -1001,12 +1002,13 @@ def optimize_portfolio(
             betas = compute_betas(capm_returns, BENCHMARK)
             # Convert conviction_views (%) to fractions for compute_capm_expected_returns
             capm_views = {t: u / 100.0 for t, u in (body.conviction_views or {}).items()}
-            exp_ret = compute_capm_expected_returns(betas, rf=0.0364, mrp=0.05, views=capm_views)
+            _rf = fetch_risk_free_rate()
+            exp_ret = compute_capm_expected_returns(betas, rf=_rf, mrp=0.05, views=capm_views)
             # Also add kappa-based delta_mu on top
             if delta_mu:
                 exp_ret = {t: v + delta_mu.get(t, 0.0) for t, v in exp_ret.items()}
             target_dict = optimize_max_sharpe_capm(
-                returns, exp_ret, rf=0.0364, max_weight=body.max_weight, min_weight=min_w
+                returns, exp_ret, rf=_rf, max_weight=body.max_weight, min_weight=min_w
             )
             _capm_exp_ret = exp_ret
         elif body.mode == "risk_parity":
@@ -1072,7 +1074,7 @@ def optimize_portfolio(
     if _capm_exp_ret:
         target_weights_dict = {t: round(float(target_w[i]), 4) for i, t in enumerate(valid_tickers)}
         forward_looking = compute_forward_looking_metrics(
-            target_weights_dict, _capm_exp_ret, returns, rf=0.0364
+            target_weights_dict, _capm_exp_ret, returns, rf=fetch_risk_free_rate()
         )
         capm_expected_returns_out = {
             t: round(float(_capm_exp_ret[t]), 6)
@@ -1515,6 +1517,78 @@ def run_portfolio_scenario(
             raise HTTPException(status_code=422, detail=f"No price data between {body.start_date} and {body.end_date}.")
         result = run_historical_replay(prices, weights, body.start_date, body.end_date)
 
+    elif body.scenario_type == "factor_replay":
+        # Returns BOTH historical replay output AND factor-projected output so
+        # the frontend can flip between Historical / Modeled tabs from one response.
+        from core.asset_research import compute_portfolio_attribution
+        from core.factor_replay import (
+            characterize_regime,
+            fit_current_betas,
+            project_portfolio_impact,
+        )
+        from core.portfolio import compute_portfolio_returns, compute_returns
+
+        if not body.start_date or not body.end_date:
+            raise HTTPException(status_code=400, detail="start_date and end_date required for factor_replay.")
+
+        # 1. Historical replay (best-effort — excluded tickers shown in warnings)
+        hist_start = body.start_date
+        hist_end = body.end_date
+        prices_hist = fetch_prices(tuple(sorted(tickers)), hist_start, hist_end)
+        if prices_hist is not None and not prices_hist.empty:
+            result = run_historical_replay(prices_hist, weights, hist_start, hist_end)
+        else:
+            result = {
+                "warnings": [f"No price data in window {hist_start} -> {hist_end}. Historical tab unavailable."],
+            }
+
+        # 2. Fit current betas on the portfolio's last ~1 year of returns
+        recent_start = (date.today() - timedelta(days=500)).isoformat()
+        prices_recent = fetch_prices(tuple(sorted(tickers)), recent_start, today)
+        betas: dict = {"error": "No recent price data for portfolio"}
+        if prices_recent is not None and not prices_recent.empty:
+            available = [t for t in tickers if t in prices_recent.columns]
+            if available:
+                aligned_w = {t: weights.get(t, 0) for t in available}
+                total_aligned = sum(aligned_w.values())
+                if total_aligned > 0:
+                    aligned_w = {t: w / total_aligned for t, w in aligned_w.items()}
+                w_arr = np.array([aligned_w[t] for t in available])
+                returns_recent = compute_returns(prices_recent[available])
+                port_ret = compute_portfolio_returns(returns_recent, w_arr)
+                if len(port_ret) > 252:
+                    port_ret = port_ret.iloc[-252:]
+                betas = fit_current_betas(port_ret)
+
+        # 3. Characterize regime + project
+        regime = characterize_regime(hist_start, hist_end)
+        projection = project_portfolio_impact(betas, regime, n_monte_carlo=500, block_size=5)
+
+        # Attach projection data to the response
+        result["current_betas"] = {k: v for k, v in betas.items() if k != "error"}
+        if betas.get("error"):
+            result["projection_error"] = betas["error"]
+        elif regime.get("error"):
+            result["projection_error"] = regime["error"]
+        else:
+            result["regime_factors"] = {
+                "mkt_rf": regime["mkt_rf_sum"],
+                "smb":    regime["smb_sum"],
+                "hml":    regime["hml_sum"],
+                "rf":     regime["rf_sum"],
+                "n_days": regime["n_days"],
+            }
+            if "error" in projection:
+                result["projection_error"] = projection["error"]
+            else:
+                result["projection_point"] = projection["point_projection"]
+                result["projection_mc"] = projection["mc_distribution"]
+                result["projection_paths"] = projection["paths_summary"]
+
+        # Ensure start/end always present for preset matching
+        result["start"] = hist_start
+        result["end"] = hist_end
+
     else:
         raise HTTPException(status_code=400, detail="Unknown scenario_type.")
 
@@ -1561,7 +1635,7 @@ class TickerConfig(BaseModel):
 
 class CAPMOptimizeRequest(BaseModel):
     target_value: float = 1_000_000
-    rf: float = 0.0364
+    rf: Optional[float] = None      # None = fetch live 10Y Treasury
     mrp: float = 0.05
     market_ticker: str = "VT"
     ticker_configs: dict[str, TickerConfig] = {}
@@ -1582,6 +1656,10 @@ def capm_optimize(
     with analyst views, runs Max-Sharpe optimisation, then maps weights to share quantities.
     """
     from scipy.stats import norm as sp_norm
+
+    # Resolve rf: use provided value or fetch live Treasury rate
+    if body.rf is None:
+        body.rf = fetch_risk_free_rate()
 
     p = _get_or_404(db, portfolio_id)
     positions = db.query(Position).filter(Position.portfolio_id == p.id).order_by(Position.ticker).all()
@@ -2028,7 +2106,8 @@ def _compute_frontier_data(
 
 class EfficientFrontierRequest(BaseModel):
     num_points: int = 30
-    rf: float = 0.0427
+    rf: Optional[float] = None      # None = fetch live 10Y Treasury
+    market_ticker: str = "VT"       # CAPM market proxy for beta computation
     start: Optional[str] = None
     end: Optional[str] = None
 
@@ -2039,8 +2118,10 @@ def efficient_frontier(
     body: EfficientFrontierRequest,
     db: Session = Depends(get_db),
 ) -> dict:
-    """Compute the mean-variance efficient frontier for a portfolio's holdings."""
-    from scipy.optimize import minimize
+    """Compute the mean-variance efficient frontier using CAPM expected returns."""
+
+    # Resolve rf
+    rf = body.rf if body.rf is not None else fetch_risk_free_rate()
 
     p = _get_or_404(db, portfolio_id)
     positions = db.query(Position).filter(Position.portfolio_id == p.id).order_by(Position.ticker).all()
@@ -2056,7 +2137,9 @@ def efficient_frontier(
     end_str = body.end or today.isoformat()
     start_str = body.start or (today - timedelta(days=DEFAULT_LOOKBACK_DAYS)).isoformat()
 
-    prices = fetch_prices(tuple(sorted(tickers)), start_str, end_str)
+    # Fetch prices for holdings + market benchmark (for beta computation)
+    all_tickers = tuple(sorted(set(tickers + [body.market_ticker])))
+    prices = fetch_prices(all_tickers, start_str, end_str)
     if prices is None or prices.empty:
         raise HTTPException(status_code=422, detail="Could not fetch price data.")
 
@@ -2068,11 +2151,15 @@ def efficient_frontier(
     vw = vw / vw.sum()
     n = len(valid)
 
-    returns = compute_returns(prices[valid])
-    mu = np.array(returns.mean().values * 252, dtype=np.float64)
-    C = np.array(returns.cov().values * 252, dtype=np.float64)
+    returns = compute_returns(prices)
+    C = np.array(returns[valid].cov().values * 252, dtype=np.float64)
 
-    # Current portfolio metrics
+    # Use CAPM expected returns instead of historical means
+    betas = compute_betas(returns, body.market_ticker)
+    capm_er = compute_capm_expected_returns(betas, rf=rf, mrp=0.05)
+    mu = np.array([capm_er.get(t, rf) for t in valid], dtype=np.float64)
+
+    # Current portfolio metrics (using CAPM returns)
     cur_ret = float(vw @ mu)
     cur_vol = float(np.sqrt(vw @ C @ vw))
 
@@ -2080,7 +2167,7 @@ def efficient_frontier(
     x0 = np.ones(n) / n
 
     frontier, min_var_point, max_sharpe_point, risk_parity_point, random_portfolios = \
-        _compute_frontier_data(mu, C, n, x0, bounds, body.num_points, body.rf)
+        _compute_frontier_data(mu, C, n, x0, bounds, body.num_points, rf)
 
     return {
         "portfolio_id": portfolio_id,

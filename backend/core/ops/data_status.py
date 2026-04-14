@@ -1,15 +1,15 @@
 """Ops data status aggregator.
 
-Summarises system health from job_runs and alert_events tables.
+Summarises system health from job_runs table.
 Never crashes — returns partial data if tables are missing or empty.
 """
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import date
 
 from sqlalchemy.orm import Session
 
-from db.models import AlertEvent, AlertRule, JobRun
+from db.models import JobRun
 
 
 def get_ops_status(db: Session) -> dict:
@@ -35,26 +35,10 @@ def get_ops_status(db: Session) -> dict:
             "duration_ms": last_run.duration_ms,
         }
 
-    # Count enabled rules
-    enabled_rules = db.query(AlertRule).filter(AlertRule.enabled == True).count()  # noqa: E712
-
-    # Count unacknowledged alert events
-    new_events = db.query(AlertEvent).filter(AlertEvent.status == "new").count()
-
-    # Check email config — prefer in-memory override (DB-backed), fall back to env vars
-    try:
-        from core.notify.email import is_configured
-        email_configured = is_configured()
-    except Exception:
-        email_configured = False
-
     return {
         "as_of_date": today.isoformat(),
         "last_job_run": last_run_dict,
-        "alert_rules_enabled": enabled_rules,
-        "alert_events_new": new_events,
-        "email_configured": email_configured,
-        "data_source": "yfinance",
+        "data_source": "yfinance + price_history",
     }
 
 

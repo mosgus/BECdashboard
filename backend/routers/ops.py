@@ -1,14 +1,11 @@
-"""Ops API — system health, digest, job runs, email test, email config.
+"""Ops API — system health, digest, job runs, price refresh.
 
 Endpoints:
-  GET  /api/ops/status          — lightweight health summary
-  GET  /api/ops/digest          — overnight digest with portfolio movers + alert summary
-  POST /api/ops/digest/email    — email the digest to ALERT_RECIPIENTS
-  POST /api/ops/job_runs        — record a job run (idempotent: UNIQUE job_name+asof_date)
-  POST /api/ops/email/test      — send a test email
-  GET  /api/ops/job_runs        — list recent job runs
-  GET  /api/ops/email/config    — get SMTP settings (password never returned)
-  PUT  /api/ops/email/config    — save SMTP settings (takes effect immediately)
+  GET  /api/ops/status           — lightweight health summary
+  GET  /api/ops/digest           — portfolio movers + job health
+  POST /api/ops/job_runs         — record a job run (idempotent: UNIQUE job_name+asof_date)
+  GET  /api/ops/job_runs         — list recent job runs
+  POST /api/ops/refresh_prices   — manually refresh price_history from yfinance
 """
 from __future__ import annotations
 
@@ -21,10 +18,10 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from auth import require_write_key
-from core.notify.email import set_active_config
 from core.ops.data_status import get_ops_status, get_recent_job_runs
+from core.price_loader import refresh_all_prices
 from db.base import get_db
-from db.models import AlertEvent, EmailConfig, JobRun, Portfolio, Position
+from db.models import JobRun, Portfolio, Position
 
 router = APIRouter()
 
@@ -39,13 +36,11 @@ class JobRunCreate(BaseModel):
     details_json: Optional[dict] = None
 
 
-class EmailConfigUpdate(BaseModel):
-    smtp_host:   Optional[str] = None
-    smtp_port:   int = 587
-    smtp_user:   Optional[str] = None
-    smtp_pass:   Optional[str] = None   # empty string / None = keep existing
-    email_from:  Optional[str] = None
-    recipients:  Optional[str] = None   # comma-separated
+class RefreshPricesRequest(BaseModel):
+    backfill_years: Optional[int] = None   # None = incremental (fill gaps since last run)
+    tickers: Optional[list[str]] = None    # None = all active universe tickers
+
+
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
@@ -59,6 +54,67 @@ def ops_status(db: Session = Depends(get_db)) -> dict:
 @router.get("/ops/job_runs")
 def list_job_runs(limit: int = 10, db: Session = Depends(get_db)) -> dict:
     return {"job_runs": get_recent_job_runs(db, limit=min(limit, 50))}
+
+
+@router.post("/ops/refresh_prices")
+def refresh_prices_endpoint(
+    body: RefreshPricesRequest,
+    db: Session = Depends(get_db),
+) -> dict:
+    """Manually refresh price_history from yfinance.
+
+    Gap-aware: fetches everything since the last stored date per ticker.
+    If the laptop was off for 4 days (cron missed), this fills all 4 days.
+    Takes ~5-15s for ~40 tickers under normal conditions.
+    """
+    started_at = datetime.now(tz=timezone.utc).replace(tzinfo=None)
+    today = date.today()
+
+    result = refresh_all_prices(
+        db,
+        tickers=body.tickers,
+        backfill_years=body.backfill_years,
+        progress_cb=None,
+    )
+
+    finished_at = datetime.now(tz=timezone.utc).replace(tzinfo=None)
+    status = (
+        "success" if not result["errors"]
+        else ("partial" if result["rows_upserted"] > 0 else "failure")
+    )
+
+    # Record the run so it shows up in Job Runs table
+    try:
+        run = JobRun(
+            id=uuid.uuid4(),
+            job_name="price_refresh",
+            asof_date=today,
+            status=status,
+            started_at=started_at,
+            finished_at=finished_at,
+            duration_ms=int((finished_at - started_at).total_seconds() * 1000),
+            details_json={
+                "tickers_processed": result["tickers_processed"],
+                "batches": result["batches"],
+                "rows_upserted": result["rows_upserted"],
+                "backfill_years": body.backfill_years,
+                "trigger": "manual",
+                "errors": result["errors"][:20],
+            },
+        )
+        db.merge(run)
+        db.commit()
+    except Exception:
+        pass
+
+    return {
+        "status": status,
+        "tickers_processed": result["tickers_processed"],
+        "batches": result["batches"],
+        "rows_upserted": result["rows_upserted"],
+        "elapsed_s": result["elapsed_s"],
+        "errors": result["errors"][:5],
+    }
 
 
 @router.post("/ops/job_runs", status_code=200)
@@ -185,39 +241,6 @@ def ops_digest(
             watchlist_movers.sort(key=lambda x: abs(x["daily_return"]), reverse=True)
             watchlist_movers = watchlist_movers[:5]
 
-    # Alert summary for as_of_date
-    entry_rules = {"sma_cross_up", "rsi_rebound", "macd_cross_up", "price_cross_above"}
-    asof_dt = date.fromisoformat(as_of_date)
-    today_events = (
-        db.query(AlertEvent)
-        .filter(AlertEvent.asof_date == asof_dt)
-        .all()
-    )
-    entry_count = sum(
-        1 for e in today_events
-        if e.payload_json and e.payload_json.get("rule_type") in entry_rules
-    )
-    exit_count = len(today_events) - entry_count
-
-    # New (unacked) events
-    new_events = (
-        db.query(AlertEvent)
-        .filter(AlertEvent.status == "new")
-        .order_by(AlertEvent.triggered_at.desc())
-        .limit(10)
-        .all()
-    )
-    new_events_list = [
-        {
-            "id": str(e.id),
-            "ticker": e.ticker,
-            "rule_type": e.payload_json.get("rule_type") if e.payload_json else None,
-            "triggered_at": e.triggered_at.isoformat(),
-            "status": e.status,
-        }
-        for e in new_events
-    ]
-
     # Last job run
     last_run = db.query(JobRun).order_by(JobRun.started_at.desc()).first()
     job_run_summary = None
@@ -247,8 +270,6 @@ def ops_digest(
             for m in watchlist_movers
         )
         lines.append(f"Watchlist Top Movers: {mover_str}")
-    lines.append(f"Alerts Today: {entry_count} entry, {exit_count} exit triggered")
-    lines.append(f"Open Alerts (unacked): {len(new_events_list)}")
     if job_run_summary:
         dur = f"{job_run_summary['duration_ms']/1000:.1f}s" if job_run_summary["duration_ms"] else "—"
         lines.append(f"Last Job: {job_run_summary['job_name']} {job_run_summary['status'].upper()} ({dur})")
@@ -263,107 +284,8 @@ def ops_digest(
         "as_of_date": as_of_date,
         "portfolio_movers": portfolio_movers,
         "watchlist_movers": watchlist_movers,
-        "alerts_triggered": {"entry": entry_count, "exit": exit_count},
-        "new_alert_events": new_events_list,
         "job_run": job_run_summary,
         "digest_text": digest_text,
     }
 
 
-@router.post("/ops/digest/email")
-def email_digest(
-    portfolio_id: Optional[str] = None,
-    watchlist_id: Optional[str] = None,
-    asof: Optional[str] = None,
-    db: Session = Depends(get_db),
-    _: None = Depends(require_write_key),
-) -> dict:
-    """Generate digest and email it to ALERT_RECIPIENTS."""
-    from core.notify.email import is_configured, send_digest_email
-    if not is_configured():
-        return {"sent": False, "reason": "Email not configured — set SMTP_HOST, SMTP_USER, SMTP_PASS, ALERT_RECIPIENTS"}
-
-    digest = ops_digest(portfolio_id=portfolio_id, watchlist_id=watchlist_id, asof=asof, db=db)
-    sent = send_digest_email(digest)
-    return {"sent": sent, "as_of_date": digest["as_of_date"]}
-
-
-@router.post("/ops/email/test")
-def test_email(_: None = Depends(require_write_key)) -> dict:
-    """Send a test email to verify SMTP configuration."""
-    from core.notify.email import send_test_email
-    sent, reason = send_test_email()
-    return {"sent": sent, "reason": reason}
-
-
-# ── Email config CRUD ─────────────────────────────────────────────────────────
-
-def _email_config_response(ec: EmailConfig | None) -> dict:
-    """Build the safe GET response — password is never returned."""
-    if ec is None:
-        return {
-            "smtp_host": None, "smtp_port": 587, "smtp_user": None,
-            "smtp_pass_set": False, "email_from": None,
-            "recipients": None, "updated_at": None,
-        }
-    return {
-        "smtp_host":    ec.smtp_host,
-        "smtp_port":    ec.smtp_port or 587,
-        "smtp_user":    ec.smtp_user,
-        "smtp_pass_set": bool(ec.smtp_pass),
-        "email_from":   ec.email_from,
-        "recipients":   ec.recipients,
-        "updated_at":   ec.updated_at.isoformat() if ec.updated_at else None,
-    }
-
-
-@router.get("/ops/email/config")
-def get_email_config(db: Session = Depends(get_db)) -> dict:
-    """Return current SMTP settings. Password is never included in the response."""
-    ec = db.query(EmailConfig).first()
-    return _email_config_response(ec)
-
-
-@router.put("/ops/email/config")
-def save_email_config(
-    body: EmailConfigUpdate,
-    db: Session = Depends(get_db),
-    _: None = Depends(require_write_key),
-) -> dict:
-    """Save SMTP settings to the DB and activate them immediately (no restart needed).
-
-    If smtp_pass is blank or None, the existing password is preserved.
-    """
-    now = datetime.now(tz=timezone.utc)
-    ec = db.query(EmailConfig).first()
-
-    if ec is None:
-        ec = EmailConfig(id=1)
-        db.add(ec)
-
-    ec.smtp_host  = body.smtp_host
-    ec.smtp_port  = body.smtp_port
-    ec.smtp_user  = body.smtp_user
-    if body.smtp_pass:                 # only overwrite if a new password was provided
-        ec.smtp_pass = body.smtp_pass
-    ec.email_from = body.email_from
-    ec.recipients = body.recipients
-    ec.updated_at = now
-
-    db.commit()
-    db.refresh(ec)
-
-    # Activate immediately — no restart required
-    if ec.smtp_host:
-        set_active_config({
-            "smtp_host":  ec.smtp_host,
-            "smtp_port":  ec.smtp_port or 587,
-            "smtp_user":  ec.smtp_user,
-            "smtp_pass":  ec.smtp_pass,
-            "email_from": ec.email_from or ec.smtp_user,
-            "recipients": ec.recipients,
-        })
-    else:
-        set_active_config(None)
-
-    return _email_config_response(ec)

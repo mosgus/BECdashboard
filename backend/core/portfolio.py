@@ -105,7 +105,7 @@ def compute_forward_looking_metrics(
     weights: dict[str, float],
     expected_returns: dict[str, float],
     returns: pd.DataFrame,
-    rf: float = 0.0364,
+    rf: float = 0.04,
 ) -> dict:
     """CAPM-implied forward-looking portfolio metrics.
 
@@ -137,7 +137,7 @@ def compute_forward_looking_metrics(
 
 def compute_capm_expected_returns(
     betas: dict[str, float],
-    rf: float = 0.0364,
+    rf: float = 0.04,
     mrp: float = 0.05,
     views: Optional[dict[str, float]] = None,
 ) -> dict[str, float]:
@@ -224,7 +224,7 @@ def optimize_max_sharpe(
 def optimize_max_sharpe_capm(
     returns: pd.DataFrame,
     expected_returns: dict[str, float],
-    rf: float = 0.0364,
+    rf: float = 0.04,
     max_weight: float = 1.0,
     min_weight: float = 0.0,
     asset_bounds: Optional[dict[str, tuple[float, float]]] = None,

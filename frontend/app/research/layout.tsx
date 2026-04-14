@@ -8,7 +8,6 @@ const TABS = [
   { slug: "overview",   label: "Overview" },
   { slug: "universe",   label: "Universe Research" },
   { slug: "asset",      label: "Asset Research" },
-  { slug: "strategy",   label: "Strategy Research" },
   { slug: "portfolio",  label: "Portfolio Research" },
   { slug: "stress",     label: "Stress & Robustness" },
   { slug: "decision",   label: "Decision Memo" },

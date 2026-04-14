@@ -1,15 +1,16 @@
 "use client";
-import { use, useState, useMemo } from "react";
+import { use, useState, useMemo, useRef } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { BookOpen } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import { capmOptimize, monteCarloSim, fetchPortfolioDetail, forecastPortfolio, patchPortfolioTargets, updatePosition, fetchEfficientFrontier } from "@/lib/api";
-import { fmtPct, fmtNum } from "@/lib/utils";
+import { fmtPct, fmtNum, fmtDollar } from "@/lib/utils";
 import InfoTooltip from "@/components/InfoTooltip";
 import ForecastGuide from "@/components/ForecastGuide";
 import MonteCarloGuide from "@/components/MonteCarloGuide";
+import ChartExportButtons from "@/components/ChartExportButtons";
 import FanChart from "@/components/FanChart";
 import type { Position } from "@/types/sprint3";
 import type {
@@ -33,6 +34,7 @@ import {
   Legend,
   ResponsiveContainer,
   ReferenceLine,
+  LabelList,
 } from "recharts";
 
 type OutlookSection = "capm" | "montecarlo" | "forecast";
@@ -45,7 +47,8 @@ function CAPMSection({ portfolioId, positions }: { portfolioId: string; position
   const router = useRouter();
   const qc = useQueryClient();
   const [targetValue, setTargetValue] = useState(1_000_000);
-  const [rf, setRf] = useState(4.27);
+  const [lookbackDays, setLookbackDays] = useState(1825);
+  const [rf, setRf] = useState(0);   // 0 = let backend fetch live Treasury
   const [mrp, setMrp] = useState(5.0);
   const [marketTicker, setMarketTicker] = useState("VT");
   const [globalMin, setGlobalMin] = useState(0);
@@ -86,10 +89,11 @@ function CAPMSection({ portfolioId, positions }: { portfolioId: string; position
     mutationFn: () =>
       capmOptimize(portfolioId, {
         target_value: targetValue,
-        rf: rf / 100,
+        ...(rf > 0 ? { rf: rf / 100 } : {}),
         mrp: mrp / 100,
         market_ticker: marketTicker,
         ticker_configs: configs,
+        start: new Date(Date.now() - lookbackDays * 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
       }),
     onSuccess: (data) => { setResult(data); setError(null); setApplySuccess(false); },
     onError: (e: Error) => setError(e.message),
@@ -126,19 +130,42 @@ function CAPMSection({ portfolioId, positions }: { portfolioId: string; position
           <InfoTooltip text="Replicates CAPM-based portfolio optimization: E[R_i] = Rf + Beta_i * MRP + MRP * View_i. Freeze locks a ticker at its current allocation." />
         </h3>
 
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
           <div>
-            <label className="mb-1 block text-xs font-medium text-[var(--color-muted)]">Target Portfolio Value ($)</label>
+            <label className="mb-1 block text-xs font-medium text-[var(--color-muted)]">Target Value ($)</label>
             <input type="number" value={targetValue} onChange={(e) => setTargetValue(Number(e.target.value))}
               className="w-full rounded-[var(--radius-btn)] border border-[var(--color-border)] px-3 py-2 text-sm" />
           </div>
           <div>
-            <label className="mb-1 block text-xs font-medium text-[var(--color-muted)]">Risk-Free Rate (%)</label>
+            <label className="mb-1 block text-xs font-medium text-[var(--color-muted)]">Lookback</label>
+            <div className="flex gap-1">
+              {[
+                { label: "1Y", days: 365 },
+                { label: "2Y", days: 730 },
+                { label: "3Y", days: 1095 },
+                { label: "5Y", days: 1825 },
+              ].map(({ label, days }) => (
+                <button
+                  key={days}
+                  onClick={() => setLookbackDays(days)}
+                  className={`flex-1 rounded-[var(--radius-btn)] px-1.5 py-2 text-xs font-medium transition-colors ${
+                    lookbackDays === days
+                      ? "bg-[var(--color-primary)] text-white"
+                      : "border border-[var(--color-border)] text-[var(--color-muted)] hover:bg-[var(--color-border)]"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-[var(--color-muted)]">Risk-Free Rate (%, 0=live)</label>
             <input type="number" step={0.01} value={rf} onChange={(e) => setRf(Number(e.target.value))}
               className="w-full rounded-[var(--radius-btn)] border border-[var(--color-border)] px-3 py-2 text-sm" />
           </div>
           <div>
-            <label className="mb-1 block text-xs font-medium text-[var(--color-muted)]">Market Risk Premium (%)</label>
+            <label className="mb-1 block text-xs font-medium text-[var(--color-muted)]">MRP (%)</label>
             <input type="number" step={0.1} value={mrp} onChange={(e) => setMrp(Number(e.target.value))}
               className="w-full rounded-[var(--radius-btn)] border border-[var(--color-border)] px-3 py-2 text-sm" />
           </div>
@@ -260,6 +287,9 @@ function CAPMSection({ portfolioId, positions }: { portfolioId: string; position
                     <dt className="text-[var(--color-muted)] capitalize">{h}</dt>
                     <dd className="font-semibold text-[var(--color-negative)]">
                       {fmtPct(result.var_95[h])}
+                    </dd>
+                    <dd className="text-[10px] text-[var(--color-muted)]">
+                      {fmtDollar(Math.abs(targetValue * result.var_95[h]))}
                     </dd>
                   </div>
                 ))}
@@ -393,6 +423,7 @@ function CAPMSection({ portfolioId, positions }: { portfolioId: string; position
 // ── CAL Chart Component ──────────────────────────────────────────────────────
 
 function CALChart({ data, rf }: { data: CAPMOptimizeResult["cal_data"]; rf: number }) {
+  const chartRef = useRef<HTMLDivElement>(null);
   const calLine = [
     { vol: 0, ret: rf },
     { vol: data.optimal.vol, ret: data.optimal.ret },
@@ -415,7 +446,17 @@ function CALChart({ data, rf }: { data: CAPMOptimizeResult["cal_data"]; rf: numb
     { vol: +(data.leverage_3x.vol * 100).toFixed(2), ret: +(data.leverage_3x.ret * 100).toFixed(2), label: "3x Lev" },
   ];
 
+  const csvData = [
+    ...assets.map((a) => ({ type: "asset", ticker: a.ticker, vol_pct: a.vol, return_pct: a.adjRet, orig_return_pct: a.origRet })),
+    ...keyPoints.map((p) => ({ type: "key_point", ticker: p.label, vol_pct: p.vol, return_pct: p.ret, orig_return_pct: "" })),
+  ];
+
   return (
+    <div>
+      <div className="mb-2 flex justify-end">
+        <ChartExportButtons chartRef={chartRef} csvData={csvData} filename="cal_chart" />
+      </div>
+      <div ref={chartRef}>
     <ResponsiveContainer width="100%" height={400}>
       <ScatterChart margin={{ top: 20, right: 20, bottom: 30, left: 20 }}>
         <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
@@ -430,13 +471,15 @@ function CALChart({ data, rf }: { data: CAPMOptimizeResult["cal_data"]; rf: numb
           tick={{ fontSize: 10 }} domain={[0, "auto"]}
         />
         <Tooltip
-          formatter={(v: number) => `${v.toFixed(2)}%`}
+          formatter={(v: unknown) => `${Number(v).toFixed(2)}%`}
           labelFormatter={(l) => `Vol: ${l}%`}
         />
         {/* CAL Line */}
         <Scatter name="CAL" data={calLine} fill="none" line={{ stroke: "#3b82f6", strokeWidth: 2, strokeDasharray: "6 3" }} shape={() => null} legendType="line" />
         {/* Asset returns */}
-        <Scatter name="Assets" data={assets.map((a) => ({ vol: a.vol, ret: a.adjRet, ticker: a.ticker }))} fill="#6b7280" shape="circle" />
+        <Scatter name="Assets" data={assets.map((a) => ({ vol: a.vol, ret: a.adjRet, ticker: a.ticker }))} fill="#6b7280" shape="circle">
+          <LabelList dataKey="ticker" position="top" style={{ fontSize: 9, fill: "var(--color-muted)" }} offset={8} />
+        </Scatter>
         {/* Key points — hide from auto-legend */}
         <Scatter data={[keyPoints[0]]} fill="#22c55e" shape="circle" legendType="none" />
         <Scatter name="Optimal" data={[keyPoints[1]]} fill="#ef4444" shape="star" />
@@ -455,6 +498,8 @@ function CALChart({ data, rf }: { data: CAPMOptimizeResult["cal_data"]; rf: numb
         />
       </ScatterChart>
     </ResponsiveContainer>
+      </div>
+    </div>
   );
 }
 
@@ -467,14 +512,22 @@ function MonteCarloSection({ portfolioId }: { portfolioId: string }) {
   const [numSims, setNumSims] = useState(1000);
   const [horizon, setHorizon] = useState(252);
   const [initValue, setInitValue] = useState(1_000_000);
+  const [lookbackDays, setLookbackDays] = useState(1825);
   const [result, setResult] = useState<MonteCarloResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showGuide, setShowGuide] = useState(false);
 
-  // Efficient frontier (auto-loads)
+  const frontierChartRef = useRef<HTMLDivElement>(null);
+  const pathsChartRef = useRef<HTMLDivElement>(null);
+
+  // Efficient frontier (auto-loads, refetches on lookback change)
+  const startDate = new Date(Date.now() - lookbackDays * 24 * 60 * 60 * 1000)
+    .toISOString()
+    .slice(0, 10);
   const frontierQuery = useQuery({
-    queryKey: ["efficient-frontier", portfolioId],
-    queryFn: () => fetchEfficientFrontier(portfolioId),
+    queryKey: ["efficient-frontier", portfolioId, lookbackDays],
+    queryFn: () => fetchEfficientFrontier(portfolioId, 30, startDate),
+    staleTime: 120_000,
   });
 
   const mut = useMutation({
@@ -483,6 +536,7 @@ function MonteCarloSection({ portfolioId }: { portfolioId: string }) {
         num_simulations: numSims,
         horizon_days: horizon,
         initial_value: initValue,
+        start: startDate,
       }),
     onSuccess: (data) => { setResult(data); setError(null); },
     onError: (e: Error) => setError(e.message),
@@ -518,7 +572,30 @@ function MonteCarloSection({ portfolioId }: { portfolioId: string }) {
             MC Guide
           </button>
         </div>
-        <div className="grid gap-3 sm:grid-cols-3">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <div>
+            <label className="mb-1 block text-xs font-medium text-[var(--color-muted)]">Lookback</label>
+            <div className="flex gap-1">
+              {[
+                { label: "1Y", days: 365 },
+                { label: "2Y", days: 730 },
+                { label: "3Y", days: 1095 },
+                { label: "5Y", days: 1825 },
+              ].map(({ label, days }) => (
+                <button
+                  key={days}
+                  onClick={() => setLookbackDays(days)}
+                  className={`flex-1 rounded-[var(--radius-btn)] px-1.5 py-2 text-xs font-medium transition-colors ${
+                    lookbackDays === days
+                      ? "bg-[var(--color-primary)] text-white"
+                      : "border border-[var(--color-border)] text-[var(--color-muted)] hover:bg-[var(--color-border)]"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
           <div>
             <label className="mb-1 block text-xs font-medium text-[var(--color-muted)]">Simulations</label>
             <input type="number" step={100} value={numSims} onChange={(e) => setNumSims(Number(e.target.value))}
@@ -551,12 +628,26 @@ function MonteCarloSection({ portfolioId }: { portfolioId: string }) {
       {/* Efficient Frontier (loads independently) */}
       {frontierQuery.data && frontierQuery.data.frontier.length > 0 && (
         <div className="rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-sm">
-          <h3 className="mb-3 text-sm font-semibold text-[var(--color-text)]">
-            Efficient Frontier
-            <InfoTooltip text="The curve shows the best risk-return tradeoff for your holdings. Your current portfolio is the orange dot. Closer to the frontier = more efficient use of risk." />
-          </h3>
-          <ResponsiveContainer width="100%" height={420}>
-            <ScatterChart margin={{ top: 10, right: 20, bottom: 30, left: 20 }}>
+          <div className="mb-3 flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-[var(--color-text)]">
+              Efficient Frontier
+              <InfoTooltip text="The curve shows the best risk-return tradeoff for your holdings. Your current portfolio is the orange dot. Closer to the frontier = more efficient use of risk." />
+            </h3>
+            <ChartExportButtons
+              chartRef={frontierChartRef}
+              csvData={[
+                ...frontierQuery.data.frontier.map((p) => ({ type: "frontier", vol: p.vol, ret: p.ret })),
+                ...(frontierQuery.data.current_portfolio ? [{ type: "current", vol: frontierQuery.data.current_portfolio.vol, ret: frontierQuery.data.current_portfolio.ret }] : []),
+                ...(frontierQuery.data.max_sharpe ? [{ type: "max_sharpe", vol: frontierQuery.data.max_sharpe.vol, ret: frontierQuery.data.max_sharpe.ret }] : []),
+                ...(frontierQuery.data.min_variance ? [{ type: "min_variance", vol: frontierQuery.data.min_variance.vol, ret: frontierQuery.data.min_variance.ret }] : []),
+                ...(frontierQuery.data.risk_parity ? [{ type: "risk_parity", vol: frontierQuery.data.risk_parity.vol, ret: frontierQuery.data.risk_parity.ret }] : []),
+              ]}
+              filename="efficient_frontier"
+            />
+          </div>
+          <div ref={frontierChartRef}>
+          <ResponsiveContainer width="100%" height={460}>
+            <ScatterChart margin={{ top: 50, right: 20, bottom: 40, left: 20 }}>
               <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
               <XAxis dataKey="vol" type="number" name="Volatility"
                 tickFormatter={(v: number) => `${(v * 100).toFixed(0)}%`}
@@ -566,15 +657,18 @@ function MonteCarloSection({ portfolioId }: { portfolioId: string }) {
                 tickFormatter={(v: number) => `${(v * 100).toFixed(0)}%`}
                 label={{ value: "Annualised Return", angle: -90, position: "insideLeft", style: { fontSize: 11 } }}
                 tick={{ fontSize: 10 }} domain={["auto", "auto"]} />
-              <Tooltip formatter={(v: number) => `${(v * 100).toFixed(2)}%`} />
-              {/* Random portfolio cloud (shadow scatter) — render first so it's behind everything */}
+              <Tooltip formatter={(v: unknown) => `${(Number(v) * 100).toFixed(2)}%`} />
+              {/* Random portfolio cloud — render first (background) */}
               {frontierQuery.data.random_portfolios?.length > 0 && (
-                <Scatter name="Random Portfolios" data={frontierQuery.data.random_portfolios}
-                  fill="#cbd5e1" fillOpacity={0.35} shape="circle" legendType="circle" />
+                <Scatter name="Random Portfolios"
+                  data={frontierQuery.data.random_portfolios.filter((_, i) => i % 2 === 0)}
+                  fill="#cbd5e1" fillOpacity={0.2} shape="circle" legendType="circle" />
               )}
-              {/* Frontier curve */}
-              <Scatter name="Frontier" data={frontierQuery.data.frontier} fill="none"
-                line={{ stroke: "#3b82f6", strokeWidth: 2.5 }} shape={() => null} legendType="line" />
+              {/* Frontier curve — bold line with visible dots */}
+              <Scatter name="Efficient Frontier" data={frontierQuery.data.frontier}
+                fill="#3b82f6" fillOpacity={0.6}
+                line={{ stroke: "#3b82f6", strokeWidth: 3 }}
+                shape="circle" legendType="line" />
               {/* Current portfolio */}
               <Scatter name="Current Portfolio" data={[frontierQuery.data.current_portfolio]}
                 fill="#f97316" shape="circle" legendType="circle" />
@@ -593,9 +687,15 @@ function MonteCarloSection({ portfolioId }: { portfolioId: string }) {
                 <Scatter name="Risk Parity" data={[frontierQuery.data.risk_parity]}
                   fill="#8b5cf6" shape="triangle" legendType="triangle" />
               )}
-              <Legend wrapperStyle={{ fontSize: 10 }} />
+              <Legend
+                verticalAlign="top"
+                align="center"
+                wrapperStyle={{ fontSize: 10, paddingBottom: 12 }}
+                iconSize={10}
+              />
             </ScatterChart>
           </ResponsiveContainer>
+          </div>
         </div>
       )}
 
@@ -603,24 +703,38 @@ function MonteCarloSection({ portfolioId }: { portfolioId: string }) {
         <>
           {/* Fan chart */}
           <div className="rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-sm">
-            <h3 className="mb-3 text-sm font-semibold text-[var(--color-text)]">
-              Simulated Portfolio Paths (Percentile Bands)
-            </h3>
-            <ResponsiveContainer width="100%" height={350}>
-              <AreaChart data={result.paths_summary}>
+            <div className="mb-3 flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-[var(--color-text)]">
+                Simulated Portfolio Paths (Percentile Bands)
+              </h3>
+              <ChartExportButtons
+                chartRef={pathsChartRef}
+                csvData={result.paths_summary as unknown as Record<string, unknown>[]}
+                filename="monte_carlo_paths"
+              />
+            </div>
+            <div ref={pathsChartRef}>
+            <ResponsiveContainer width="100%" height={390}>
+              <AreaChart data={result.paths_summary} margin={{ top: 40, right: 20, bottom: 30, left: 10 }}>
                 <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
                 <XAxis dataKey="day" tick={{ fontSize: 10 }} label={{ value: "Trading Days", position: "insideBottom", offset: -5, style: { fontSize: 11 } }} />
                 <YAxis tick={{ fontSize: 10 }} tickFormatter={(v: number) => `$${(v / 1000).toFixed(0)}k`} />
-                <Tooltip formatter={(v: number) => `$${v.toLocaleString("en-US", { maximumFractionDigits: 0 })}`} />
-                <Area dataKey="p95" stroke="none" fill="#dbeafe" name="P95" />
-                <Area dataKey="p75" stroke="none" fill="#93c5fd" name="P75" />
-                <Area dataKey="p50" stroke="#3b82f6" strokeWidth={2} fill="#60a5fa" name="P50 (Median)" />
-                <Area dataKey="p25" stroke="none" fill="#93c5fd" name="P25" />
+                <Tooltip formatter={(v: unknown) => `$${Number(v).toLocaleString("en-US", { maximumFractionDigits: 0 })}`} />
                 <Area dataKey="p5" stroke="none" fill="#dbeafe" name="P5" />
+                <Area dataKey="p25" stroke="none" fill="#93c5fd" name="P25" />
+                <Area dataKey="p50" stroke="#3b82f6" strokeWidth={2} fill="#60a5fa" name="P50 (Median)" />
+                <Area dataKey="p75" stroke="none" fill="#93c5fd" name="P75" />
+                <Area dataKey="p95" stroke="none" fill="#dbeafe" name="P95" />
                 <ReferenceLine y={result.initial_value} stroke="#6b7280" strokeDasharray="4 4" label={{ value: "Initial", position: "left", fill: "#6b7280", fontSize: 10 }} />
-                <Legend wrapperStyle={{ fontSize: 10 }} />
+                <Legend
+                  verticalAlign="top"
+                  align="center"
+                  wrapperStyle={{ fontSize: 10, paddingBottom: 10 }}
+                  iconSize={10}
+                />
               </AreaChart>
             </ResponsiveContainer>
+            </div>
           </div>
 
           {/* Terminal stats + Brier scoring side-by-side */}

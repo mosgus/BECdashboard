@@ -487,14 +487,6 @@ function TechnicalsSection({
               })
             )}
 
-            {chartTicker && (
-              <button
-                onClick={() => router.push(`/alerts?ticker=${chartTicker}`)}
-                className="w-full rounded-[var(--radius-btn)] border border-[var(--color-primary)] px-3 py-2 text-sm font-medium text-[var(--color-primary)] hover:bg-[var(--color-primary)] hover:text-white transition-colors"
-              >
-                Create Alert Rule →
-              </button>
-            )}
           </div>
         </div>
       </div>

@@ -1,6 +1,4 @@
 import {
-  AlertRequest,
-  AlertResponse,
   OptimizeRequest,
   OptimizeResponse,
   PortfolioRequest,
@@ -18,11 +16,6 @@ import {
   WatchlistSummary,
 } from "@/types/sprint2";
 import {
-  AlertEvent,
-  AlertEventStatus,
-  AlertRule,
-  EmailConfig,
-  EvaluateResult,
   ImplementationResult,
   JobRunRecord,
   OpsDigest,
@@ -31,7 +24,6 @@ import {
   PortfolioDetail,
   PortfolioOptimizeResult,
   PortfolioSummary,
-  RuleMetadata,
   LastTargetSet,
   TiltResult,
 } from "@/types/sprint3";
@@ -58,6 +50,8 @@ import type {
   UniverseScreenResponse,
   UniverseStatsResult,
   AssetResearchResult,
+  AttributionResult,
+  TearsheetData,
 } from "@/types/research";
 import { apiDelete, apiGet, apiPatch, apiPost, apiPut, apiUpload } from "./utils";
 
@@ -72,8 +66,6 @@ export const fetchOptimize = (req: OptimizeRequest): Promise<OptimizeResponse> =
 export const fetchTechnicals = (req: TechnicalsRequest): Promise<TechnicalsResponse> =>
   apiPost<TechnicalsResponse>("/api/technicals", req);
 
-export const fetchAlertCheck = (req: AlertRequest): Promise<AlertResponse> =>
-  apiPost<AlertResponse>("/api/alerts/check", req);
 
 // ── Universe ──────────────────────────────────────────────────────────────────
 
@@ -97,6 +89,12 @@ export const fetchUniverseTicker = (ticker: string): Promise<EnrichedUniverseTic
 
 export const enrichUniverseTicker = (ticker: string): Promise<EnrichedUniverseTicker> =>
   apiPost<EnrichedUniverseTicker>(`/api/universe/${ticker}/enrich`, {});
+
+export const enrichAllUniverseTickers = (): Promise<{
+  refreshed: number;
+  total: number;
+  errors: string[];
+}> => apiPost("/api/universe/enrich_all", {});
 
 // ── Watchlists ────────────────────────────────────────────────────────────────
 
@@ -315,44 +313,21 @@ export const upsertIndicatorConfig = (
 export const deleteIndicatorConfig = (portfolioId: string, ticker: string, indicator: string): Promise<void> =>
   apiDelete(`/api/portfolios/${portfolioId}/indicator_configs/${ticker}/${indicator}`);
 
-// ── Alert Rules ────────────────────────────────────────────────────────────────
-
-export const fetchAlertRules = (): Promise<{ rules: AlertRule[] }> =>
-  apiGet("/api/alert_rules");
-
-export const createAlertRule = (body: Omit<AlertRule, "id" | "created_at">): Promise<AlertRule> =>
-  apiPost("/api/alert_rules", body);
-
-export const updateAlertRule = (
-  id: string,
-  patch: Partial<Pick<AlertRule, "enabled" | "params_json" | "cooldown_days" | "rule_type">>,
-): Promise<AlertRule> => apiPut(`/api/alert_rules/${id}`, patch);
-
-export const deleteAlertRule = (id: string): Promise<void> =>
-  apiDelete(`/api/alert_rules/${id}`);
-
-export const evaluateNow = (): Promise<EvaluateResult> =>
-  apiPost<EvaluateResult>("/api/alert_rules/evaluate_now", {});
-
-export const fetchAlertEvents = (
-  limit = 50,
-  filters?: { status?: string; ticker?: string },
-): Promise<{ events: AlertEvent[] }> =>
-  apiGet("/api/alert_rules/events", { limit, ...filters });
-
-export const updateAlertEventStatus = (
-  id: string,
-  status: AlertEventStatus,
-): Promise<AlertEvent> =>
-  apiPatch<AlertEvent>(`/api/alert_rules/events/${id}`, { status });
-
-export const fetchRuleMetadata = (): Promise<{ metadata: RuleMetadata[] }> =>
-  apiGet("/api/alert_rules/rule_metadata");
-
 // ── Ops ───────────────────────────────────────────────────────────────────────
 
 export const fetchOpsStatus = (): Promise<OpsStatus> =>
   apiGet<OpsStatus>("/api/ops/status");
+
+export const refreshPrices = (
+  body: { backfill_years?: number | null; tickers?: string[] | null } = {},
+): Promise<{
+  status: string;
+  tickers_processed: number;
+  batches: number;
+  rows_upserted: number;
+  elapsed_s: number;
+  errors: string[];
+}> => apiPost("/api/ops/refresh_prices", body);
 
 export const fetchOpsDigest = (params?: {
   portfolio_id?: string;
@@ -363,32 +338,6 @@ export const fetchOpsDigest = (params?: {
 
 export const fetchJobRuns = (limit = 10): Promise<{ job_runs: JobRunRecord[] }> =>
   apiGet("/api/ops/job_runs", { limit });
-
-export const testEmail = (): Promise<{ sent: boolean; reason?: string }> =>
-  apiPost("/api/ops/email/test", {});
-
-export const fetchEmailConfig = (): Promise<EmailConfig> =>
-  apiGet<EmailConfig>("/api/ops/email/config");
-
-export const saveEmailConfig = (body: {
-  smtp_host?: string | null;
-  smtp_port?: number;
-  smtp_user?: string | null;
-  smtp_pass?: string;
-  email_from?: string | null;
-  recipients?: string | null;
-}): Promise<EmailConfig> => apiPut<EmailConfig>("/api/ops/email/config", body);
-
-export const emailDigest = (params?: {
-  portfolio_id?: string;
-  watchlist_id?: string;
-  asof?: string;
-}): Promise<{ sent: boolean; as_of_date?: string; reason?: string }> => {
-  const qs = params
-    ? "?" + new URLSearchParams(Object.entries(params ?? {}).filter(([, v]) => v) as [string, string][]).toString()
-    : "";
-  return apiPost(`/api/ops/digest/email${qs}`, {});
-};
 
 // ── Outlook: CAPM Optimize + Monte Carlo ─────────────────────────────────────
 
@@ -406,12 +355,14 @@ export const monteCarloSim = (
 
 export const fetchEfficientFrontier = (
   id: string,
-  rf = 0.0427,
   numPoints = 30,
+  start?: string,
+  end?: string,
 ): Promise<EfficientFrontierResult> =>
   apiPost<EfficientFrontierResult>(`/api/portfolios/${id}/efficient_frontier`, {
     num_points: numPoints,
-    rf,
+    ...(start ? { start } : {}),
+    ...(end ? { end } : {}),
   });
 
 // ── Research Suite ──────────────────────────────────────────────────────────
@@ -470,3 +421,15 @@ export const fetchAssetResearch = (
   ticker: string,
 ): Promise<AssetResearchResult> =>
   apiGet<AssetResearchResult>(`/api/research/${portfolioId}/asset/${ticker}`);
+
+export const fetchPortfolioAttribution = (
+  portfolioId: string,
+  lookbackDays: number = 252,
+): Promise<AttributionResult> =>
+  apiGet<AttributionResult>(`/api/research/${portfolioId}/attribution`, { lookback_days: lookbackDays });
+
+export const fetchTearsheetData = (
+  portfolioId: string,
+  lookbackDays: number = 252,
+): Promise<TearsheetData> =>
+  apiGet<TearsheetData>(`/api/research/${portfolioId}/tearsheet_data`, { lookback_days: lookbackDays });

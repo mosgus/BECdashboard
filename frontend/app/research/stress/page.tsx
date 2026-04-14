@@ -4,10 +4,12 @@ import { useMutation } from "@tanstack/react-query";
 import { useResearch } from "@/components/research/ResearchContext";
 import WalkForwardPanel from "@/components/research/WalkForwardPanel";
 import { validatePortfolio, runScenario } from "@/lib/api";
-import { fmtPct, fmtNum } from "@/lib/utils";
 import type { PortfolioValidationResult } from "@/types/sprint6";
 import type { ScenarioResult } from "@/types/sprint7";
 import InfoTooltip from "@/components/InfoTooltip";
+import { SCENARIO_PRESETS, TAG_STYLES, type ScenarioPreset } from "@/lib/scenarios";
+import ScenarioResultCard from "@/components/research/ScenarioResultCard";
+import ScenarioComparisonBar from "@/components/research/ScenarioComparisonBar";
 
 const TEST_INTERPRETATIONS: Record<string, string> = {
   sharpe_ttest: "Is the Sharpe ratio statistically different from zero? (Lo 2002 autocorrelation correction)",
@@ -21,7 +23,7 @@ const TEST_INTERPRETATIONS: Record<string, string> = {
 
 // ── Scenario panel ──────────────────────────────────────────────────────────
 
-function ScenarioPanel({ portfolioId }: { portfolioId: string }) {
+function ScenarioPanel({ portfolioId, notionalValue }: { portfolioId: string; notionalValue: number | null }) {
   const [scenarioType, setScenarioType] = useState("market_shock");
   const [shockPct, setShockPct] = useState(-20);
   const [volScale, setVolScale] = useState(2.0);
@@ -30,13 +32,18 @@ function ScenarioPanel({ portfolioId }: { portfolioId: string }) {
   const [results, setResults] = useState<ScenarioResult[]>([]);
 
   const scenMut = useMutation({
-    mutationFn: () => {
+    mutationFn: (overrides?: { type?: string; start?: string; end?: string }) => {
+      const type = overrides?.type ?? scenarioType;
+      const s = overrides?.start ?? startDate;
+      const e = overrides?.end ?? endDate;
       const body =
-        scenarioType === "market_shock"
+        type === "market_shock"
           ? { scenario_type: "market_shock" as const, shock_pct: shockPct / 100 }
-          : scenarioType === "vol_shock"
+          : type === "vol_shock"
             ? { scenario_type: "vol_shock" as const, vol_scale: volScale }
-            : { scenario_type: "historical_replay" as const, start_date: startDate, end_date: endDate };
+            : type === "factor_replay"
+              ? { scenario_type: "factor_replay" as const, start_date: s, end_date: e }
+              : { scenario_type: "historical_replay" as const, start_date: s, end_date: e };
       return runScenario(portfolioId, body);
     },
     onSuccess: (data) => {
@@ -44,8 +51,51 @@ function ScenarioPanel({ portfolioId }: { portfolioId: string }) {
     },
   });
 
+  const runPreset = (p: ScenarioPreset) => {
+    // Presets always run as factor_replay (returns BOTH historical + modeled data).
+    setScenarioType("factor_replay");
+    setStartDate(p.start);
+    setEndDate(p.end);
+    // Pass overrides directly so we don't wait on the async state update.
+    scenMut.mutate({ type: "factor_replay", start: p.start, end: p.end });
+  };
+
   return (
     <div className="space-y-4">
+      {/* Preset gallery */}
+      <div>
+        <p className="mb-2 text-xs font-semibold text-[var(--color-muted)]">
+          Preset Scenarios — click to run historical replay with one of these crisis windows
+        </p>
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
+          {SCENARIO_PRESETS.map((p) => (
+            <button
+              key={p.id}
+              onClick={() => runPreset(p)}
+              disabled={scenMut.isPending}
+              className="rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] p-3 text-left hover:border-[var(--color-primary)] hover:shadow-sm transition-all disabled:opacity-50"
+            >
+              <p className="text-xs font-semibold text-[var(--color-text)]">{p.name}</p>
+              <p className="mt-0.5 text-[10px] text-[var(--color-muted)]">{p.description}</p>
+              <p className="mt-1 text-[10px] font-mono text-[var(--color-muted)]">
+                {p.start} &rarr; {p.end}
+              </p>
+              <div className="mt-1.5 flex flex-wrap gap-1">
+                {p.tags.map((t) => (
+                  <span key={t} className={`rounded px-1.5 py-0.5 text-[9px] font-semibold ${TAG_STYLES[t]}`}>
+                    {t}
+                  </span>
+                ))}
+              </div>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="pt-2 border-t border-[var(--color-border)]">
+        <p className="mb-3 text-xs font-semibold text-[var(--color-muted)]">Or run a custom scenario:</p>
+      </div>
+
       <div className="flex flex-wrap items-end gap-4">
         <div>
           <label className="block text-xs font-medium text-[var(--color-muted)]">
@@ -59,6 +109,7 @@ function ScenarioPanel({ portfolioId }: { portfolioId: string }) {
             <option value="market_shock">Market Shock</option>
             <option value="vol_shock">Vol Shock</option>
             <option value="historical_replay">Historical Replay</option>
+            <option value="factor_replay">Factor Replay (Historical + Modeled)</option>
           </select>
         </div>
 
@@ -91,7 +142,7 @@ function ScenarioPanel({ portfolioId }: { portfolioId: string }) {
           </div>
         )}
 
-        {scenarioType === "historical_replay" && (
+        {(scenarioType === "historical_replay" || scenarioType === "factor_replay") && (
           <>
             <div>
               <label className="block text-xs font-medium text-[var(--color-muted)]">
@@ -119,7 +170,7 @@ function ScenarioPanel({ portfolioId }: { portfolioId: string }) {
         )}
 
         <button
-          onClick={() => scenMut.mutate()}
+          onClick={() => scenMut.mutate(undefined)}
           disabled={scenMut.isPending}
           className="rounded-[var(--radius-btn)] bg-[var(--color-primary)] px-5 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50 transition-opacity"
         >
@@ -142,54 +193,21 @@ function ScenarioPanel({ portfolioId }: { portfolioId: string }) {
         </p>
       )}
 
-      {/* Results table */}
+      {/* Results — comparison strip + rich cards */}
       {results.length > 0 && (
-        <div className="overflow-x-auto">
-          <table className="w-full text-xs">
-            <thead>
-              <tr className="border-b border-[var(--color-border)]">
-                <th className="px-3 py-2 text-left font-semibold text-[var(--color-muted)]">
-                  #
-                </th>
-                <th className="px-3 py-2 text-left font-semibold text-[var(--color-muted)]">
-                  Type
-                </th>
-                <th className="px-3 py-2 text-left font-semibold text-[var(--color-muted)]">
-                  Impact
-                </th>
-                <th className="px-3 py-2 text-left font-semibold text-[var(--color-muted)]">
-                  Detail
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {results.map((r, i) => (
-                <tr
-                  key={i}
-                  className="border-b border-[var(--color-border)]"
-                >
-                  <td className="px-3 py-2">{i + 1}</td>
-                  <td className="px-3 py-2 font-medium capitalize">
-                    {r.scenario_type?.replace("_", " ") ?? "Unknown"}
-                  </td>
-                  <td className="px-3 py-2 font-mono">
-                    {r.portfolio_impact != null
-                      ? fmtPct(r.portfolio_impact)
-                      : r.total_return != null
-                        ? fmtPct(r.total_return)
-                        : r.shocked_vol != null
-                          ? `Vol: ${fmtPct(r.base_vol)} → ${fmtPct(r.shocked_vol)}`
-                          : "—"}
-                  </td>
-                  <td className="px-3 py-2 text-[var(--color-muted)]">
-                    {r.max_dd != null && `Max DD: ${fmtPct(r.max_dd)}`}
-                    {r.n_days != null && ` (${r.n_days} days)`}
-                    {r.vol_scale != null && `Scale: ${r.vol_scale}x`}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className="space-y-4 pt-2">
+          <ScenarioComparisonBar results={results} />
+          <div className="space-y-4">
+            {results.map((r, i) => (
+              <ScenarioResultCard
+                key={i}
+                result={r}
+                notionalValue={notionalValue}
+                index={i}
+                onRemove={() => setResults((prev) => prev.filter((_, idx) => idx !== i))}
+              />
+            ))}
+          </div>
         </div>
       )}
     </div>
@@ -199,7 +217,8 @@ function ScenarioPanel({ portfolioId }: { portfolioId: string }) {
 // ── Main page ───────────────────────────────────────────────────────────────
 
 export default function StressPage() {
-  const { portfolioId } = useResearch();
+  const { portfolioId, portfolioDetail } = useResearch();
+  const notionalValue = portfolioDetail?.notional_value ?? null;
 
   // Validation
   const valMut = useMutation({
@@ -363,7 +382,7 @@ export default function StressPage() {
           periods. Results accumulate — run multiple scenarios for comparative
           analysis.
         </p>
-        <ScenarioPanel portfolioId={portfolioId} />
+        <ScenarioPanel portfolioId={portfolioId} notionalValue={notionalValue} />
       </div>
     </div>
   );

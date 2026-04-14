@@ -12,7 +12,8 @@ from pydantic import BaseModel, field_validator
 
 from auth import require_write_key
 
-from core.cache import fetch_prices
+from core.cache import fetch_prices_hybrid as fetch_prices
+from core.rates import fetch_risk_free_rate
 from core.portfolio import (
     compute_betas,
     compute_capm_expected_returns,
@@ -42,7 +43,7 @@ class OptimizeRequest(BaseModel):
     mode: Literal["min_variance", "max_sharpe", "max_sharpe_capm"] = "max_sharpe_capm"
     max_weight: float = 1.0
     # CAPM / views params (used only for max_sharpe_capm)
-    rf: float = 0.0364
+    rf: Optional[float] = None      # None = fetch live 10Y Treasury
     market_risk_premium: float = 0.05
     market_ticker: str = "VT"
     views: Optional[dict[str, float]] = None           # ticker → undervaluation fraction
@@ -73,6 +74,10 @@ def _df_to_records(df: pd.DataFrame) -> list[dict]:
 
 @router.post("/optimize")
 def optimize_portfolio(req: OptimizeRequest, _: None = Depends(require_write_key)) -> dict:
+    # Resolve rf: use provided value or fetch live Treasury rate
+    if req.rf is None:
+        req.rf = fetch_risk_free_rate()
+
     if len(req.tickers) < 2:
         raise HTTPException(status_code=422, detail="Need at least 2 tickers to optimize.")
 

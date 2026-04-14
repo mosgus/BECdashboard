@@ -2,22 +2,29 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
-import { actor } from "@/lib/auth";
+import { actor, auth, SITE_PASSWORD } from "@/lib/auth";
 
 export default function LoginPage() {
   const router = useRouter();
   const [displayName, setDisplayName] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
 
-  // If name already set, skip straight to portfolios
+  // If already authenticated, skip to portfolios
   useEffect(() => {
-    if (actor.hasActor()) router.replace("/portfolios");
+    if (actor.hasActor() && auth.isVerified()) router.replace("/portfolios");
   }, [router]);
 
-  const canSubmit = displayName.trim().length > 0;
+  const canSubmit = displayName.trim().length > 0 && password.length > 0;
 
   const handleSubmit = () => {
     if (!canSubmit) return;
+    if (password !== SITE_PASSWORD) {
+      setError("Incorrect password");
+      return;
+    }
     actor.set(displayName);
+    auth.setVerified();
     router.replace("/portfolios");
   };
 
@@ -36,7 +43,7 @@ export default function LoginPage() {
           />
           <h1 className="mt-3 text-xl font-bold text-[var(--color-primary)]">Blue Eagle Capital</h1>
           <p className="text-xs font-medium tracking-widest text-[var(--color-muted)] uppercase mt-0.5">
-            Emory Goizueta · Portfolio Dashboard
+            Emory Goizueta &middot; Portfolio Dashboard
           </p>
         </div>
 
@@ -53,6 +60,23 @@ export default function LoginPage() {
               autoFocus
               className="w-full rounded-[var(--radius-btn)] border border-[var(--color-border)] px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]"
             />
+          </div>
+
+          <div>
+            <label className="mb-1 block text-xs font-medium text-[var(--color-muted)]">
+              Password
+            </label>
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => { setPassword(e.target.value); setError(""); }}
+              onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
+              placeholder="Enter site password"
+              className="w-full rounded-[var(--radius-btn)] border border-[var(--color-border)] px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]"
+            />
+            {error && (
+              <p className="mt-1 text-xs text-[var(--color-negative)]">{error}</p>
+            )}
           </div>
 
           <button

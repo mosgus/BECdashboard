@@ -13,7 +13,7 @@ export interface TickerConfig {
 
 export interface CAPMOptimizeRequest {
   target_value: number;
-  rf: number;
+  rf?: number;         // omit = backend fetches live 10Y Treasury
   mrp: number;
   market_ticker: string;
   ticker_configs: Record<string, TickerConfig>;
