@@ -157,7 +157,12 @@ function CandidatesSection({
   const addToHoldingsMut = useMutation({
     mutationFn: (ticker: string) => addPosition(portfolioId, ticker, 0),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["portfolio", portfolioId] });
+      qc.invalidateQueries({
+        predicate: (query) => {
+          const key = query.queryKey;
+          return Array.isArray(key) && key.length > 0 && key[1] === portfolioId;
+        },
+      });
       onAddToHoldings();
     },
   });

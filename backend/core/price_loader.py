@@ -46,7 +46,7 @@ def fetch_ohlcv(
             auto_adjust=False,    # so we get both Close + Adj Close
             progress=False,
             threads=True,
-            group_by="ticker" if len(tickers) > 1 else "column",
+            group_by="ticker",  # Always use "ticker" for consistent MultiIndex structure
         )
     except Exception:
         return {}
@@ -58,18 +58,29 @@ def fetch_ohlcv(
 
     if len(tickers) == 1:
         t = tickers[0]
-        # Single ticker returns flat columns
-        df = pd.DataFrame({
-            "open":      raw.get("Open"),
-            "high":      raw.get("High"),
-            "low":       raw.get("Low"),
-            "close":     raw.get("Close"),
-            "adj_close": raw.get("Adj Close"),
-            "volume":    raw.get("Volume"),
-        })
-        df = df.dropna(how="all")
-        if not df.empty:
-            out[t] = df
+        # Single ticker may have MultiIndex columns from yfinance
+        if isinstance(raw.columns, pd.MultiIndex):
+            # MultiIndex case: columns like ('TICKER', 'Open')
+            sub = raw[t]
+        else:
+            # Flat columns case
+            sub = raw
+
+        data_dict = {
+            "open":      sub.get("Open"),
+            "high":      sub.get("High"),
+            "low":       sub.get("Low"),
+            "close":     sub.get("Close"),
+            "adj_close": sub.get("Adj Close"),
+            "volume":    sub.get("Volume"),
+        }
+        # Handle case where values might be None or empty
+        data_dict = {k: v for k, v in data_dict.items() if v is not None and len(v) > 0}
+        if data_dict:
+            df = pd.DataFrame(data_dict)
+            df = df.dropna(how="all")
+            if not df.empty:
+                out[t] = df
         return out
 
     # Multi-ticker: raw has MultiIndex columns (ticker, field) when group_by="ticker"
@@ -77,17 +88,21 @@ def fetch_ohlcv(
         if t not in raw.columns.get_level_values(0):
             continue
         sub = raw[t]
-        df = pd.DataFrame({
+        data_dict = {
             "open":      sub.get("Open"),
             "high":      sub.get("High"),
             "low":       sub.get("Low"),
             "close":     sub.get("Close"),
             "adj_close": sub.get("Adj Close"),
             "volume":    sub.get("Volume"),
-        })
-        df = df.dropna(how="all")
-        if not df.empty:
-            out[t] = df
+        }
+        # Handle case where values might be None or empty
+        data_dict = {k: v for k, v in data_dict.items() if v is not None and len(v) > 0}
+        if data_dict:
+            df = pd.DataFrame(data_dict)
+            df = df.dropna(how="all")
+            if not df.empty:
+                out[t] = df
 
     return out
 
@@ -142,6 +157,11 @@ def df_to_records(ticker: str, df: pd.DataFrame) -> list[dict]:
 
 def _safe_float(v) -> float | None:
     try:
+        if v is None:
+            return None
+        # Handle pandas Series (extract scalar)
+        if isinstance(v, pd.Series):
+            v = v.iloc[0] if len(v) > 0 else None
         if v is None or pd.isna(v):
             return None
         return float(v)
@@ -151,9 +171,14 @@ def _safe_float(v) -> float | None:
 
 def _safe_int(v) -> int | None:
     try:
+        if v is None:
+            return None
+        # Handle pandas Series (extract scalar)
+        if isinstance(v, pd.Series):
+            v = v.iloc[0] if len(v) > 0 else None
         if v is None or pd.isna(v):
             return None
-        return int(v)
+        return int(float(v))  # Convert to float first to handle decimal inputs
     except Exception:
         return None
 

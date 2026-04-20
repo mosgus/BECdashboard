@@ -8,7 +8,7 @@ import { fetchPortfolioDetail } from "@/lib/api";
 
 const TABS = [
   { slug: "holdings",  label: "Holdings"    },
-  { slug: "targets",   label: "Historical"  },
+  { slug: "targets",   label: "Backtest"    },
   { slug: "outlook",   label: "Outlook"     },
   { slug: "monitor",   label: "Monitor"     },
   { slug: "risk",      label: "Risk & Perf" },

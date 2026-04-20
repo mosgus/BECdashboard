@@ -11,12 +11,15 @@ import {
   runScenario,
 } from "@/lib/api";
 import { fmtNum, fmtPct, colorForValue, downsample } from "@/lib/utils";
+import { SCENARIO_PRESETS, TAG_STYLES } from "@/lib/scenarios";
 import InfoTooltip from "@/components/InfoTooltip";
 import HelpSidebar from "@/components/HelpSidebar";
 import SignalBadge from "@/components/SignalBadge";
 import ChartExportButtons from "@/components/ChartExportButtons";
 import RiskContributionChart from "@/components/RiskContributionChart";
 import ScenarioGuide from "@/components/ScenarioGuide";
+import ScenarioComparisonBar from "@/components/research/ScenarioComparisonBar";
+import ScenarioResultCard from "@/components/research/ScenarioResultCard";
 import type { PortfolioAnalytics } from "@/types/sprint3";
 import type { PortfolioHealthResult, ScenarioResult, ScenarioType, ScenarioRequest } from "@/types/sprint7";
 import {
@@ -885,12 +888,12 @@ function ScenariosSection({ portfolioId }: { portfolioId: string }) {
   const [volScale, setVolScale] = useState("2");
   const [replayStart, setReplayStart] = useState("2022-01-01");
   const [replayEnd, setReplayEnd] = useState("2022-12-31");
-  const [result, setResult] = useState<ScenarioResult | null>(null);
+  const [results, setResults] = useState<ScenarioResult[]>([]);
   const [showGuide, setShowGuide] = useState(false);
 
   const mutation = useMutation<ScenarioResult, Error, ScenarioRequest>({
     mutationFn: (body) => runScenario(portfolioId, body),
-    onSuccess: (data) => setResult(data),
+    onSuccess: (data) => setResults((prev) => [...prev, data]),
   });
 
   function handleRun() {
@@ -898,35 +901,78 @@ function ScenariosSection({ portfolioId }: { portfolioId: string }) {
     if (scenarioType === "market_shock") body.shock_pct = parseFloat(shockPct) / 100;
     if (scenarioType === "vol_shock") body.vol_scale = parseFloat(volScale);
     if (scenarioType === "historical_replay") { body.start_date = replayStart; body.end_date = replayEnd; }
+    if (scenarioType === "factor_replay") { body.start_date = replayStart; body.end_date = replayEnd; }
+    mutation.mutate(body);
+  }
+
+  function runPreset(p: any) {
+    setScenarioType("factor_replay" as ScenarioType);
+    setReplayStart(p.start);
+    setReplayEnd(p.end);
+    const body: ScenarioRequest = { scenario_type: "factor_replay", start_date: p.start, end_date: p.end };
     mutation.mutate(body);
   }
 
   const TYPES: { key: ScenarioType; label: string }[] = [
-    { key: "market_shock",     label: "Market Shock" },
-    { key: "vol_shock",        label: "Vol Shock" },
+    { key: "market_shock",      label: "Market Shock" },
+    { key: "vol_shock",         label: "Vol Shock" },
     { key: "historical_replay", label: "Historical Replay" },
+    { key: "factor_replay",     label: "Factor Replay (Historical + Modeled)" },
   ];
 
   return (
     <div className="space-y-5">
       {showGuide && <ScenarioGuide onClose={() => setShowGuide(false)} />}
 
-      {/* Type selector */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex rounded-[var(--radius-btn)] border border-[var(--color-border)] overflow-hidden">
-          {TYPES.map(({ key, label }) => (
+      {/* Preset scenarios gallery */}
+      <div>
+        <p className="mb-2 text-xs font-semibold text-[var(--color-muted)]">
+          Preset Scenarios — click to run factor replay with one of these crisis windows
+        </p>
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
+          {SCENARIO_PRESETS.map((p: any) => (
             <button
-              key={key}
-              onClick={() => { setScenarioType(key); setResult(null); }}
-              className={`px-4 py-2 text-sm font-medium transition-colors ${
-                scenarioType === key
-                  ? "bg-[var(--color-primary)] text-white"
-                  : "bg-[var(--color-surface)] text-[var(--color-muted)] hover:text-[var(--color-text)]"
-              }`}
+              key={p.id}
+              onClick={() => runPreset(p)}
+              disabled={mutation.isPending}
+              className="rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] p-3 text-left hover:border-[var(--color-primary)] hover:shadow-sm transition-all disabled:opacity-50"
             >
-              {label}
+              <p className="text-xs font-semibold text-[var(--color-text)]">{p.name}</p>
+              <p className="mt-0.5 text-[10px] text-[var(--color-muted)]">{p.description}</p>
+              <p className="mt-1 text-[10px] font-mono text-[var(--color-muted)]">
+                {p.start} → {p.end}
+              </p>
+              <div className="mt-1.5 flex flex-wrap gap-1">
+                {p.tags.map((t: string) => (
+                  <span key={t} className={`rounded px-1.5 py-0.5 text-[9px] font-semibold ${TAG_STYLES[t]}`}>
+                    {t}
+                  </span>
+                ))}
+              </div>
             </button>
           ))}
+        </div>
+      </div>
+
+      <div className="pt-2 border-t border-[var(--color-border)]">
+        <p className="mb-3 text-xs font-semibold text-[var(--color-muted)]">Or run a custom scenario:</p>
+      </div>
+
+      {/* Type selector and controls */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <label className="block text-xs font-medium text-[var(--color-muted)] mb-1">
+            Scenario Type
+          </label>
+          <select
+            value={scenarioType}
+            onChange={(e) => setScenarioType(e.target.value as ScenarioType)}
+            className="rounded-[var(--radius-btn)] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-sm text-[var(--color-text)]"
+          >
+            {TYPES.map(({ key, label }) => (
+              <option key={key} value={key}>{label}</option>
+            ))}
+          </select>
         </div>
         <button
           onClick={() => setShowGuide(true)}
@@ -936,7 +982,7 @@ function ScenariosSection({ portfolioId }: { portfolioId: string }) {
         </button>
       </div>
 
-      {/* Inputs */}
+      {/* Input controls */}
       <div className="flex flex-wrap items-end gap-4 rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-sm">
         {scenarioType === "market_shock" && (
           <div>
@@ -962,7 +1008,7 @@ function ScenariosSection({ portfolioId }: { portfolioId: string }) {
             />
           </div>
         )}
-        {scenarioType === "historical_replay" && (
+        {(scenarioType === "historical_replay" || scenarioType === "factor_replay") && (
           <>
             <div>
               <label className="mb-1 block text-xs font-medium text-[var(--color-muted)]">Start</label>
@@ -983,126 +1029,35 @@ function ScenariosSection({ portfolioId }: { portfolioId: string }) {
         >
           {mutation.isPending ? "Running…" : "Run Scenario"}
         </button>
+        {results.length > 0 && (
+          <button
+            onClick={() => setResults([])}
+            className="rounded-[var(--radius-btn)] border border-[var(--color-border)] px-3 py-2 text-xs text-[var(--color-muted)] hover:bg-[var(--color-border)]"
+          >
+            Clear
+          </button>
+        )}
       </div>
 
       {mutation.error && (
         <p className="text-sm text-[var(--color-negative)]">{mutation.error.message}</p>
       )}
 
-      {/* Results */}
-      {result && (
+      {/* Results with comparison */}
+      {results.length > 0 && (
         <div className="space-y-4">
-          {/* Market shock result */}
-          {result.scenario_type === "market_shock" && result.portfolio_impact != null && (
-            <>
-              <div className="rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-sm">
-                <p className="text-xs text-[var(--color-muted)]">Portfolio Impact</p>
-                <p className={`text-3xl font-bold ${colorForValue(result.portfolio_impact)}`}>
-                  {fmtPct(result.portfolio_impact)}
-                </p>
-              </div>
-              {result.contributions && (
-                <div className="rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-sm overflow-auto">
-                  <h3 className="mb-3 text-sm font-semibold text-[var(--color-text)]">Per-Asset Impact</h3>
-                  <table className="w-full text-xs">
-                    <thead className="border-b border-[var(--color-border)] bg-gray-50">
-                      <tr>
-                        {["Ticker", "Weight", "Impact"].map((h) => (
-                          <th key={h} className="px-3 py-2 text-left font-semibold text-[var(--color-muted)]">{h}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-100">
-                      {result.contributions.map((c) => (
-                        <tr key={c.ticker} className="hover:bg-gray-50">
-                          <td className="px-3 py-2 font-mono font-medium">{c.ticker}</td>
-                          <td className="px-3 py-2">{fmtPct(c.weight)}</td>
-                          <td className={`px-3 py-2 font-semibold ${colorForValue(c.impact)}`}>{fmtPct(c.impact)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </>
-          )}
-
-          {/* Vol shock result */}
-          {result.scenario_type === "vol_shock" && (
-            <div className="grid grid-cols-3 gap-3">
-              {[
-                { label: "Base Vol",    value: result.base_vol    != null ? fmtPct(result.base_vol)    : "—" },
-                { label: "Shocked Vol", value: result.shocked_vol != null ? fmtPct(result.shocked_vol) : "—" },
-                { label: "Vol Scale",   value: `${result.vol_scale}×` },
-              ].map((c) => (
-                <div key={c.label} className="rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-sm">
-                  <p className="text-xs text-[var(--color-muted)]">{c.label}</p>
-                  <p className="text-2xl font-bold text-[var(--color-text)]">{c.value}</p>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* Historical replay result */}
-          {result.scenario_type === "historical_replay" && (
-            <>
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                {[
-                  { label: "Total Return", value: result.total_return != null ? fmtPct(result.total_return) : "—" },
-                  { label: "Max Drawdown", value: result.max_dd      != null ? fmtPct(result.max_dd)       : "—" },
-                  { label: "Best Day",     value: result.best_day    != null ? fmtPct(result.best_day)     : "—" },
-                  { label: "Worst Day",    value: result.worst_day   != null ? fmtPct(result.worst_day)    : "—" },
-                ].map((c) => (
-                  <div key={c.label} className="rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-sm">
-                    <p className="text-xs text-[var(--color-muted)]">{c.label}</p>
-                    <p className={`text-xl font-bold ${colorForValue(parseFloat(c.value.replace(/[%+]/g, "") || "0"))}`}>{c.value}</p>
-                  </div>
-                ))}
-              </div>
-
-              {result.equity_curve && result.equity_curve.length > 1 && (
-                <div className="rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-sm">
-                  <h3 className="mb-3 text-sm font-semibold text-[var(--color-text)]">Equity Curve</h3>
-                  <ResponsiveContainer width="100%" height={150}>
-                    <LineChart data={downsample(result.equity_curve, 300)} margin={{ top: 4, right: 16, bottom: 0, left: 0 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
-                      <XAxis dataKey="date" tick={{ fontSize: 10 }} minTickGap={60} tickFormatter={(d: string) => d.slice(0, 7)} />
-                      <YAxis tick={{ fontSize: 10 }} width={48} domain={["auto", "auto"]} tickFormatter={(v: number) => v.toFixed(2)} />
-                      <Tooltip labelFormatter={(l) => `Date: ${l}`} formatter={(v: unknown) => [(Number(v) || 0).toFixed(4), "Portfolio"]} />
-                      <Line type="monotone" dataKey="value" stroke="var(--color-primary)" strokeWidth={1.5} dot={false} name="Portfolio" />
-                    </LineChart>
-                  </ResponsiveContainer>
-                </div>
-              )}
-
-              {result.contributors && (
-                <div className="rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-sm overflow-auto">
-                  <h3 className="mb-3 text-sm font-semibold text-[var(--color-text)]">Asset Contributions</h3>
-                  <table className="w-full text-xs">
-                    <thead className="border-b border-[var(--color-border)] bg-gray-50">
-                      <tr>
-                        {["Ticker", "Asset Return", "Weight", "Contribution"].map((h) => (
-                          <th key={h} className="px-3 py-2 text-left font-semibold text-[var(--color-muted)]">{h}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-100">
-                      {[...result.contributors].sort((a, b) => b.weighted_contribution - a.weighted_contribution).map((c) => (
-                        <tr key={c.ticker} className="hover:bg-gray-50">
-                          <td className="px-3 py-2 font-mono font-medium">{c.ticker}</td>
-                          <td className={`px-3 py-2 ${colorForValue(c.asset_return)}`}>{fmtPct(c.asset_return)}</td>
-                          <td className="px-3 py-2">{fmtPct(c.weight)}</td>
-                          <td className={`px-3 py-2 font-semibold ${colorForValue(c.weighted_contribution)}`}>{fmtPct(c.weighted_contribution)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </>
-          )}
-
-          <ScenarioPlaybook result={result} />
+          <ScenarioComparisonBar results={results} />
+          <div className="space-y-4">
+            {results.map((result, i) => (
+              <ScenarioResultCard
+                key={i}
+                result={result}
+                notionalValue={null}
+                index={i}
+                onRemove={() => setResults((prev) => prev.filter((_, idx) => idx !== i))}
+              />
+            ))}
+          </div>
         </div>
       )}
     </div>

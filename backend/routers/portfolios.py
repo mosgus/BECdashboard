@@ -6,7 +6,7 @@ import io
 import json
 import re
 import uuid
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Literal, Optional
 
 import numpy as np
@@ -72,11 +72,17 @@ class PortfolioNotional(BaseModel):
     notional_value: Optional[float] = None
 
 
+class CashUpdateRequest(BaseModel):
+    cash_value: Optional[float] = None
+    cash_pct_target: Optional[float] = None  # 0–100
+
+
 class PositionUpsert(BaseModel):
     ticker: str
-    weight: Optional[float] = None      # percentage units (25 = 25%); set by targets page
-    shares: Optional[float] = None      # number of shares; set by holdings page
-    cost_basis: Optional[float] = None  # per-share cost basis for P&L
+    weight: Optional[float] = None                          # percentage units (25 = 25%); set by targets page
+    shares: Optional[float] = None                          # number of shares; set by holdings page
+    cost_basis: Optional[float] = None                      # per-share cost basis for P&L
+    position_type: Literal["stock", "cash"] = "stock"      # 'cash' = excluded from optimization
 
     @field_validator("ticker")
     @classmethod
@@ -162,16 +168,161 @@ class IndicatorConfigUpsert(BaseModel):
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
+def _parse_bloomberg_format(content: str) -> list[dict] | None:
+    """Parse Bloomberg holdings export format.
+
+    Expected columns: Security, Position (shares), Price, Market Val, Cost Date, etc.
+    Skips: <Search>, Totals, Cash rows.
+    Returns synthetic cost_basis (market value) if cost data is missing.
+    """
+    try:
+        reader = csv.DictReader(io.StringIO(content))
+        fieldnames = [h.lower().strip() for h in (reader.fieldnames or [])]
+
+        # Verify this is Bloomberg format by checking for required columns
+        if not ("security" in fieldnames and "position" in fieldnames):
+            return None
+
+        def _row_get(row: dict, *keys: str) -> str:
+            """Case-insensitive lookup across multiple possible column names."""
+            lower_map = {k.lower().strip(): v for k, v in row.items()}
+            for key in keys:
+                val = lower_map.get(key)
+                if val is not None:
+                    return val
+            return ""
+
+        results = []
+        for row in reader:
+            security = _row_get(row, "security").strip()
+
+            # Skip special rows
+            if not security or security.startswith("<") or security.lower() in ("totals", "cash"):
+                continue
+
+            # Extract ticker from security (e.g., "BAESY US" → "BAESY", "SHOP CN" → "SHOP")
+            ticker = security.split()[0].strip().upper() if security else ""
+            # Skip invalid tickers (empty, "0", numeric-only, too short)
+            if not ticker or ticker == "0" or len(ticker) < 1 or ticker.isdigit():
+                continue
+            if ticker in ("TICKER", "SYMBOL", "SECURITY"):  # Skip header-like entries
+                continue
+
+            # Extract shares (Position column)
+            position_str = _row_get(row, "position").strip()
+            shares = None
+            if position_str:
+                try:
+                    shares = int(float(position_str))
+                except (ValueError, TypeError):
+                    try:
+                        shares = float(position_str)
+                    except (ValueError, TypeError):
+                        pass
+
+            # Extract current price
+            price_str = _row_get(row, "price", "current price").strip()
+            current_price = None
+            if price_str:
+                try:
+                    current_price = float(price_str)
+                except (ValueError, TypeError):
+                    pass
+
+            # Extract market value (current value)
+            market_val_str = _row_get(row, "market val", "marketval", "market_val").strip()
+            market_val = None
+            if market_val_str:
+                try:
+                    market_val = float(market_val_str)
+                except (ValueError, TypeError):
+                    pass
+
+            # Extract cost basis if available; otherwise use market value as synthetic cost
+            cost_val_str = _row_get(row, "cost val", "costval", "cost_val").strip()
+            cost_basis = None
+            if cost_val_str:
+                try:
+                    cost_basis = float(cost_val_str)
+                except (ValueError, TypeError):
+                    pass
+
+            # If cost basis is missing, calculate per-share cost from market value and shares
+            # Otherwise use current price as synthetic cost per share
+            if cost_basis is None:
+                if market_val is not None and shares is not None and shares > 0:
+                    # Calculate per-share cost: total market value / shares
+                    cost_basis = market_val / shares
+                elif current_price is not None:
+                    # Fall back to current price as synthetic cost per share
+                    cost_basis = current_price
+
+            # Extract cost date if available
+            cost_date_str = _row_get(row, "cost date", "costdate", "cost_date").strip()
+
+            # Detect cash/money-market equivalents:
+            # 1. Price is $1.00 ± $0.01 (money-market fund NAV)
+            # 2. shares ≈ market_value (implies $1/share parity)
+            # Either condition is sufficient.
+            is_cash_price = current_price is not None and abs(current_price - 1.0) < 0.01
+            is_cash_parity = (
+                shares is not None and shares > 0
+                and market_val is not None
+                and abs(market_val / shares - 1.0) < 0.01
+            )
+            position_type = "cash" if (is_cash_price or is_cash_parity) else "stock"
+
+            results.append({
+                "ticker": ticker,
+                "shares": shares,
+                "price": current_price,
+                "market_value": market_val,
+                "cost_basis": cost_basis,
+                "cost_date": cost_date_str or None,
+                "weight": None,  # Will be calculated from shares/prices if needed
+                "position_type": position_type,
+            })
+
+        return results if results else None
+
+    except Exception:
+        return None
+
+
 def _parse_portfolio_csv(content: str) -> list[dict]:
-    """Parse portfolio CSV into [{ticker, weight}] dicts.
+    """Parse portfolio CSV into [{ticker, shares, cost_basis, ...}] dicts.
 
     Accepted formats:
-      - Header row with 'ticker' column; optional 'weight' column
-      - No header: first column = ticker, second column = optional weight
+      1. Simple ticker list: header 'ticker' column; optional 'weight' column
+      2. Time-series portfolio: columns like AAPL_Weight, MSFT_Weight, etc. (extracts latest weights)
+      3. Bloomberg holdings export: Security, Position, Price, Market Val, Cost Date columns
+      4. Headerless: first column = ticker, second column = optional weight
 
     Weights may be decimals (0.25) or percentages (25 or 25%); decimals ≤ 1
     are converted to percentage scale to match the Position model convention.
+
+    For missing cost basis: uses market value or calculates from shares × price.
     """
+    # First, detect Bloomberg format by looking for specific header patterns
+    lines = content.strip().split('\n')
+    if len(lines) > 10:
+        # Bloomberg format has metadata rows (1-8), then a header description row,
+        # then the actual column headers. Look for the row containing "Security" and "Position"
+        header_idx = None
+        for i in range(min(15, len(lines))):  # Look within first 15 rows
+            lower_line = lines[i].lower()
+            if "security" in lower_line and "position" in lower_line:
+                header_idx = i
+                break
+
+        if header_idx is not None:
+            # This is a Bloomberg format with headers at row (header_idx + 1)
+            # Parse starting from that header row
+            bloomberg_content = '\n'.join(lines[header_idx:])
+            result = _parse_bloomberg_format(bloomberg_content)
+            if result:
+                return result
+
     reader = csv.DictReader(io.StringIO(content))
     fieldnames = [h.lower().strip() for h in (reader.fieldnames or [])]
 
@@ -194,6 +345,7 @@ def _parse_portfolio_csv(content: str) -> list[dict]:
                 return val
         return ""
 
+    # Format 1: Simple ticker list (ticker column present)
     if "ticker" in fieldnames or "symbol" in fieldnames:
         return [
             {
@@ -205,13 +357,87 @@ def _parse_portfolio_csv(content: str) -> list[dict]:
             for row in reader
         ]
 
-    # No header
+    # Format 2: Time-series portfolio (columns like AAPL_Weight, MSFT_Weight, etc.)
+    # Detect by looking for columns with _weight, _share, _mktval suffixes
+    weight_cols = [f for f in fieldnames if "_weight" in f]
+    if weight_cols:
+        # Extract tickers from column names (e.g. "aapl_weight" → "AAPL")
+        tickers_found = set()
+        for col in weight_cols:
+            ticker = col.replace("_weight", "").strip().upper()
+            if ticker and ticker not in ("PORTFOLIO", "TOTAL"):
+                tickers_found.add(ticker)
+
+        if tickers_found:
+            # Use the last row (most recent date) to get current weights, shares, and cost
+            all_rows = list(reader)
+            if all_rows:
+                last_row = all_rows[-1]
+                # Create case-insensitive lookup for the last row
+                last_row_lower = {k.lower().strip(): v for k, v in last_row.items()}
+                result = []
+                for ticker in sorted(tickers_found):
+                    weight_key = f"{ticker.lower()}_weight"
+                    weight_val = last_row_lower.get(weight_key, "")
+                    # Time-series weights are typically decimals (0.25) or percentages (25)
+                    parsed_weight = _parse_weight(weight_val) if weight_val else None
+
+                    # Try to extract shares (look for _shares, _share, _qty, _quantity columns)
+                    shares_val = (last_row_lower.get(f"{ticker.lower()}_shares") or
+                                 last_row_lower.get(f"{ticker.lower()}_share") or
+                                 last_row_lower.get(f"{ticker.lower()}_qty") or
+                                 last_row_lower.get(f"{ticker.lower()}_quantity") or "")
+                    parsed_shares = None
+                    if shares_val:
+                        try:
+                            parsed_shares = int(float(shares_val))
+                        except (ValueError, TypeError):
+                            pass
+
+                    # Try to extract cost basis (look for _close, _price, _cost, _cost_basis columns)
+                    cost_val = (last_row_lower.get(f"{ticker.lower()}_close") or
+                               last_row_lower.get(f"{ticker.lower()}_price") or
+                               last_row_lower.get(f"{ticker.lower()}_cost") or
+                               last_row_lower.get(f"{ticker.lower()}_cost_basis") or "")
+                    parsed_cost = None
+                    if cost_val:
+                        try:
+                            parsed_cost = float(cost_val)
+                        except (ValueError, TypeError):
+                            pass
+
+                    result.append({
+                        "ticker": ticker,
+                        "weight": parsed_weight,
+                        "shares": parsed_shares,
+                        "cost_basis": parsed_cost,
+                    })
+                return result
+
+    # Format 3: Headerless (first column = ticker, second = optional weight)
+    # Only use this format if there's no header row detected
+    # Skip the first line to avoid treating header as data if any fieldnames were detected
     rows: list[dict] = []
+    first_line = True
     for line in csv.reader(io.StringIO(content)):
         if not line:
             continue
+        # Skip first line if it looks like a header (any fieldnames were read from DictReader)
+        if first_line and (reader.fieldnames is not None):
+            first_line = False
+            continue
+        first_line = False
+
+        # Skip lines that look like dates (YYYY-MM-DD format) - protection against data corruption
+        ticker = line[0].strip().upper()
+        if ticker and ("^[0-9]{4}-[0-9]{2}-[0-9]{2}" in repr(ticker) or \
+                      (len(ticker) == 10 and ticker[4] == '-' and ticker[7] == '-' and \
+                       ticker[:4].isdigit() and ticker[5:7].isdigit() and ticker[8:10].isdigit())):
+            # Skip date-like entries
+            continue
+
         rows.append({
-            "ticker": line[0].strip().upper(),
+            "ticker": ticker,
             "weight": _parse_weight(line[1]) if len(line) > 1 else None,
             "shares": None,
             "cost_basis": None,
@@ -247,6 +473,7 @@ def _pos_dict(pos: Position) -> dict:
         "weight": pos.weight,
         "shares": pos.shares,
         "cost_basis": pos.cost_basis,
+        "position_type": pos.position_type,
         "updated_at": pos.updated_at.isoformat(),
     }
 
@@ -258,12 +485,17 @@ def _recompute_portfolio_from_shares(portfolio_id: uuid.UUID, db: Session) -> No
     position in the portfolio has shares recorded.
     Weights are stored in percentage units (25.0 = 25 %) so the optimizer
     and existing analytics code continue to work without changes.
+
+    Note: Cash is now stored at portfolio.cash_value; no cash position rows exist.
     """
     positions = db.query(Position).filter(Position.portfolio_id == portfolio_id).all()
     share_positions = [p for p in positions if p.shares is not None]
     if not share_positions:
         return
 
+    market_values: dict[str, float] = {}
+
+    # Fetch live prices for equity positions
     tickers_tuple = tuple(sorted(p.ticker for p in share_positions))
     today = date.today()
     start_str = (today - timedelta(days=10)).isoformat()
@@ -272,33 +504,28 @@ def _recompute_portfolio_from_shares(portfolio_id: uuid.UUID, db: Session) -> No
     except Exception:
         prices_df = None
 
-    if prices_df is None or prices_df.empty:
-        return
-
-    # Latest close per ticker
-    latest: dict[str, float] = {}
-    for t in tickers_tuple:
-        if t in prices_df.columns:
-            s = prices_df[t].dropna()
-            if len(s) > 0:
-                latest[t] = float(s.iloc[-1])
-
-    # Market values
-    market_values: dict[str, float] = {}
-    for p in share_positions:
-        if p.ticker in latest:
-            market_values[p.ticker] = p.shares * latest[p.ticker]  # type: ignore[operator]
+    if prices_df is not None and not prices_df.empty:
+        latest: dict[str, float] = {}
+        for t in tickers_tuple:
+            if t in prices_df.columns:
+                s = prices_df[t].dropna()
+                if len(s) > 0:
+                    latest[t] = float(s.iloc[-1])
+        for p in share_positions:
+            if p.ticker in latest:
+                market_values[p.ticker] = p.shares * latest[p.ticker]  # type: ignore[operator]
 
     total_mv = sum(market_values.values())
     if total_mv <= 0:
         return
 
-    # Update weight (%) for share-based positions; leave weight-only positions untouched
+    # Update weight (%) for all share-based positions; leave weight-only positions untouched
     for p in positions:
         if p.ticker in market_values:
             p.weight = round(market_values[p.ticker] / total_mv * 100, 4)
 
-    # Auto-update portfolio notional value to reflect current market value
+    # Auto-update portfolio notional value to reflect current equity market value only
+    # (cash is tracked separately in portfolio.cash_value)
     portfolio = db.query(Portfolio).filter(Portfolio.id == portfolio_id).first()
     if portfolio:
         portfolio.notional_value = round(total_mv, 2)
@@ -352,6 +579,7 @@ def list_portfolios(db: Session = Depends(get_db)) -> dict:
             "id": str(p.id),
             "name": p.name,
             "created_at": p.created_at.isoformat(),
+            "last_rebalance_date": p.last_rebalance_date.isoformat() if p.last_rebalance_date else None,
             "position_count": count,
         })
     return {"portfolios": result}
@@ -373,7 +601,10 @@ def create_portfolio(
 @router.get("/portfolios/{portfolio_id}")
 def get_portfolio(portfolio_id: str, db: Session = Depends(get_db)) -> dict:
     p = _get_or_404(db, portfolio_id)
-    positions = db.query(Position).filter(Position.portfolio_id == p.id).order_by(Position.ticker).all()
+    all_positions = db.query(Position).filter(Position.portfolio_id == p.id).order_by(Position.ticker).all()
+
+    # Filter out any cash positions (should not exist after migration, but safety net)
+    positions = [pos for pos in all_positions if pos.position_type != "cash"]
 
     prices = _fetch_position_prices(positions)
 
@@ -393,6 +624,9 @@ def get_portfolio(portfolio_id: str, db: Session = Depends(get_db)) -> dict:
         "name": p.name,
         "created_at": p.created_at.isoformat(),
         "notional_value": float(p.notional_value) if p.notional_value is not None else None,
+        "cash_value": float(p.cash_value) if p.cash_value is not None else None,
+        "cash_pct_target": p.cash_pct_target,
+        "last_rebalance_date": p.last_rebalance_date.isoformat() if p.last_rebalance_date else None,
         "last_target_set": json.loads(p.last_target_set) if p.last_target_set else None,
         "positions": [enrich(pos) for pos in positions],
     }
@@ -413,6 +647,26 @@ def patch_portfolio_notional(
         "id": str(p.id),
         "name": p.name,
         "notional_value": float(p.notional_value) if p.notional_value is not None else None,
+    }
+
+
+@router.patch("/portfolios/{portfolio_id}/cash")
+def update_portfolio_cash(
+    portfolio_id: str,
+    body: CashUpdateRequest,
+    db: Session = Depends(get_db),
+    _: None = Depends(require_write_key),
+) -> dict:
+    """Update portfolio cash_value and/or cash_pct_target."""
+    p = _get_or_404(db, portfolio_id)
+    if body.cash_value is not None:
+        p.cash_value = body.cash_value
+    if body.cash_pct_target is not None:
+        p.cash_pct_target = body.cash_pct_target
+    db.commit()
+    return {
+        "cash_value": float(p.cash_value) if p.cash_value is not None else None,
+        "cash_pct_target": p.cash_pct_target,
     }
 
 
@@ -490,6 +744,7 @@ def add_or_update_position(
             existing.cost_basis = body.cost_basis
         if body.weight is not None:
             existing.weight = body.weight
+        existing.position_type = body.position_type
     else:
         pos = Position(
             portfolio_id=p.id,
@@ -497,6 +752,7 @@ def add_or_update_position(
             weight=body.weight,
             shares=body.shares,
             cost_basis=body.cost_basis,
+            position_type=body.position_type,
         )
         db.add(pos)
     db.commit()
@@ -589,12 +845,14 @@ def import_portfolio_csv(
     positions_updated = 0
     universe_added: list[str] = []
     warnings: list[str] = []
+    cash_total = 0.0
 
     for row in rows:
         ticker = row["ticker"]
         weight = row["weight"]
         shares_raw = row.get("shares")
         cost_basis_raw = row.get("cost_basis")
+        position_type = row.get("position_type", "stock")
 
         if not ticker or ticker in ("TICKER", "SYMBOL", "CASH"):
             continue
@@ -617,7 +875,17 @@ def import_portfolio_csv(
             except (ValueError, TypeError):
                 pass
 
-        # Ensure ticker is in active universe; auto-add if missing
+        # Handle cash positions: sum market values and don't create position rows
+        if position_type == "cash":
+            market_val = row.get("market_value")
+            if market_val is not None:
+                try:
+                    cash_total += float(market_val)
+                except (ValueError, TypeError):
+                    pass
+            continue
+
+        # For equity positions: ensure ticker is in active universe; auto-add if missing
         ut = db.query(UniverseTicker).filter(UniverseTicker.ticker == ticker).first()
         if not ut:
             ut = UniverseTicker(ticker=ticker, active=True)
@@ -629,7 +897,7 @@ def import_portfolio_csv(
             ut.active = True
             universe_added.append(ticker)
 
-        # Upsert position
+        # Upsert position (stock only)
         existing = db.query(Position).filter(
             Position.portfolio_id == p.id, Position.ticker == ticker
         ).first()
@@ -642,9 +910,17 @@ def import_portfolio_csv(
             positions_updated += 1
         else:
             db.add(Position(portfolio_id=p.id, ticker=ticker, weight=weight,
-                            shares=shares, cost_basis=cost_basis))
+                            shares=shares, cost_basis=cost_basis, position_type="stock"))
             positions_added += 1
 
+    db.commit()
+
+    # Add cash total to portfolio.cash_value
+    if cash_total > 0:
+        p.cash_value = round(cash_total, 2)
+
+    # Set last_rebalance_date to now since we've imported new positions
+    p.last_rebalance_date = datetime.now(timezone.utc)
     db.commit()
 
     # Recompute weights + notional from shares × live price (needed for Rebalance tab)
@@ -917,7 +1193,7 @@ def optimize_portfolio(
     ]
 
     if len(positions) < 2:
-        raise HTTPException(status_code=422, detail="Need at least 2 positions to optimize.")
+        raise HTTPException(status_code=422, detail="Need at least 2 equity positions to optimize.")
 
     tickers = [pos.ticker for pos in positions]
     raw_w = [(pos.weight or 1.0) for pos in positions]
@@ -1873,7 +2149,7 @@ def monte_carlo_sim(
     p = _get_or_404(db, portfolio_id)
     positions = db.query(Position).filter(Position.portfolio_id == p.id).order_by(Position.ticker).all()
     if len(positions) < 1:
-        raise HTTPException(status_code=422, detail="No positions in portfolio.")
+        raise HTTPException(status_code=422, detail="No equity positions in portfolio.")
 
     tickers = [pos.ticker for pos in positions]
     raw_w = [(pos.weight or 1.0) for pos in positions]
@@ -2126,7 +2402,7 @@ def efficient_frontier(
     p = _get_or_404(db, portfolio_id)
     positions = db.query(Position).filter(Position.portfolio_id == p.id).order_by(Position.ticker).all()
     if len(positions) < 2:
-        raise HTTPException(status_code=422, detail="Need at least 2 positions.")
+        raise HTTPException(status_code=422, detail="Need at least 2 equity positions to compute frontier.")
 
     tickers = [pos.ticker for pos in positions]
     raw_w = [(pos.weight or 1.0) for pos in positions]

@@ -402,7 +402,7 @@ export default function UniverseResearchPage() {
   return (
     <div className="space-y-6">
       <div className="rounded-[var(--radius-card)] border border-[var(--color-border)] bg-amber-50 px-4 py-2.5 text-xs text-amber-700">
-        Universe Research defines the investable opportunity set. Screen by fundamentals,
+        Securities Research defines your tracked consideration set. Screen by fundamentals,
         check data quality, and determine which tickers are eligible for portfolio construction.
       </div>
 

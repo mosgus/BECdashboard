@@ -81,9 +81,9 @@ export default function UniversePage() {
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-lg font-bold text-[var(--color-text)]">Universe</h1>
+          <h1 className="text-lg font-bold text-[var(--color-text)]">Securities</h1>
           <p className="text-sm text-[var(--color-muted)]">
-            Managed ticker universe — click any row to view metrics
+            Tracked securities under consideration — click any row to view metrics
             <InfoTooltip text="Only active tickers can be added to portfolio watchlists. Import via CSV to bulk-load tickers." />
           </p>
         </div>
@@ -270,7 +270,7 @@ export default function UniversePage() {
                     {t.pe_ratio != null ? fmtNum(t.pe_ratio, 1) : "—"}
                   </td>
                   <td className="px-4 py-3 text-right text-[var(--color-muted)]">
-                    {t.dividend_yield != null ? fmtPct(t.dividend_yield) : "—"}
+                    {t.dividend_yield != null ? `${t.dividend_yield.toFixed(2)}%` : "—"}
                   </td>
                   <td className="px-4 py-3 text-right text-[var(--color-muted)] whitespace-nowrap">
                     {t.fifty_two_week_low != null && t.fifty_two_week_high != null

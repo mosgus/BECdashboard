@@ -164,7 +164,7 @@ export const addPosition = (
   shares: number,
   costBasis?: number | null,
 ): Promise<{ ticker: string; weight: number | null; shares: number | null }> =>
-  apiPost(`/api/portfolios/${portfolioId}/positions`, { ticker, shares, cost_basis: costBasis ?? null });
+  apiPost(`/api/portfolios/${portfolioId}/positions`, { ticker, shares, cost_basis: costBasis ?? null, position_type: "stock" });
 
 /** Update shares (and optional cost basis) for an existing position. Used by Holdings tab. */
 export const updatePositionShares = (
@@ -259,6 +259,13 @@ export const fetchRebalance = (
 
 export const patchPortfolioNotional = (id: string, notionalValue: number | null): Promise<{ id: string; name: string; notional_value: number | null }> =>
   apiPatch(`/api/portfolios/${id}/notional`, { notional_value: notionalValue });
+
+export const setCashAllocation = (
+  portfolioId: string,
+  cashValue: number | null,
+  cashPctTarget: number | null,
+): Promise<{ cash_value: number | null; cash_pct_target: number | null }> =>
+  apiPatch(`/api/portfolios/${portfolioId}/cash`, { cash_value: cashValue, cash_pct_target: cashPctTarget });
 
 export const patchPortfolioTargets = (
   id: string,

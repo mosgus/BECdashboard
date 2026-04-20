@@ -10,6 +10,7 @@ import {
   fetchTickerTechnicals,
   importPortfolioCSV,
   removePosition,
+  setCashAllocation,
   updatePositionShares,
 } from "@/lib/api";
 import { fmtDollar, fmtNum } from "@/lib/utils";
@@ -101,12 +102,17 @@ export default function HoldingsPage({
 
   const positions: Position[] = data?.positions ?? [];
   const notionalValue: number | null = data?.notional_value ?? null;
+  const cashValue: number | null = data?.cash_value ?? null;
+  const cashPctTarget: number | null = data?.cash_pct_target ?? null;
 
   // ── Add form state ──────────────────────────────────────────────────────────
-  const [newTicker, setNewTicker]       = useState("");
-  const [newShares, setNewShares]       = useState("");
-  const [newCostBasis, setNewCostBasis] = useState("");
-  const [addError, setAddError]         = useState<string | null>(null);
+  const [newTicker, setNewTicker]             = useState("");
+  const [newShares, setNewShares]             = useState("");
+  const [newCostBasis, setNewCostBasis]       = useState("");
+  const [addError, setAddError]               = useState<string | null>(null);
+  const [cashUpdateMode, setCashUpdateMode]   = useState<"value" | "pct">("value");
+  const [cashInputValue, setCashInputValue]   = useState<string>("");
+  const [cashInputPct, setCashInputPct]       = useState<string>("");
 
   // ── Inline edit state ───────────────────────────────────────────────────────
   const [editingTicker, setEditingTicker]     = useState<string | null>(null);
@@ -140,7 +146,12 @@ export default function HoldingsPage({
       setNewShares("");
       setNewCostBasis("");
       setAddError(null);
-      qc.invalidateQueries({ queryKey: ["portfolio", portfolioId] });
+      qc.invalidateQueries({
+        predicate: (query) => {
+          const key = query.queryKey;
+          return Array.isArray(key) && key.length > 0 && key[1] === portfolioId;
+        },
+      });
     },
     onError: (e: Error) => setAddError(e.message),
   });
@@ -150,7 +161,12 @@ export default function HoldingsPage({
       updatePositionShares(portfolioId, ticker, shares, costBasis),
     onSuccess: () => {
       setEditingTicker(null);
-      qc.invalidateQueries({ queryKey: ["portfolio", portfolioId] });
+      qc.invalidateQueries({
+        predicate: (query) => {
+          const key = query.queryKey;
+          return Array.isArray(key) && key.length > 0 && key[1] === portfolioId;
+        },
+      });
     },
   });
 
@@ -160,10 +176,8 @@ export default function HoldingsPage({
   });
 
   // ── Derived totals ──────────────────────────────────────────────────────────
-  const totalMarketValue = positions.reduce(
-    (s, p) => s + (p.market_value ?? 0),
-    0,
-  );
+  const equityMV = positions.reduce((s, p) => s + (p.market_value ?? 0), 0);
+  const totalMarketValue = equityMV + (cashValue ?? 0);
 
   function startEdit(pos: Position) {
     setEditingTicker(pos.ticker);
@@ -195,19 +209,30 @@ export default function HoldingsPage({
         <span className="text-xs font-semibold text-[var(--color-muted)] shrink-0">
           Portfolio Value
         </span>
-        {hasShares ? (
+        {hasShares || cashValue != null ? (
           <>
             <span className="text-sm font-bold text-[var(--color-text)]">
               {totalMarketValue > 0 ? fmtDollar(totalMarketValue) : "—"}
             </span>
+            {equityMV > 0 || cashValue != null ? (
+              <span className="text-xs text-[var(--color-muted)]">
+                Equities: <strong className="text-[var(--color-text)]">{fmtDollar(equityMV)}</strong>
+                {cashValue != null && cashValue > 0 && (
+                  <>
+                    {" · "}
+                    Cash: <strong className="text-amber-600">{fmtDollar(cashValue)}</strong>
+                  </>
+                )}
+              </span>
+            ) : null}
             <span className="text-xs text-[var(--color-muted)]">
-              (auto-computed from shares × price)
-              <InfoTooltip text="Portfolio value is automatically computed from your share counts × live prices. It updates whenever you add or edit holdings." />
+              (equities auto-computed from shares × price)
+              <InfoTooltip text="Equity value is automatically computed from your share counts × live prices. Cash is managed separately via the Cash & Equivalents panel." />
             </span>
           </>
         ) : (
           <span className="text-xs text-[var(--color-muted)]">
-            Add share counts to compute automatically.
+            Add holdings or set cash value.
           </span>
         )}
         {notionalValue != null && (
@@ -219,6 +244,21 @@ export default function HoldingsPage({
           </span>
         )}
       </div>
+
+      {/* Last Rebalance Date */}
+      {data?.last_rebalance_date && (
+        <div className="flex items-center gap-2 rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-2 text-xs shadow-sm">
+          <span className="text-[var(--color-muted)]">Last Rebalance:</span>
+          <span className="font-semibold text-[var(--color-text)]">
+            {new Date(data.last_rebalance_date).toLocaleDateString("en-US", {
+              month: "short",
+              day: "numeric",
+              year: "numeric",
+            })}
+          </span>
+          <InfoTooltip text="Date when positions were last imported or rebalanced. Used as the baseline for PnL calculations." />
+        </div>
+      )}
 
       {/* Add holding form */}
       <div className="rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-sm">
@@ -322,6 +362,89 @@ export default function HoldingsPage({
         {addError && (
           <p className="mt-2 text-xs text-[var(--color-negative)]">{addError}</p>
         )}
+      </div>
+
+      {/* Cash & Equivalents panel */}
+      <div className="rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-sm">
+        <div className="mb-3">
+          <h3 className="text-sm font-semibold text-[var(--color-text)]">
+            Cash & Equivalents
+            <InfoTooltip text="Cash and money-market positions held in the portfolio. Set either a dollar amount or a percentage target." />
+          </h3>
+        </div>
+
+        <div className="space-y-3">
+          {/* Display current cash value */}
+          {cashValue != null && cashValue > 0 && (
+            <div className="flex items-center justify-between rounded bg-amber-50 px-3 py-2">
+              <span className="text-xs font-medium text-[var(--color-muted)]">Current:</span>
+              <span className="text-sm font-semibold text-amber-700">{fmtDollar(cashValue)}</span>
+            </div>
+          )}
+
+          {/* Input fields */}
+          <div className="flex flex-wrap items-end gap-3">
+            {/* Dollar amount input */}
+            <div className="flex flex-col gap-1">
+              <label className="text-[10px] font-medium text-[var(--color-muted)]">$ Amount</label>
+              <input
+                value={cashInputValue}
+                onChange={(e) => setCashInputValue(e.target.value)}
+                placeholder={cashValue ? fmtDollar(cashValue) : "0"}
+                type="number"
+                min={0}
+                step={0.01}
+                className="w-36 rounded-[var(--radius-btn)] border border-[var(--color-border)] px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]"
+              />
+            </div>
+
+            {/* Percentage target input */}
+            <div className="flex flex-col gap-1">
+              <label className="text-[10px] font-medium text-[var(--color-muted)]">% Target</label>
+              <div className="flex items-center gap-2">
+                <input
+                  value={cashInputPct}
+                  onChange={(e) => setCashInputPct(e.target.value)}
+                  placeholder={cashPctTarget ? String(cashPctTarget.toFixed(1)) : "0"}
+                  type="number"
+                  min={0}
+                  max={100}
+                  step={0.1}
+                  className="w-24 rounded-[var(--radius-btn)] border border-[var(--color-border)] px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]"
+                />
+                <span className="text-xs text-[var(--color-muted)]">%</span>
+              </div>
+            </div>
+
+            {/* Save button */}
+            <button
+              onClick={async () => {
+                const val = cashInputValue ? parseFloat(cashInputValue) : null;
+                const pct = cashInputPct ? parseFloat(cashInputPct) : null;
+                if (val != null || pct != null) {
+                  try {
+                    await setCashAllocation(portfolioId, val, pct);
+                    setCashInputValue("");
+                    setCashInputPct("");
+                    qc.invalidateQueries({ queryKey: ["portfolio", portfolioId] });
+                  } catch (e) {
+                    alert("Failed to update cash: " + (e as Error).message);
+                  }
+                }
+              }}
+              className="rounded-[var(--radius-btn)] bg-[var(--color-primary)] px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50 transition-opacity"
+            >
+              Save Cash
+            </button>
+          </div>
+
+          {/* Computed info */}
+          {totalMarketValue > 0 && cashPctTarget != null && cashPctTarget > 0 && (
+            <div className="rounded bg-gray-50 px-3 py-2 text-xs text-[var(--color-muted)]">
+              <span>Computed: {cashPctTarget.toFixed(1)}% of {fmtDollar(totalMarketValue)} = {fmtDollar((totalMarketValue * cashPctTarget) / 100)}</span>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Positions table */}
@@ -522,7 +645,16 @@ export default function HoldingsPage({
                       Total
                     </td>
                     <td className="px-4 py-2 text-right text-xs font-bold text-[var(--color-text)]">
-                      {totalMarketValue > 0 ? fmtDollar(totalMarketValue) : "—"}
+                      {totalMarketValue > 0 ? (
+                        <div className="flex flex-col items-end gap-0.5">
+                          <span>{fmtDollar(totalMarketValue)}</span>
+                          {cashValue != null && cashValue > 0 && equityMV > 0 && (
+                            <span className="text-[10px] font-normal text-[var(--color-muted)]">
+                              {fmtDollar(equityMV)} eq · <span className="text-amber-600">{fmtDollar(cashValue)} cash</span>
+                            </span>
+                          )}
+                        </div>
+                      ) : "—"}
                     </td>
                     <td className="px-4 py-2 text-right text-xs font-bold">
                       {positions.reduce((s, p) => s + (p.weight ?? 0), 0).toFixed(1)}%
@@ -536,17 +668,6 @@ export default function HoldingsPage({
         </div>
       )}
 
-      {/* Next step CTA */}
-      {positions.length > 0 && (
-        <div className="mt-2 text-center">
-          <Link
-            href={`/portfolios/${portfolioId}/targets`}
-            className="text-sm text-[var(--color-primary)] hover:underline"
-          >
-            Next step: Set Targets →
-          </Link>
-        </div>
-      )}
     </div>
   );
 }

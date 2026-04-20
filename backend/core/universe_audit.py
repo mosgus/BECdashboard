@@ -41,17 +41,26 @@ def _audit_single_ticker(
     try:
         # Fetch raw OHLCV (not the cache, which forward-fills)
         raw = yf.download(
-            ticker,
+            [ticker],  # Use list to ensure consistent MultiIndex structure
             start=start,
             end=end,
             auto_adjust=True,
             progress=False,
+            group_by="ticker",  # Consistent column structure
         )
         if raw.empty:
             result["issues"].append("No data returned from yfinance")
             return result
 
-        close = raw["Close"].squeeze() if isinstance(raw["Close"], pd.DataFrame) else raw["Close"]
+        # Handle MultiIndex columns (ticker, field)
+        if isinstance(raw.columns, pd.MultiIndex):
+            close = raw[ticker]["Close"]
+            volume = raw[ticker]["Volume"] if "Volume" in raw[ticker].columns else None
+        else:
+            close = raw["Close"]
+            volume = raw["Volume"] if "Volume" in raw.columns else None
+
+        close = close.squeeze() if isinstance(close, pd.DataFrame) else close
         n_total = len(close)
         n_valid = int(close.notna().sum())
         n_gaps = n_total - n_valid
@@ -62,10 +71,13 @@ def _audit_single_ticker(
         result["pct_gaps"] = round(n_gaps / n_total, 4) if n_total > 0 else 0.0
 
         # Volume
-        if "Volume" in raw.columns:
-            vol_series = raw["Volume"].squeeze() if isinstance(raw["Volume"], pd.DataFrame) else raw["Volume"]
-            avg_vol = float(vol_series.mean())
-            result["avg_daily_volume"] = round(avg_vol, 0)
+        if volume is not None:
+            vol_series = volume.squeeze() if isinstance(volume, pd.DataFrame) else volume
+            try:
+                avg_vol = float(vol_series.mean())
+                result["avg_daily_volume"] = round(avg_vol, 0) if not pd.isna(avg_vol) else None
+            except (TypeError, ValueError):
+                result["avg_daily_volume"] = None
 
         # Grading
         issues = []

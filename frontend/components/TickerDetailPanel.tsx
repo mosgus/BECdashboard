@@ -75,7 +75,7 @@ export default function TickerDetailPanel({ ticker, onClose }: Props) {
               />
               <Row
                 label="Dividend Yield"
-                value={data.dividend_yield != null ? fmtPct(data.dividend_yield) : "—"}
+                value={data.dividend_yield != null ? `${data.dividend_yield.toFixed(2)}%` : "—"}
               />
               <Row
                 label="52w High"

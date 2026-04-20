@@ -43,10 +43,13 @@ type OutlookSection = "capm" | "montecarlo" | "forecast";
 // CAPM Optimizer Section
 // ═══════════════════════════════════════════════════════════════════════════════
 
-function CAPMSection({ portfolioId, positions }: { portfolioId: string; positions: Position[] }) {
+function CAPMSection({ portfolioId, positions, notionalValue }: { portfolioId: string; positions: Position[]; notionalValue: number | null }) {
   const router = useRouter();
   const qc = useQueryClient();
-  const [targetValue, setTargetValue] = useState(1_000_000);
+  // All positions are now equity; cash is tracked at portfolio level
+  // Round up portfolio notional value to next 100k bucket; default to 1M if no notional value
+  const defaultTargetValue = Math.ceil((notionalValue ?? 1_000_000) / 100_000) * 100_000;
+  const [targetValue, setTargetValue] = useState(defaultTargetValue);
   const [lookbackDays, setLookbackDays] = useState(1825);
   const [rf, setRf] = useState(0);   // 0 = let backend fetch live Treasury
   const [mrp, setMrp] = useState(5.0);
@@ -110,7 +113,13 @@ function CAPMSection({ portfolioId, positions }: { portfolioId: string; position
         mode: "capm_outlook",
         views_applied: Object.values(configs).some((c) => c.view !== 0),
       });
-      qc.invalidateQueries({ queryKey: ["portfolio", portfolioId] });
+      // Invalidate all portfolio-related queries to refresh analytics, health, scenarios, etc.
+      qc.invalidateQueries({
+        predicate: (query) => {
+          const key = query.queryKey;
+          return Array.isArray(key) && key.length > 0 && key[1] === portfolioId;
+        },
+      });
     },
     onSuccess: () => setApplySuccess(true),
   });
@@ -381,13 +390,13 @@ function CAPMSection({ portfolioId, positions }: { portfolioId: string; position
                   {result.capm_details.map((d) => (
                     <tr key={d.ticker} className="border-b border-[var(--color-border)]">
                       <td className="py-2 font-medium text-[var(--color-text)]">{d.ticker}</td>
-                      <td className="py-2 text-right">{d.beta.toFixed(2)}</td>
-                      <td className="py-2 text-right">{(d.capm_return * 100).toFixed(2)}%</td>
+                      <td className="py-2 text-right">{d.beta !== null ? d.beta.toFixed(2) : "—"}</td>
+                      <td className="py-2 text-right">{d.capm_return !== null ? (d.capm_return * 100).toFixed(2) : "—"}%</td>
                       <td className={`py-2 text-right ${d.view > 0 ? "text-[var(--color-positive)]" : d.view < 0 ? "text-[var(--color-negative)]" : "text-[var(--color-muted)]"}`}>
                         {d.view >= 0 ? "+" : ""}{(d.view * 100).toFixed(0)}%
                       </td>
-                      <td className="py-2 text-right font-semibold">{(d.adj_return * 100).toFixed(2)}%</td>
-                      <td className="py-2 text-right font-semibold">{(d.opt_weight * 100).toFixed(2)}%</td>
+                      <td className="py-2 text-right font-semibold">{d.adj_return !== null ? (d.adj_return * 100).toFixed(2) : "—"}%</td>
+                      <td className="py-2 text-right font-semibold">{d.opt_weight !== null ? (d.opt_weight * 100).toFixed(2) : "—"}%</td>
                     </tr>
                   ))}
                 </tbody>
@@ -956,7 +965,7 @@ export default function OutlookPage({
         ))}
       </div>
 
-      {section === "capm" && <CAPMSection portfolioId={portfolioId} positions={positions} />}
+      {section === "capm" && <CAPMSection portfolioId={portfolioId} positions={positions} notionalValue={data?.notional_value ?? null} />}
       {section === "montecarlo" && <MonteCarloSection portfolioId={portfolioId} />}
       {section === "forecast" && <ForecastSection portfolioId={portfolioId} />}
     </div>

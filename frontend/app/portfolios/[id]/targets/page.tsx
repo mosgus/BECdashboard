@@ -277,7 +277,13 @@ export default function TargetsPage({
         source === "optimizer" ? (optResult?.views_applied ?? false) : false,
       delta_mu: source === "optimizer" ? (optResult?.delta_mu ?? null) : null,
     });
-    qc.invalidateQueries({ queryKey: ["portfolio", portfolioId] });
+    // Invalidate all portfolio-related queries to refresh analytics, health, scenarios, etc.
+    qc.invalidateQueries({
+      predicate: (query) => {
+        const key = query.queryKey;
+        return Array.isArray(key) && key.length > 0 && key[1] === portfolioId;
+      },
+    });
   }
 
   // Helper: apply weights to DB positions (fractions → percentages)
@@ -289,7 +295,13 @@ export default function TargetsPage({
         parseFloat((w * 100).toFixed(4)),
       );
     }
-    qc.invalidateQueries({ queryKey: ["portfolio", portfolioId] });
+    // Invalidate all portfolio-related queries to refresh analytics, health, scenarios, etc.
+    qc.invalidateQueries({
+      predicate: (query) => {
+        const key = query.queryKey;
+        return Array.isArray(key) && key.length > 0 && key[1] === portfolioId;
+      },
+    });
   }
 
   const optMut = useMutation({

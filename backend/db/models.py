@@ -111,22 +111,26 @@ class WatchlistItem(Base):
 class Portfolio(Base):
     __tablename__ = "portfolios"
 
-    id:               Mapped[uuid.UUID]    = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    name:             Mapped[str]          = mapped_column(Text, nullable=False)
-    created_at:       Mapped[datetime]     = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    notional_value:   Mapped[float | None] = mapped_column(Numeric(18, 2), nullable=True)
-    last_target_set:  Mapped[str | None]   = mapped_column(Text, nullable=True)
+    id:                    Mapped[uuid.UUID]      = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name:                  Mapped[str]            = mapped_column(Text, nullable=False)
+    created_at:            Mapped[datetime]       = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    notional_value:        Mapped[float | None]   = mapped_column(Numeric(18, 2), nullable=True)
+    cash_value:            Mapped[float | None]   = mapped_column(Numeric(18, 2), nullable=True)
+    cash_pct_target:       Mapped[float | None]   = mapped_column(Float, nullable=True)
+    last_rebalance_date:   Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_target_set:       Mapped[str | None]     = mapped_column(Text, nullable=True)
 
 
 class Position(Base):
     __tablename__ = "positions"
 
-    portfolio_id: Mapped[uuid.UUID]    = mapped_column(UUID(as_uuid=True), ForeignKey("portfolios.id", ondelete="CASCADE"), primary_key=True)
-    ticker:       Mapped[str]          = mapped_column(Text, ForeignKey("universe_tickers.ticker", ondelete="CASCADE"), primary_key=True)
-    weight:       Mapped[float | None] = mapped_column(Float, nullable=True)
-    shares:       Mapped[float | None] = mapped_column(Float, nullable=True)
-    cost_basis:   Mapped[float | None] = mapped_column(Float, nullable=True)
-    updated_at:   Mapped[datetime]     = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    portfolio_id:  Mapped[uuid.UUID]    = mapped_column(UUID(as_uuid=True), ForeignKey("portfolios.id", ondelete="CASCADE"), primary_key=True)
+    ticker:        Mapped[str]          = mapped_column(Text, ForeignKey("universe_tickers.ticker", ondelete="CASCADE"), primary_key=True)
+    weight:        Mapped[float | None] = mapped_column(Float, nullable=True)
+    shares:        Mapped[float | None] = mapped_column(Float, nullable=True)
+    cost_basis:    Mapped[float | None] = mapped_column(Float, nullable=True)
+    position_type: Mapped[str]          = mapped_column(Text, nullable=False, default="stock")  # 'stock' | 'cash'
+    updated_at:    Mapped[datetime]     = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
 
 # ── Sprint 4 (portfolio workspace) ────────────────────────────────────────────

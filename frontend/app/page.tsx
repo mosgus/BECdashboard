@@ -18,56 +18,86 @@ const WORKFLOW_STEPS = [
   {
     num: 1,
     tab: "Holdings",
-    emoji: "📋",
-    headline: "Build your portfolio",
+    emoji: "🗂️",
+    headline: "Build or import your portfolio",
     description:
-      "Add positions with tickers and target weights. Set a notional dollar value so every downstream calculation is grounded in real share math. Import existing holdings from a CSV.",
-    tip: "Start here — every other tab depends on having positions.",
+      "Add positions manually, pull tickers from the Securities universe, or upload a Bloomberg/brokerage CSV. Each position stores shares, cost basis, and current market value.",
+    tip: "Start here — every other tab depends on having positions. CSV import supports Bloomberg holdings export format.",
   },
   {
     num: 2,
-    tab: "Targets",
-    emoji: "🎯",
-    headline: "Set target weights",
+    tab: "Backtest",
+    emoji: "📊",
+    headline: "Optimize for historical performance",
     description:
-      "Run the optimizer across 9 modes (Max Sharpe, Min Variance, Risk Parity, L/S, and more) or apply per-ticker conviction tilts with a tanh overlay. Target weights are saved to the database so they survive a page refresh.",
-    tip: "Views + κ inject your alpha directly into the optimizer's expected-return vector.",
+      "Run backtested portfolio optimization across 9 modes — Max Sharpe, Min Variance, Risk Parity, Long/Short, and more. Inject conviction tilts via Black-Litterman views + κ overlay. Save target weights to the portfolio.",
+    tip: "Use this to understand how different weightings would have performed historically. Views + κ inject your alpha directly into the optimizer's expected-return vector.",
   },
   {
     num: 3,
-    tab: "Rebalance",
-    emoji: "⚖️",
-    headline: "Generate trade orders",
+    tab: "Outlook",
+    emoji: "🔭",
+    headline: "Project forward: CAPM, Monte Carlo & Forecast",
     description:
-      "Translate target weights into whole-share quantities using live prices and your notional value. Floor-and-greedily-allocate residual cash. Export a ready-to-execute CSV trade list.",
-    tip: "Uses the saved target set from step 2 — no session state required.",
+      "CAPM-based optimization with per-ticker min/max/freeze constraints. Monte Carlo simulation across thousands of paths. Fan-chart price forecasting with EWMA, ARIMA, Prophet, or ensemble models. Refine allocation before committing.",
+    tip: "Where Backtest looks backward, Outlook looks forward. Run Monte Carlo to see the distribution of outcomes before finalizing weights.",
   },
   {
     num: 4,
     tab: "Monitor",
     emoji: "📡",
-    headline: "Watch candidates",
+    headline: "Watch candidates & live signals",
     description:
-      "Track tickers you're considering with live SMA, RSI, and MACD signal badges. Drill into any ticker's chart with 10 extended indicators (Bollinger, ADX, Donchian, Stochastic, OBV). Configure per-ticker indicator saves.",
-    tip: "Add a candidate here, then promote it to Holdings when signals align.",
+      "Live SMA, RSI, and MACD signal badges for every candidate. Configure custom indicator thresholds and alert rules. Drill into full charts with 10 extended indicators (Bollinger, ADX, Donchian, Stochastic, OBV).",
+    tip: "Add a candidate here, then promote it to Holdings when signals align — Monitor is for watching, Holdings is for committing.",
   },
   {
     num: 5,
     tab: "Risk & Perf",
-    emoji: "📊",
-    headline: "Understand your risk",
+    emoji: "⚖️",
+    headline: "Measure and stress-test your risk",
     description:
-      "Simulated equity curve vs SPY, exit signals per holding, HHI concentration, beta, vol, and marginal risk contributions. Stress-test with market shocks, volatility scaling, or historical period replays — each with a mitigation playbook.",
-    tip: "All analytics assume current weights held constant — no trade history needed.",
+      "Equity curve vs SPY, factor attribution, HHI concentration, beta, vol, and marginal risk contributions. Preset stress scenarios (GFC, COVID crash, rate shock) plus custom market and vol shocks. Re-run after applying optimization to see how your risk profile shifts.",
+    tip: "All analytics reflect current saved weights. Apply optimization in Backtest or Outlook first, then return here to measure the change.",
+  },
+] as const;
+
+const RESEARCH_TOOLS = [
+  {
+    title: "Portfolio Health",
+    href: "/research/overview",
+    emoji: "🏥",
+    description: "Composite score gauge (0–100), decision memos, and one-click PDF tearsheet export.",
   },
   {
-    num: 6,
-    tab: "Research",
-    emoji: "🔬",
-    headline: "Validate statistically",
-    description:
-      "Run 7 statistical tests on the portfolio's simulated daily returns — Sharpe t-test, block permutation, bootstrap CI, ADF stationarity, Ljung-Box autocorrelation, Jarque-Bera normality, and drawdown bootstrap. Get a GO / NO-GO decision. Then forecast the equity curve and rolling vol using EWMA, ARIMA, Prophet, or an ensemble.",
-    tip: "Quick mode runs in ~20 s (500 permutations). Full mode is more powerful but slower.",
+    title: "Asset Research",
+    href: "/research/asset",
+    emoji: "🔍",
+    description: "Deep-dive on any ticker: factor exposure (Fama-French), price/return charts, and peer comparison.",
+  },
+  {
+    title: "Decision Memo",
+    href: "/research/decision",
+    emoji: "📋",
+    description: "Auto-generated red-flag scorecard (concentration, poor Sharpe, excessive drawdown) + written decision log.",
+  },
+  {
+    title: "Portfolio Analytics",
+    href: "/research/portfolio",
+    emoji: "📈",
+    description: "Correlation heatmap, efficient frontier, and side-by-side optimizer comparison table.",
+  },
+  {
+    title: "Stress & Validation",
+    href: "/research/stress",
+    emoji: "⚡",
+    description: "Scenario stress tests (COVID, GFC, taper tantrum) + walk-forward statistical validation (Sharpe t-test, bootstrap, ADF, Ljung-Box, Jarque-Bera).",
+  },
+  {
+    title: "Universe Screener",
+    href: "/research/universe",
+    emoji: "🌍",
+    description: "Sector/asset breakdown, data-quality audit with letter grades, and custom filter screens for the investable universe.",
   },
 ] as const;
 
@@ -113,9 +143,9 @@ export default function OverviewPage() {
               Welcome to Blue Eagle Capital
             </h1>
             <p className="mt-1 max-w-xl text-sm text-[var(--color-muted)]">
-              An institutional-grade portfolio management system — from holdings to targets to
-              rebalancing, all in one URL-navigable workspace. Each portfolio has six tabs that
-              take you from idea to execution.
+              An institutional-grade portfolio management system. Import or build a portfolio, backtest
+              and project your weights, monitor live signals, and stress-test your risk — all in one
+              URL-navigable workspace.
             </p>
           </div>
           <Link
@@ -131,10 +161,10 @@ export default function OverviewPage() {
       <div>
         <div className="mb-1 flex items-baseline gap-3">
           <h2 className="text-base font-semibold text-[var(--color-text)]">
-            The Six-Tab Workflow
+            The Five-Tab Portfolio Workflow
           </h2>
           <span className="text-xs text-[var(--color-muted)]">
-            Follow steps 1 → 6 in order for your first portfolio.
+            Follow steps 1 → 5 in order for your first portfolio.
           </span>
         </div>
 
@@ -190,31 +220,40 @@ export default function OverviewPage() {
           ))}
         </div>
 
-        {/* Supporting pages note */}
-        <div className="mt-4 rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] px-5 py-4 shadow-sm">
-          <p className="text-xs font-semibold text-[var(--color-text)] mb-2">Also available</p>
-          <div className="flex flex-wrap gap-x-6 gap-y-2 text-xs text-[var(--color-muted)]">
-            <span>
-              <Link href="/universe" className="font-medium text-[var(--color-primary)] hover:underline">Universe</Link>
-              {" "}— browse and filter the investable ticker universe that powers the UniverseTickerPicker
-            </span>
-            <span>
-              <Link href="/technicals" className="font-medium text-[var(--color-primary)] hover:underline">Technicals</Link>
-              {" "}— standalone chart tool: any ticker, any date range, any indicator overlay
-            </span>
-            <span>
-              <Link href="/alerts" className="font-medium text-[var(--color-primary)] hover:underline">Alerts</Link>
-              {" "}— configure signal-triggered alert rules (SMA cross, RSI threshold, MACD cross)
-            </span>
-            <span>
-              <Link href="/optimize" className="font-medium text-[var(--color-primary)] hover:underline">Quick Optimize</Link>
-              {" "}— ad-hoc portfolio optimization without saving to a portfolio
-            </span>
-            <span>
-              <Link href="/ops" className="font-medium text-[var(--color-primary)] hover:underline">Ops</Link>
-              {" "}— system health, data freshness, and backend diagnostics
-            </span>
-          </div>
+      </div>
+
+      {/* ── Research & Validation section ───────────────────────────────────── */}
+      <div>
+        <div className="mb-1 flex items-baseline gap-3">
+          <h2 className="text-base font-semibold text-[var(--color-text)]">
+            Research & Validation
+          </h2>
+          <span className="text-xs text-[var(--color-muted)]">
+            A parallel toolkit for validating strategy, auditing data quality, and stress-testing ideas — independent of any portfolio workflow.
+          </span>
+        </div>
+
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {RESEARCH_TOOLS.map((tool) => (
+            <Link
+              key={tool.href}
+              href={tool.href}
+              className="rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] p-5 shadow-sm hover:shadow-md hover:border-[var(--color-primary)] transition-all flex flex-col"
+            >
+              {/* Tool header */}
+              <div className="mb-3">
+                <p className="text-2xl mb-1">{tool.emoji}</p>
+                <p className="text-sm font-semibold text-[var(--color-text)]">
+                  {tool.title}
+                </p>
+              </div>
+
+              {/* Description */}
+              <p className="text-xs leading-relaxed text-[var(--color-muted)] flex-1">
+                {tool.description}
+              </p>
+            </Link>
+          ))}
         </div>
       </div>
 

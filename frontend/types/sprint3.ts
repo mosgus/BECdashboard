@@ -13,12 +13,13 @@ export interface PortfolioSummary {
 
 export interface Position {
   ticker: string;
-  weight: number | null;       // percentage units (25 = 25 %), always present
-  shares: number | null;       // number of shares; null if weight-only entry
-  cost_basis: number | null;   // per-share cost basis for P&L
+  weight: number | null;             // percentage units (25 = 25 %), always present
+  shares: number | null;             // number of shares; null if weight-only entry
+  cost_basis: number | null;         // per-share cost basis for P&L
+  position_type: "stock";            // all positions are equity; cash is portfolio-level
   updated_at: string;
-  price?: number | null;        // live last close (enriched by get_portfolio)
-  market_value?: number | null; // shares × price (enriched by get_portfolio)
+  price?: number | null;             // live last close (enriched by get_portfolio)
+  market_value?: number | null;      // shares × price (enriched by get_portfolio)
 }
 
 export interface LastTargetSet {
@@ -34,6 +35,8 @@ export interface LastTargetSet {
 export interface PortfolioDetail extends PortfolioSummary {
   positions: Position[];
   notional_value: number | null;
+  cash_value: number | null;
+  cash_pct_target: number | null;
   last_target_set: LastTargetSet | null;
 }
 
