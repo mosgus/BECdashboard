@@ -10,8 +10,6 @@ Sprint 2 tables:
   watchlist_items   — watchlist ↔ ticker join (kept for backward compat)
   portfolios        — named portfolios
   positions         — portfolio ↔ ticker positions
-  alerts            — alert rule definitions
-  alert_events      — alert trigger history
 
 Sprint 4 tables:
   portfolio_candidates       — tickers being considered for a portfolio
@@ -20,7 +18,6 @@ Sprint 4 tables:
 Sprint 5 tables:
   job_runs     — nightly job run history (idempotent: UNIQUE on job_name+asof_date)
   email_config — single-row SMTP settings (id always 1), editable via Ops UI
-  alert_events columns added: ticker, fingerprint, status, updated_at
 """
 from __future__ import annotations
 

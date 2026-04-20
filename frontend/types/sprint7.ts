@@ -53,22 +53,41 @@ export interface ReplayContributor {
   weighted_contribution: number;
 }
 
-export interface ScenarioResult {
-  scenario_type: ScenarioType;
+interface ScenarioBase {
   portfolio_id: string;
   as_of_date: string;
   warnings?: string[];
+}
 
-  // market_shock
-  portfolio_impact?: number;
-  contributions?: ShockContribution[];
+export interface MarketShockResult extends ScenarioBase {
+  scenario_type: "market_shock";
+  portfolio_impact: number;
+  contributions: ShockContribution[];
+}
 
-  // vol_shock
-  base_vol?: number | null;
-  shocked_vol?: number | null;
-  vol_scale?: number;
+export interface VolShockResult extends ScenarioBase {
+  scenario_type: "vol_shock";
+  base_vol: number | null;
+  shocked_vol: number | null;
+  vol_scale: number;
+}
 
-  // historical_replay
+export interface HistoricalReplayResult extends ScenarioBase {
+  scenario_type: "historical_replay";
+  total_return: number;
+  max_dd: number;
+  worst_day: number;
+  best_day: number;
+  contributors: ReplayContributor[];
+  equity_curve: EquityCurvePoint[];
+  n_days: number;
+  start: string;
+  end: string;
+}
+
+export interface FactorReplayResult extends ScenarioBase {
+  scenario_type: "factor_replay";
+  // Historical replay fields (factor replay includes these)
   total_return?: number;
   max_dd?: number;
   worst_day?: number;
@@ -78,8 +97,7 @@ export interface ScenarioResult {
   n_days?: number;
   start?: string;
   end?: string;
-
-  // factor_replay (projection tab) — present when scenario_type is "factor_replay"
+  // Factor-specific projection fields
   current_betas?: {
     alpha_daily: number;
     beta_mkt: number;
@@ -119,6 +137,8 @@ export interface ScenarioResult {
   projection_paths?: { day: number; p5: number; p25: number; p50: number; p75: number; p95: number }[];
   projection_error?: string;
 }
+
+export type ScenarioResult = MarketShockResult | VolShockResult | HistoricalReplayResult | FactorReplayResult;
 
 export interface ScenarioRequest {
   scenario_type: ScenarioType;

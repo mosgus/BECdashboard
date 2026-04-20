@@ -7,11 +7,11 @@ interface Props {
 }
 
 const CONFIG: Record<SignalState, { label: string; cls: string }> = {
-  BULLISH:   { label: "Bullish",    cls: "bg-green-100 text-green-800 border-green-200" },
-  BEARISH:   { label: "Bearish",    cls: "bg-red-100 text-red-800 border-red-200" },
-  NEUTRAL:   { label: "Neutral",    cls: "bg-gray-100 text-gray-600 border-gray-200" },
-  OVERBOUGHT:{ label: "Overbought", cls: "bg-orange-100 text-orange-800 border-orange-200" },
-  OVERSOLD:  { label: "Oversold",   cls: "bg-blue-100 text-blue-800 border-blue-200" },
+  BULLISH:   { label: "\u2191 Bullish",    cls: "bg-green-100 text-green-800 border-green-200" },
+  BEARISH:   { label: "\u2193 Bearish",    cls: "bg-red-100 text-red-800 border-red-200" },
+  NEUTRAL:   { label: "\u2014 Neutral",    cls: "bg-gray-100 text-gray-600 border-gray-200" },
+  OVERBOUGHT:{ label: "\u2191\u2191 Overbought", cls: "bg-orange-100 text-orange-800 border-orange-200" },
+  OVERSOLD:  { label: "\u2193\u2193 Oversold",   cls: "bg-blue-100 text-blue-800 border-blue-200" },
 };
 
 export default function SignalBadge({ state, lastDate, small = false }: Props) {

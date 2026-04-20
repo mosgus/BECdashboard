@@ -7,6 +7,7 @@ import { Settings } from "lucide-react";
 import Providers from "@/components/Providers";
 import AuthNav from "@/components/AuthNav";
 import OpsStatusBadge from "@/components/OpsStatusBadge";
+import ErrorBoundary from "@/components/ErrorBoundary";
 
 const outfit = Outfit({
   subsets: ["latin"],
@@ -83,7 +84,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           </header>
 
           <main className="mx-auto max-w-screen-2xl px-4 py-6 sm:px-6">
-            {children}
+            <ErrorBoundary>
+              {children}
+            </ErrorBoundary>
           </main>
         </Providers>
       </body>

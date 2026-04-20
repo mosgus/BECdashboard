@@ -23,6 +23,9 @@ from core.price_loader import refresh_all_prices
 from db.base import get_db
 from db.models import JobRun, Portfolio, Position
 
+import logging
+logger = logging.getLogger(__name__)
+
 router = APIRouter()
 
 
@@ -105,7 +108,7 @@ def refresh_prices_endpoint(
         db.merge(run)
         db.commit()
     except Exception:
-        pass
+        logger.warning("Failed to record job run", exc_info=True)
 
     return {
         "status": status,

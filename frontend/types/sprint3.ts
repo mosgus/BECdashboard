@@ -9,6 +9,7 @@ export interface PortfolioSummary {
   name: string;
   created_at: string;
   position_count: number;
+  last_rebalance_date: string | null;
 }
 
 export interface Position {
@@ -150,66 +151,6 @@ export interface PortfolioOptimizeResult {
   data_source?: string;
 }
 
-// ── Alert Rules ────────────────────────────────────────────────────────────────
-
-export type AlertScope = "watchlist" | "portfolio" | "ticker";
-
-export type AlertRuleType =
-  | "sma_cross_up"
-  | "sma_cross_down"
-  | "rsi_rebound"
-  | "rsi_fade"
-  | "macd_cross_up"
-  | "macd_cross_down"
-  | "price_cross_above"
-  | "price_cross_below";
-
-export interface AlertRule {
-  id: string;
-  scope: AlertScope;
-  scope_id: string | null;
-  ticker: string | null;
-  rule_type: AlertRuleType;
-  params_json: Record<string, unknown> | null;
-  enabled: boolean;
-  cooldown_days: number;
-  created_at: string;
-}
-
-export type AlertEventStatus = "new" | "ack" | "snoozed" | "resolved";
-
-export interface AlertEvent {
-  id: string;
-  alert_id: string;
-  triggered_at: string;
-  as_of_date: string;
-  payload_json: Record<string, unknown> | null;
-  // S5 additions
-  ticker: string | null;
-  fingerprint: string | null;
-  status: AlertEventStatus;
-  updated_at: string | null;
-}
-
-export interface EvaluateResult {
-  evaluated: number;
-  triggered: number;
-  skipped: number;
-  as_of_date: string;
-  data_source?: string;
-  events: Array<Record<string, unknown>>;
-  warnings?: string[];
-}
-
-export interface RuleMetadata {
-  rule_type: string;
-  direction: string;
-  label: string;
-  description: string;
-  required_indicators: string[];
-  default_params: Record<string, number>;
-}
-
 export interface JobRunRecord {
   id: string;
   job_name: string;
@@ -232,34 +173,13 @@ export interface OpsStatus {
     finished_at: string | null;
     duration_ms: number | null;
   } | null;
-  alert_rules_enabled: number;
-  alert_events_new: number;
-  email_configured: boolean;
   data_source: string;
-}
-
-export interface EmailConfig {
-  smtp_host: string | null;
-  smtp_port: number;
-  smtp_user: string | null;
-  smtp_pass_set: boolean;
-  email_from: string | null;
-  recipients: string | null;
-  updated_at: string | null;
 }
 
 export interface OpsDigest {
   as_of_date: string;
   portfolio_movers: Array<{ ticker: string; daily_return: number; weight: number }>;
   watchlist_movers: Array<{ ticker: string; daily_return: number }>;
-  alerts_triggered: { entry: number; exit: number };
-  new_alert_events: Array<{
-    id: string;
-    ticker: string;
-    rule_type: string | null;
-    triggered_at: string;
-    status: string;
-  }>;
   job_run: {
     job_name: string;
     asof_date: string;

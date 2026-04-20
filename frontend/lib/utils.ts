@@ -70,7 +70,7 @@ export async function apiGet<T>(
   path: string,
   params?: Record<string, string | number | boolean | null | undefined>,
 ): Promise<T> {
-  const base = process.env.NEXT_PUBLIC_API_URL ?? "";
+  const base = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
   let url = `${base}${path}`;
   if (params) {
     const qs = new URLSearchParams(

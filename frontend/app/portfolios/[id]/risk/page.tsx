@@ -11,7 +11,7 @@ import {
   runScenario,
 } from "@/lib/api";
 import { fmtNum, fmtPct, colorForValue, downsample } from "@/lib/utils";
-import { SCENARIO_PRESETS, TAG_STYLES } from "@/lib/scenarios";
+import { SCENARIO_PRESETS, TAG_STYLES, type ScenarioTag } from "@/lib/scenarios";
 import InfoTooltip from "@/components/InfoTooltip";
 import HelpSidebar from "@/components/HelpSidebar";
 import SignalBadge from "@/components/SignalBadge";
@@ -943,7 +943,7 @@ function ScenariosSection({ portfolioId }: { portfolioId: string }) {
                 {p.start} → {p.end}
               </p>
               <div className="mt-1.5 flex flex-wrap gap-1">
-                {p.tags.map((t: string) => (
+                {p.tags.map((t: ScenarioTag) => (
                   <span key={t} className={`rounded px-1.5 py-0.5 text-[9px] font-semibold ${TAG_STYLES[t]}`}>
                     {t}
                   </span>

@@ -622,7 +622,10 @@ export default function HoldingsPage({
                               <Pencil size={13} />
                             </button>
                             <button
-                              onClick={() => removeMut.mutate(pos.ticker)}
+                              onClick={() => {
+                                if (!window.confirm(`Remove ${pos.ticker} from this portfolio?`)) return;
+                                removeMut.mutate(pos.ticker);
+                              }}
                               disabled={removeMut.isPending}
                               className="rounded p-1 text-[var(--color-muted)] hover:text-[var(--color-negative)] hover:bg-red-50 transition-colors"
                               title="Remove holding"

@@ -545,7 +545,10 @@ export default function TargetsPage({
           {/* Apply buttons */}
           <div className="flex flex-wrap items-center gap-3">
             <button
-              onClick={() => applyOptMut.mutate(result.target_weights)}
+              onClick={() => {
+                if (!window.confirm("Apply these target weights? This will overwrite current portfolio targets.")) return;
+                applyOptMut.mutate(result.target_weights);
+              }}
               disabled={applyOptMut.isPending}
               className="rounded-[var(--radius-btn)] bg-green-600 px-5 py-2.5 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50 transition-opacity"
             >

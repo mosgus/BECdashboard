@@ -17,7 +17,7 @@ import {
   ReferenceLine,
   ResponsiveContainer,
 } from "recharts";
-import type { ScenarioResult } from "@/types/sprint7";
+import type { ScenarioResult, MarketShockResult, VolShockResult, HistoricalReplayResult, FactorReplayResult } from "@/types/sprint7";
 import { fmtPct, fmtDollar, fmtNum } from "@/lib/utils";
 import { getPresetByDates } from "@/lib/scenarios";
 import ChartExportButtons from "@/components/ChartExportButtons";
@@ -88,7 +88,7 @@ function HistoricalReplayCard({
   index,
   onRemove,
 }: {
-  result: ScenarioResult;
+  result: HistoricalReplayResult;
   notionalValue: number | null;
   index: number;
   onRemove: () => void;
@@ -306,13 +306,13 @@ function MarketShockCard({
   index,
   onRemove,
 }: {
-  result: ScenarioResult;
+  result: MarketShockResult;
   notionalValue: number | null;
   index: number;
   onRemove: () => void;
 }) {
   const chartRef = useRef<HTMLDivElement>(null);
-  const impact = result.portfolio_impact ?? 0;
+  const impact = result.portfolio_impact;
   const isGain = impact >= 0;
 
   const shockLabel = result.contributions?.length
@@ -386,13 +386,13 @@ function VolShockCard({
   index,
   onRemove,
 }: {
-  result: ScenarioResult;
+  result: VolShockResult;
   index: number;
   onRemove: () => void;
 }) {
   const baseVol = result.base_vol ?? 0;
   const shockedVol = result.shocked_vol ?? 0;
-  const scale = result.vol_scale ?? 1;
+  const scale = result.vol_scale;
   const delta = shockedVol - baseVol;
 
   return (
@@ -439,7 +439,7 @@ function FactorReplayCard({
   index,
   onRemove,
 }: {
-  result: ScenarioResult;
+  result: FactorReplayResult;
   notionalValue: number | null;
   index: number;
   onRemove: () => void;
@@ -510,7 +510,7 @@ function ModeledProjectionContent({
   notionalValue,
   index,
 }: {
-  result: ScenarioResult;
+  result: FactorReplayResult;
   notionalValue: number | null;
   index: number;
 }) {
@@ -707,7 +707,7 @@ function HistoricalReplayContent({
   notionalValue,
   index,
 }: {
-  result: ScenarioResult;
+  result: FactorReplayResult;
   notionalValue: number | null;
   index: number;
 }) {

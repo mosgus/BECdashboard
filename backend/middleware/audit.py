@@ -16,9 +16,13 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
 
+import logging
+
 from auth import get_actor_name
 from db.base import SessionLocal
 from db.models import AuditLog
+
+logger = logging.getLogger(__name__)
 
 _AUDITED_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 
@@ -57,7 +61,7 @@ class AuditMiddleware(BaseHTTPMiddleware):
                 db.commit()
             except Exception:
                 # Audit failure must never surface as a 500 to the caller
-                pass
+                logger.warning("Audit log write failed", exc_info=True)
             finally:
                 if db:
                     db.close()

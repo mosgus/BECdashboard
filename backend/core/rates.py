@@ -7,8 +7,12 @@ from __future__ import annotations
 
 import threading
 
+import logging
+
 import yfinance as yf
 from cachetools import TTLCache
+
+logger = logging.getLogger(__name__)
 
 _lock = threading.Lock()
 _cache: TTLCache = TTLCache(maxsize=1, ttl=3600)
@@ -35,4 +39,5 @@ def fetch_risk_free_rate() -> float:
             _cache["rf"] = rate
         return rate
     except Exception:
+        logger.info("Risk-free rate fetch failed; using fallback %.4f", _FALLBACK_RF)
         return _FALLBACK_RF

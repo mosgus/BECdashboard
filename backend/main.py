@@ -1,13 +1,20 @@
 """Blue Eagle API — v4.0.0 (actor-header identity + audit + persistence)."""
 from contextlib import asynccontextmanager
 
+import logging
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(name)s %(levelname)s %(message)s",
+)
 
 from config import settings
 from db.base import Base, engine
 from middleware.audit import AuditMiddleware
-from routers import ops, optimize, portfolio, portfolios, research, technicals, ticker, universe, watchlists
+from routers import ops, optimize, portfolio, portfolios_crud, portfolios_analytics, portfolios_optimize, portfolios_scenarios, portfolios_workspace, research, technicals, ticker, universe, watchlists
 
 
 @asynccontextmanager
@@ -36,7 +43,11 @@ app.include_router(technicals.router,   prefix="/api",           tags=["technica
 app.include_router(universe.router,     prefix="/api",           tags=["universe"])
 app.include_router(watchlists.router,   prefix="/api",           tags=["watchlists"])
 app.include_router(ticker.router,       prefix="/api",           tags=["ticker"])
-app.include_router(portfolios.router,   prefix="/api",           tags=["portfolios"])
+app.include_router(portfolios_crud.router,       prefix="/api", tags=["portfolios"])
+app.include_router(portfolios_analytics.router,   prefix="/api", tags=["portfolios"])
+app.include_router(portfolios_optimize.router,    prefix="/api", tags=["portfolios"])
+app.include_router(portfolios_scenarios.router,   prefix="/api", tags=["portfolios"])
+app.include_router(portfolios_workspace.router,   prefix="/api", tags=["portfolios"])
 app.include_router(ops.router,          prefix="/api",           tags=["ops"])
 app.include_router(research.router,     prefix="/api",           tags=["research"])
 
@@ -50,5 +61,6 @@ def health() -> dict:
             conn.execute(sqlalchemy.text("SELECT 1"))
         db_status = "ok"
     except Exception:
+        logging.getLogger(__name__).warning("Health check DB ping failed", exc_info=True)
         db_status = "error"
     return {"status": "ok", "db": db_status, "version": "4.0.0"}

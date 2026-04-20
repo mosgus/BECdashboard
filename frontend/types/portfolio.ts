@@ -129,33 +129,3 @@ export interface TechnicalsResponse {
   data_source?: string;
 }
 
-// ── Alerts ────────────────────────────────────────────────────────────────────
-
-export type AlertType = "sma_crossover" | "rsi_threshold" | "price_threshold";
-
-export interface AlertRequest {
-  ticker: string;
-  alert_type: AlertType;
-  start: string;
-  end: string;
-  params?: Record<string, number | string>;
-}
-
-export interface AlertResponse {
-  triggered: boolean;
-  message: string;
-  rsi?: number;
-  price?: number;
-  direction?: string;
-  email_payload: {
-    to: string;
-    subject: string;
-    body: string;
-    ticker: string;
-    alert: Record<string, unknown>;
-  };
-  ticker: string;
-  alert_type: AlertType;
-  as_of_date?: string;
-  data_source?: string;
-}

@@ -11,9 +11,13 @@ from __future__ import annotations
 import threading
 from typing import Optional
 
+import logging
+
 import pandas as pd
 import yfinance as yf
 from cachetools import TTLCache
+
+logger = logging.getLogger(__name__)
 
 _ohlcv_lock = threading.Lock()
 _ohlcv_cache: TTLCache = TTLCache(maxsize=256, ttl=3600)
@@ -46,6 +50,7 @@ class YFinanceProvider:
                 threads=False,
             )
         except Exception:
+            logger.warning("OHLCV download failed", exc_info=True)
             return None
 
         if raw is None or raw.empty:
@@ -80,6 +85,7 @@ class YFinanceProvider:
             )
             return raw is not None and not raw.empty
         except Exception:
+            logger.debug("Ticker validation failed for %s", ticker)
             return False
 
 

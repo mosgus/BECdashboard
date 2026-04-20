@@ -4,7 +4,7 @@ from __future__ import annotations
 import datetime
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -32,8 +32,18 @@ class AddItemRequest(BaseModel):
 # ── List / Create / Rename / Delete ──────────────────────────────────────────
 
 @router.get("/watchlists")
-def list_watchlists(db: Session = Depends(get_db)) -> dict:
-    watchlists = db.query(Watchlist).order_by(Watchlist.created_at).all()
+def list_watchlists(
+    limit: int = Query(50, le=200),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db),
+) -> dict:
+    watchlists = (
+        db.query(Watchlist)
+        .order_by(Watchlist.created_at)
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
     result = []
     for wl in watchlists:
         count = (

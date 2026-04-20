@@ -17,6 +17,9 @@ from core.provider import provider as data_provider
 from db.base import get_db
 from db.models import UniverseTicker
 
+import logging
+logger = logging.getLogger(__name__)
+
 router = APIRouter()
 
 _TICKER_RE = re.compile(r"^[A-Z0-9\-\.]{1,10}$")
@@ -37,7 +40,7 @@ def _enrich(obj: UniverseTicker) -> None:
         obj.fifty_two_week_low = info.get("fiftyTwoWeekLow")
         obj.last_enriched_at = datetime.now(timezone.utc)
     except Exception:
-        pass  # enrichment is best-effort; ticker still added
+        logger.debug("Enrichment failed for %s", obj.ticker, exc_info=True)
 
 
 def _ticker_dict(t: UniverseTicker) -> dict:
@@ -183,13 +186,15 @@ def import_universe_csv(
 def list_universe(
     query: Optional[str] = Query(None, description="Search ticker symbol or name"),
     active: Optional[bool] = Query(None, description="Filter by active status"),
+    limit: int = Query(100, le=500),
+    offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
 ) -> dict:
     """List universe tickers with optional search and active filter."""
     q = db.query(UniverseTicker)
     if active is not None:
         q = q.filter(UniverseTicker.active == active)
-    tickers = q.order_by(UniverseTicker.ticker).all()
+    tickers = q.order_by(UniverseTicker.ticker).offset(offset).limit(limit).all()
 
     if query:
         q_upper = query.upper()

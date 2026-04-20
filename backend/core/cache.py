@@ -5,9 +5,13 @@ import threading
 from datetime import date, datetime, timedelta
 from typing import Optional
 
+import logging
+
 import pandas as pd
 import yfinance as yf
 from cachetools import TTLCache
+
+logger = logging.getLogger(__name__)
 
 _lock = threading.Lock()
 _cache: TTLCache = TTLCache(maxsize=128, ttl=3600)
@@ -38,6 +42,7 @@ def fetch_prices(
             threads=True,
         )
     except Exception:
+        logger.warning("yfinance download failed for %s", tickers, exc_info=True)
         return None
 
     if raw.empty:
@@ -84,6 +89,7 @@ def fetch_prices_hybrid(
             get_price_coverage,
         )
     except Exception:
+        logger.info("DB modules unavailable; using legacy fetch")
         return fetch_prices(tickers, start, end)
 
     tickers = tuple(sorted(set(tickers)))
@@ -126,6 +132,7 @@ def fetch_prices_hybrid(
             return fetch_prices(tickers, start, end)
         return prices
     except Exception:
+        logger.warning("Hybrid price fetch failed; falling back to yfinance", exc_info=True)
         return fetch_prices(tickers, start, end)
     finally:
         db.close()

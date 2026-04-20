@@ -34,6 +34,9 @@ from core.walk_forward import AVAILABLE_MODES, dispatch_optimizer, run_walk_forw
 from db.base import get_db
 from db.models import DecisionMemo, Portfolio, Position, UniverseTicker
 
+import logging
+logger = logging.getLogger(__name__)
+
 router = APIRouter()
 
 BENCHMARK = "SPY"
@@ -250,7 +253,7 @@ def correlation_matrix(
         order = leaves_list(linkage_matrix)
         cluster_order = [available[i] for i in order]
     except Exception:
-        pass
+        logger.debug("Hierarchical clustering failed; using default order", exc_info=True)
 
     # Convert to serialisable format
     matrix = {
@@ -341,6 +344,7 @@ def tearsheet_data(
                                           bench_prices if bench_prices is not None else returns[available[:1]],
                                           lookback=lookback_days)
     except Exception:
+        logger.warning("Portfolio health computation failed", exc_info=True)
         health = {"concentration": conc, "beta": None, "vol": None, "risk_contributions": [], "warnings": []}
 
     # Top 10 holdings

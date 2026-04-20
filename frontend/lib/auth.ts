@@ -9,7 +9,7 @@ const AUTH_KEY = "be_auth";
 const isBrowser = (): boolean => typeof window !== "undefined";
 
 export const SITE_PASSWORD =
-  (typeof process !== "undefined" && process.env?.NEXT_PUBLIC_SITE_PASSWORD) || "blueeagle2026";
+  (typeof process !== "undefined" && process.env?.NEXT_PUBLIC_SITE_PASSWORD) || "";
 
 export const actor = {
   set(name: string): void {

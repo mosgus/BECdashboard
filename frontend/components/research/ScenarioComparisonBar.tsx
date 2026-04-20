@@ -12,7 +12,7 @@ import {
   ReferenceLine,
   Legend,
 } from "recharts";
-import type { ScenarioResult } from "@/types/sprint7";
+import type { ScenarioResult, HistoricalReplayResult } from "@/types/sprint7";
 import { getPresetByDates } from "@/lib/scenarios";
 import ChartExportButtons from "@/components/ChartExportButtons";
 
@@ -29,7 +29,7 @@ export default function ScenarioComparisonBar({ results }: Props) {
 
   // Filter to historical_replay (the only type with both total_return AND max_dd)
   const rows = results
-    .filter((r) => r.scenario_type === "historical_replay")
+    .filter((r): r is HistoricalReplayResult => r.scenario_type === "historical_replay")
     .map((r, i) => {
       const preset = getPresetByDates(r.start, r.end);
       const label = preset?.name

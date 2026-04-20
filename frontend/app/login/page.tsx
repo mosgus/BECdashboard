@@ -15,11 +15,14 @@ export default function LoginPage() {
     if (actor.hasActor() && auth.isVerified()) router.replace("/portfolios");
   }, [router]);
 
-  const canSubmit = displayName.trim().length > 0 && password.length > 0;
+  const openAccess = SITE_PASSWORD === "";
+  const canSubmit = openAccess
+    ? displayName.trim().length > 0
+    : displayName.trim().length > 0 && password.length > 0;
 
   const handleSubmit = () => {
     if (!canSubmit) return;
-    if (password !== SITE_PASSWORD) {
+    if (!openAccess && password !== SITE_PASSWORD) {
       setError("Incorrect password");
       return;
     }
@@ -62,22 +65,24 @@ export default function LoginPage() {
             />
           </div>
 
-          <div>
-            <label className="mb-1 block text-xs font-medium text-[var(--color-muted)]">
-              Password
-            </label>
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => { setPassword(e.target.value); setError(""); }}
-              onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
-              placeholder="Enter site password"
-              className="w-full rounded-[var(--radius-btn)] border border-[var(--color-border)] px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]"
-            />
-            {error && (
-              <p className="mt-1 text-xs text-[var(--color-negative)]">{error}</p>
-            )}
-          </div>
+          {!openAccess && (
+            <div>
+              <label className="mb-1 block text-xs font-medium text-[var(--color-muted)]">
+                Password
+              </label>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => { setPassword(e.target.value); setError(""); }}
+                onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
+                placeholder="Enter site password"
+                className="w-full rounded-[var(--radius-btn)] border border-[var(--color-border)] px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]"
+              />
+              {error && (
+                <p className="mt-1 text-xs text-[var(--color-negative)]">{error}</p>
+              )}
+            </div>
+          )}
 
           <button
             onClick={handleSubmit}

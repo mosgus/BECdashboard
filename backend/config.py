@@ -23,15 +23,6 @@ class Settings(BaseSettings):
     # Data provider
     data_provider: str = "yfinance"
 
-    # ── Sprint 5: Email delivery (SMTP) ──────────────────────────────────────
-    # All optional — system degrades gracefully when unset.
-    smtp_host: str | None = None          # e.g. smtp.gmail.com
-    smtp_port: int = 587                  # 587 = STARTTLS (default)
-    smtp_user: str | None = None          # SMTP login username
-    smtp_pass: str | None = None          # SMTP login password / app password
-    email_from: str | None = None         # Sender address (defaults to smtp_user)
-    alert_recipients: str | None = None   # Comma-separated recipient emails
-
     model_config = {"env_file": ".env", "extra": "ignore"}
 
 
