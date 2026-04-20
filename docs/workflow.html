@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Blue Eagle | Portfolio Workflow Quick Reference</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Avenir', 'Helvetica Neue', Arial, sans-serif;
+            background: #FFFFFF;
+            color: #333333;
+            line-height: 1.6;
+        }
+
+        .page {
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 40px 20px;
+            background: #FFFFFF;
+        }
+
+        .header {
+            background: #012169;
+            color: #F2A900;
+            padding: 30px;
+            margin-bottom: 40px;
+            border-radius: 8px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 32px;
+            font-weight: bold;
+            margin-bottom: 8px;
+        }
+
+        .header p {
+            font-size: 14px;
+            color: #FFFFFF;
+            opacity: 0.9;
+        }
+
+        .workflow-container {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .workflow-card {
+            background: #0C2340;
+            border-left: 4px solid #F2A900;
+            padding: 20px;
+            border-radius: 6px;
+            color: #FFFFFF;
+        }
+
+        .workflow-card h2 {
+            color: #F2A900;
+            font-size: 18px;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+        }
+
+        .tab-badge {
+            background: #F2A900;
+            color: #012169;
+            padding: 2px 8px;
+            border-radius: 3px;
+            font-size: 12px;
+            font-weight: bold;
+            margin-right: 8px;
+        }
+
+        .workflow-card .purpose {
+            font-size: 14px;
+            color: #E0E0E0;
+            margin-bottom: 12px;
+            line-height: 1.5;
+        }
+
+        .workflow-card .when-to-use {
+            background: rgba(242, 169, 0, 0.1);
+            padding: 10px;
+            border-radius: 4px;
+            font-size: 12px;
+            margin-bottom: 10px;
+        }
+
+        .workflow-card .when-to-use strong {
+            color: #F2A900;
+        }
+
+        .workflow-card .key-features {
+            font-size: 12px;
+            color: #B0B0B0;
+        }
+
+        .workflow-card .key-features strong {
+            color: #F2A900;
+        }
+
+        .workflow-card ul {
+            list-style: none;
+            padding-left: 0;
+            margin-top: 8px;
+        }
+
+        .workflow-card li {
+            padding-left: 16px;
+            position: relative;
+            font-size: 12px;
+            margin-bottom: 4px;
+        }
+
+        .workflow-card li:before {
+            content: "▸";
+            color: #F2A900;
+            position: absolute;
+            left: 0;
+        }
+
+        .pipeline-visual {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin: 40px 0;
+            padding: 20px;
+            background: #F5F5F5;
+            border-radius: 6px;
+            font-size: 12px;
+            color: #012169;
+            font-weight: bold;
+        }
+
+        .pipeline-step {
+            text-align: center;
+            flex: 1;
+        }
+
+        .pipeline-arrow {
+            color: #012169;
+            font-size: 20px;
+            margin: 0 10px;
+        }
+
+        .footer-note {
+            background: #F9F9F9;
+            border: 1px solid #E0E0E0;
+            padding: 15px;
+            border-radius: 6px;
+            font-size: 12px;
+            color: #666666;
+            margin-top: 30px;
+            text-align: center;
+        }
+
+        .footer-note strong {
+            color: #012169;
+        }
+
+        @media print {
+            body {
+                background: #FFFFFF;
+            }
+            .page {
+                max-width: 100%;
+                padding: 20px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="page">
+        <div class="header">
+            <h1>🦅 Blue Eagle Portfolio Workflow</h1>
+            <p>Quick Reference Guide — Five-Step Investment Pipeline</p>
+        </div>
+
+        <div class="pipeline-visual">
+            <div class="pipeline-step">Holdings</div>
+            <div class="pipeline-arrow">→</div>
+            <div class="pipeline-step">Backtest</div>
+            <div class="pipeline-arrow">→</div>
+            <div class="pipeline-step">Outlook</div>
+            <div class="pipeline-arrow">→</div>
+            <div class="pipeline-step">Monitor</div>
+            <div class="pipeline-arrow">→</div>
+            <div class="pipeline-step">Risk & Perf</div>
+        </div>
+
+        <div class="workflow-container">
+            <div class="workflow-card">
+                <h2><span class="tab-badge">1</span>Holdings</h2>
+                <div class="purpose">Build and maintain your portfolio positions. Add, edit, or remove stocks; manage cash allocation.</div>
+                <div class="when-to-use"><strong>When to use:</strong> Daily basis to track holdings, adjust allocation, import new strategies, or rebalance.</div>
+                <div class="key-features">
+                    <strong>Key features:</strong>
+                    <ul>
+                        <li>Add individual stocks (price, shares, thesis)</li>
+                        <li>Set cash allocation (dollar amount + target %)</li>
+                        <li>Import portfolio CSV templates</li>
+                        <li>View portfolio composition & value</li>
+                        <li>Monitor HHI concentration index</li>
+                    </ul>
+                </div>
+            </div>
+
+            <div class="workflow-card">
+                <h2><span class="tab-badge">2</span>Backtest</h2>
+                <div class="purpose">Test your strategy against historical data. Optimize allocations based on past performance.</div>
+                <div class="when-to-use"><strong>When to use:</strong> Before committing capital; validating strategic shifts; stress-testing new candidate stocks.</div>
+                <div class="key-features">
+                    <strong>Key features:</strong>
+                    <ul>
+                        <li>8 backtest modes (Equal Weight, Volatility, Sharpe, etc.)</li>
+                        <li>Customizable date ranges</li>
+                        <li>Walk-forward validation to prevent overfitting</li>
+                        <li>Drawdown & volatility analysis</li>
+                        <li>Side-by-side strategy comparison</li>
+                    </ul>
+                </div>
+            </div>
+
+            <div class="workflow-card">
+                <h2><span class="tab-badge">3</span>Outlook</h2>
+                <div class="purpose">Look forward. Use CAPM to optimize, Monte Carlo for scenarios, and forecasting for price/volatility.</div>
+                <div class="when-to-use"><strong>When to use:</strong> Forward-looking risk assessment, conviction weighting on disagreements, portfolio resilience checks.</div>
+                <div class="key-features">
+                    <strong>Key features:</strong>
+                    <ul>
+                        <li><strong>CAPM Optimizer:</strong> Find optimal weights; adjust conviction via "% undervalued"</li>
+                        <li><strong>Monte Carlo:</strong> 1000s of paths; terminal stats; Brier scoring for calibration</li>
+                        <li><strong>Efficient Frontier:</strong> Risk-return tradeoff; Max Sharpe & Min Variance portfolios</li>
+                        <li><strong>Forecast:</strong> Model future price & volatility</li>
+                    </ul>
+                </div>
+            </div>
+
+            <div class="workflow-card">
+                <h2><span class="tab-badge">4</span>Monitor</h2>
+                <div class="purpose">Track candidate stocks and ideas. Watch technical signals and fundamental changes.</div>
+                <div class="when-to-use"><strong>When to use:</strong> Sourcing new opportunities; monitoring macro shifts; technical entry/exit signals.</div>
+                <div class="key-features">
+                    <strong>Key features:</strong>
+                    <ul>
+                        <li>Watchlist of external candidates (not yet in portfolio)</li>
+                        <li>Technical indicators (SMA, RSI, MACD, Bollinger Bands)</li>
+                        <li>Price alerts and signal notifications</li>
+                        <li>Track ideas from research, news, peer suggestions</li>
+                    </ul>
+                </div>
+            </div>
+
+            <div class="workflow-card">
+                <h2><span class="tab-badge">5</span>Risk & Perf</h2>
+                <div class="purpose">Measure and stress-test your portfolio. Understand what's working and what could go wrong.</div>
+                <div class="when-to-use"><strong>When to use:</strong> Monthly/quarterly reviews; stress testing; attribution analysis; performance post-mortems.</div>
+                <div class="key-features">
+                    <strong>Key features:</strong>
+                    <ul>
+                        <li><strong>Performance:</strong> CAGR, Sharpe, Sortino, max drawdown vs. benchmark</li>
+                        <li><strong>Health:</strong> VaR, CVaR, stress test scenarios</li>
+                        <li><strong>Attribution:</strong> Fama-French factor decomposition</li>
+                        <li><strong>Scenarios:</strong> What-if analysis (rate shock, vol spike, market crash)</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <div class="footer-note">
+            <strong>Plus:</strong> Research Suite (securities, asset, portfolio, stress) and Watchlists for deeper dives. See <strong>BLUEEAGLE_GUIDE.md</strong> for full documentation.
+        </div>
+    </div>
+</body>
+</html>

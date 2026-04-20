@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Blue Eagle | Research Suite Cheat Sheet</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Avenir', 'Helvetica Neue', Arial, sans-serif;
+            background: #FFFFFF;
+            color: #333333;
+            line-height: 1.6;
+        }
+
+        .page {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 40px 20px;
+            background: #FFFFFF;
+        }
+
+        .header {
+            background: #012169;
+            color: #F2A900;
+            padding: 30px;
+            margin-bottom: 40px;
+            border-radius: 8px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 32px;
+            font-weight: bold;
+            margin-bottom: 8px;
+        }
+
+        .header p {
+            font-size: 14px;
+            color: #FFFFFF;
+            opacity: 0.9;
+        }
+
+        .research-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .research-card {
+            background: #0C2340;
+            border: 1px solid #1a3a60;
+            border-top: 4px solid #F2A900;
+            padding: 20px;
+            border-radius: 6px;
+            color: #FFFFFF;
+        }
+
+        .research-card h2 {
+            color: #F2A900;
+            font-size: 18px;
+            margin-bottom: 12px;
+        }
+
+        .research-card .subtitle {
+            font-size: 11px;
+            color: #B0B0B0;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 12px;
+        }
+
+        .section-label {
+            color: #F2A900;
+            font-size: 12px;
+            font-weight: bold;
+            text-transform: uppercase;
+            margin-top: 14px;
+            margin-bottom: 6px;
+            display: block;
+        }
+
+        .research-card p {
+            font-size: 13px;
+            color: #E0E0E0;
+            line-height: 1.5;
+            margin-bottom: 12px;
+        }
+
+        .research-card ul {
+            list-style: none;
+            padding-left: 0;
+            margin-bottom: 12px;
+        }
+
+        .research-card li {
+            padding-left: 16px;
+            position: relative;
+            font-size: 12px;
+            color: #D0D0D0;
+            margin-bottom: 6px;
+        }
+
+        .research-card li:before {
+            content: "◆";
+            color: #F2A900;
+            position: absolute;
+            left: 0;
+        }
+
+        .when-to-act {
+            background: rgba(242, 169, 0, 0.1);
+            padding: 10px;
+            border-radius: 4px;
+            font-size: 12px;
+            margin-top: 12px;
+            border-left: 2px solid #F2A900;
+        }
+
+        .when-to-act strong {
+            color: #F2A900;
+        }
+
+        .action-badge {
+            display: inline-block;
+            background: #F2A900;
+            color: #012169;
+            padding: 3px 8px;
+            border-radius: 3px;
+            font-size: 11px;
+            font-weight: bold;
+            margin-top: 8px;
+        }
+
+        .action-badge.conditional {
+            background: #FFD700;
+            color: #012169;
+        }
+
+        .action-badge.no-go {
+            background: #E74C3C;
+            color: #FFFFFF;
+        }
+
+        .summary-box {
+            background: #F5F5F5;
+            border: 1px solid #E0E0E0;
+            padding: 20px;
+            border-radius: 6px;
+            margin-top: 30px;
+        }
+
+        .summary-box h3 {
+            color: #012169;
+            margin-bottom: 12px;
+            font-size: 14px;
+        }
+
+        .summary-box p {
+            color: #333333;
+            font-size: 12px;
+            margin-bottom: 8px;
+        }
+
+        @media print {
+            body {
+                background: #FFFFFF;
+            }
+            .page {
+                max-width: 100%;
+                padding: 20px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="page">
+        <div class="header">
+            <h1>🔬 Research Suite Cheat Sheet</h1>
+            <p>Six Specialized Tools for Deep Dives — What to Look For & When to Act</p>
+        </div>
+
+        <div class="research-grid">
+            <div class="research-card">
+                <h2>Overview</h2>
+                <div class="subtitle">Portfolio Snapshot & Positioning</div>
+                <p>High-level view of your portfolio: holdings breakdown, sector exposure, top positions.</p>
+                <span class="section-label">What to Look For</span>
+                <ul>
+                    <li>Concentration risk (HHI, top 5 positions)</li>
+                    <li>Sector imbalance vs. target</li>
+                    <li>Correlation clusters</li>
+                    <li>Liquidity constraints</li>
+                </ul>
+                <span class="section-label">When to Act</span>
+                <div class="when-to-act">
+                    <strong>REVIEW:</strong> Quarterly rebalance cycles
+                    <br><strong>RED FLAG:</strong> HHI &gt; 0.20 or top position &gt; 20%
+                </div>
+            </div>
+
+            <div class="research-card">
+                <h2>Securities Research</h2>
+                <div class="subtitle">Individual Stock Deep Dive</div>
+                <p>Fundamental analysis, technicals, earnings history, and valuation multiples for any security.</p>
+                <span class="section-label">What to Look For</span>
+                <ul>
+                    <li>Revenue & earnings trends (YoY growth)</li>
+                    <li>Valuation vs. peer and sector medians</li>
+                    <li>Insider ownership & lock-up schedules</li>
+                    <li>Technical support/resistance levels</li>
+                </ul>
+                <span class="section-label">When to Act</span>
+                <div class="when-to-act">
+                    <strong>DUE DILIGENCE:</strong> Before adding new position
+                    <br><strong>RED FLAG:</strong> Missed earnings, downgrade, or technicals break support
+                </div>
+            </div>
+
+            <div class="research-card">
+                <h2>Asset Research</h2>
+                <div class="subtitle">Multi-Asset Comparison</div>
+                <p>Compare returns, volatility, and correlations across your holdings and benchmark.</p>
+                <span class="section-label">What to Look For</span>
+                <ul>
+                    <li>Asset-to-benchmark correlation</li>
+                    <li>Risk-adjusted return (Sharpe, Sortino)</li>
+                    <li>Drawdown recovery time</li>
+                    <li>Relative strength vs. sector/market</li>
+                </ul>
+                <span class="section-label">When to Act</span>
+                <div class="when-to-act">
+                    <strong>OPTIMIZE:</strong> Quarterly rebalance
+                    <br><strong>YELLOW FLAG:</strong> Negative Sharpe &amp; underperforming
+                </div>
+            </div>
+
+            <div class="research-card">
+                <h2>Portfolio Research</h2>
+                <div class="subtitle">Entire Fund Performance & Attribution</div>
+                <p>Aggregate metrics, factor exposure, performance vs. benchmark, and performance sources.</p>
+                <span class="section-label">What to Look For</span>
+                <ul>
+                    <li>CAGR, Sharpe, max drawdown</li>
+                    <li>Beta and factor exposures (Fama-French)</li>
+                    <li>Contribution to return by asset</li>
+                    <li>Performance persistence</li>
+                </ul>
+                <span class="section-label">When to Act</span>
+                <div class="when-to-act">
+                    <strong>REVIEW:</strong> Monthly with Investment Committee
+                    <br><strong>INVESTIGATE:</strong> If underperforming for 2+ months
+                </div>
+            </div>
+
+            <div class="research-card">
+                <h2>Stress & Robustness</h2>
+                <div class="subtitle">Scenario Analysis & Tail Risk</div>
+                <p>Test portfolio under extreme scenarios: market crash, rate shock, volatility spike.</p>
+                <span class="section-label">What to Look For</span>
+                <ul>
+                    <li>Portfolio loss under 2008-style shock</li>
+                    <li>Duration sensitivity to rate changes</li>
+                    <li>VaR and CVaR at 95% and 99% confidence</li>
+                    <li>Systemic risk exposure</li>
+                </ul>
+                <span class="section-label">When to Act</span>
+                <div class="when-to-act">
+                    <strong>QUARTERLY:</strong> Standard review
+                    <br><strong>URGENT:</strong> If 99% CVaR &gt; risk limit
+                </div>
+            </div>
+
+            <div class="research-card">
+                <h2>Decision Memo</h2>
+                <div class="subtitle">Structured Investment Thesis</div>
+                <p>Template-driven memo for documenting conviction, catalysts, downside scenarios, and sizing.</p>
+                <span class="section-label">What to Look For</span>
+                <ul>
+                    <li>Clear investment thesis (bull case)</li>
+                    <li>Downside scenario &amp; probability</li>
+                    <li>Key catalysts and timeline</li>
+                    <li>Recommended position size &amp; entry</li>
+                </ul>
+                <span class="section-label">When to Act</span>
+                <div class="when-to-act">
+                    <strong>REQUIRED:</strong> Before any new position &gt; 2% of AUM
+                    <br><strong>GOVERNANCE:</strong> Investment Committee approval needed
+                </div>
+            </div>
+        </div>
+
+        <div class="summary-box">
+            <h3>🎯 Research Workflow Summary</h3>
+            <p><strong>Sourcing Phase:</strong> Use Securities → Asset Research → Decision Memo</p>
+            <p><strong>Monitoring Phase:</strong> Portfolio Research + Stress & Robustness (Monthly)</p>
+            <p><strong>Rebalance Phase:</strong> Asset Research + Overview (Quarterly)</p>
+            <p><strong>Post-Mortem Phase:</strong> Portfolio Research + Attribution (After significant events)</p>
+        </div>
+    </div>
+</body>
+</html>

@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Blue Eagle | Investment Decision Workflow</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Avenir', 'Helvetica Neue', Arial, sans-serif;
+            background: #FFFFFF;
+            color: #333333;
+            line-height: 1.6;
+        }
+
+        .page {
+            max-width: 1100px;
+            margin: 0 auto;
+            padding: 40px 20px;
+            background: #FFFFFF;
+        }
+
+        .header {
+            background: #012169;
+            color: #F2A900;
+            padding: 30px;
+            margin-bottom: 40px;
+            border-radius: 8px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 32px;
+            font-weight: bold;
+            margin-bottom: 8px;
+        }
+
+        .header p {
+            font-size: 14px;
+            color: #FFFFFF;
+            opacity: 0.9;
+        }
+
+        .flowchart {
+            margin: 30px 0;
+        }
+
+        .flow-stage {
+            background: #0C2340;
+            border-left: 4px solid #F2A900;
+            padding: 20px;
+            margin-bottom: 20px;
+            border-radius: 6px;
+            color: #FFFFFF;
+        }
+
+        .stage-number {
+            display: inline-block;
+            background: #F2A900;
+            color: #012169;
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            text-align: center;
+            line-height: 32px;
+            font-weight: bold;
+            margin-right: 10px;
+            font-size: 14px;
+        }
+
+        .stage-title {
+            display: inline-block;
+            color: #F2A900;
+            font-size: 18px;
+            font-weight: bold;
+        }
+
+        .stage-content {
+            margin-top: 12px;
+            padding-left: 42px;
+        }
+
+        .stage-content p {
+            font-size: 13px;
+            color: #E0E0E0;
+            margin-bottom: 10px;
+            line-height: 1.5;
+        }
+
+        .checkpoint {
+            background: rgba(242, 169, 0, 0.1);
+            border-left: 2px solid #F2A900;
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+            font-size: 12px;
+        }
+
+        .checkpoint strong {
+            color: #F2A900;
+        }
+
+        .decision-box {
+            background: #1a3a60;
+            border: 1px solid #2a5a80;
+            padding: 15px;
+            border-radius: 6px;
+            margin: 12px 0;
+            font-size: 12px;
+        }
+
+        .decision-box strong {
+            color: #F2A900;
+        }
+
+        .go {
+            background: #1a4d2e;
+            border-left: 4px solid #27AE60;
+            padding: 12px;
+            border-radius: 4px;
+            margin: 10px 0;
+            font-size: 12px;
+        }
+
+        .go strong {
+            color: #27AE60;
+        }
+
+        .conditional {
+            background: #4A3728;
+            border-left: 4px solid #F39C12;
+            padding: 12px;
+            border-radius: 4px;
+            margin: 10px 0;
+            font-size: 12px;
+        }
+
+        .conditional strong {
+            color: #F39C12;
+        }
+
+        .no-go {
+            background: #4c1a1a;
+            border-left: 4px solid #E74C3C;
+            padding: 12px;
+            border-radius: 4px;
+            margin: 10px 0;
+            font-size: 12px;
+        }
+
+        .no-go strong {
+            color: #E74C3C;
+        }
+
+        .arrow {
+            text-align: center;
+            color: #F2A900;
+            font-size: 20px;
+            margin: 10px 0;
+            padding-left: 42px;
+        }
+
+        .governance-box {
+            background: #F5F5F5;
+            border: 1px solid #E0E0E0;
+            padding: 20px;
+            border-radius: 6px;
+            margin-top: 30px;
+        }
+
+        .governance-box h3 {
+            color: #012169;
+            margin-bottom: 12px;
+            font-size: 14px;
+        }
+
+        .governance-box p {
+            color: #333333;
+            font-size: 12px;
+            margin-bottom: 10px;
+        }
+
+        .governance-box ul {
+            list-style: none;
+            padding-left: 0;
+            margin-left: 20px;
+        }
+
+        .governance-box li {
+            padding-left: 16px;
+            position: relative;
+            font-size: 12px;
+            color: #333333;
+            margin-bottom: 6px;
+        }
+
+        .governance-box li:before {
+            content: "▸";
+            color: #012169;
+            position: absolute;
+            left: 0;
+            font-weight: bold;
+        }
+
+        .summary-section {
+            background: #0C2340;
+            color: #FFFFFF;
+            padding: 20px;
+            border-radius: 6px;
+            margin-top: 30px;
+            border-left: 4px solid #F2A900;
+        }
+
+        .summary-section h3 {
+            color: #F2A900;
+            margin-bottom: 10px;
+            font-size: 14px;
+        }
+
+        .summary-section p {
+            font-size: 12px;
+            color: #E0E0E0;
+            line-height: 1.5;
+        }
+
+        @media print {
+            body {
+                background: #FFFFFF;
+            }
+            .page {
+                max-width: 100%;
+                padding: 20px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="page">
+        <div class="header">
+            <h1>🎯 Investment Decision Workflow</h1>
+            <p>From Stock Idea to Position — Structured Approval Process</p>
+        </div>
+
+        <div class="flowchart">
+
+            <!-- STAGE 1: IDEA SOURCING -->
+            <div class="flow-stage">
+                <span class="stage-number">1</span>
+                <span class="stage-title">Idea Sourcing</span>
+                <div class="stage-content">
+                    <p>Identify potential stock opportunity from research, news, peer suggestions, or screening.</p>
+                    <div class="checkpoint">
+                        <strong>Action:</strong> Add to Watchlist in Monitor tab. Track technicals and fundamentals.
+                    </div>
+                    <p><strong>Duration:</strong> 1–4 weeks observation period.</p>
+                </div>
+            </div>
+
+            <div class="arrow">↓</div>
+
+            <!-- STAGE 2: PRELIMINARY DUE DILIGENCE -->
+            <div class="flow-stage">
+                <span class="stage-number">2</span>
+                <span class="stage-title">Preliminary Due Diligence</span>
+                <div class="stage-content">
+                    <p>Run quick checks: fundamentals, valuation, technical setup, competitive position.</p>
+                    <div class="checkpoint">
+                        <strong>Tools:</strong> Securities Research tab. Check earnings history, multiples, insider ownership, technicals.
+                    </div>
+                    <p><strong>Quick Filter:</strong> Does this fit our investment style and sector targets?</p>
+                    <div class="decision-box">
+                        <strong>If fundamentals are weak or technicals broken:</strong> Return to sourcing. Mark for later.
+                    </div>
+                </div>
+            </div>
+
+            <div class="arrow">↓</div>
+
+            <!-- STAGE 3: DECISION MEMO PREPARATION -->
+            <div class="flow-stage">
+                <span class="stage-number">3</span>
+                <span class="stage-title">Decision Memo Preparation</span>
+                <div class="stage-content">
+                    <p>Formalize investment thesis. Structure bull case, downside scenario, catalysts, position sizing.</p>
+                    <div class="checkpoint">
+                        <strong>Required Sections:</strong> Investment Thesis · Bull Case · Bear Case &amp; Probability · Catalysts &amp; Timeline · Entry Point &amp; Target · Recommended Size
+                    </div>
+                    <p>Use <strong>Decision Memo</strong> tab in Research Suite to draft and document.</p>
+                    <div class="decision-box">
+                        <strong>Position Size Rule:</strong>
+                        <br>• &lt; 1% of AUM: Team lead approval
+                        <br>• 1–2% of AUM: One committee member sign-off
+                        <br>• &gt; 2% of AUM: Full Investment Committee approval (required)
+                    </div>
+                </div>
+            </div>
+
+            <div class="arrow">↓</div>
+
+            <!-- STAGE 4: COMMITTEE REVIEW -->
+            <div class="flow-stage">
+                <span class="stage-number">4</span>
+                <span class="stage-title">Investment Committee Review</span>
+                <div class="stage-content">
+                    <p>Present memo to committee. Q&amp;A on thesis, risks, competitive advantages, macro alignment.</p>
+                    <div class="checkpoint">
+                        <strong>Committee Questions:</strong> What if the bull case doesn't play out? What's the exit plan? How does this fit our mandate?
+                    </div>
+                    <p><strong>Timeline:</strong> Typically 1–2 weeks for feedback loop.</p>
+
+                    <div class="conditional">
+                        <strong>🟡 CONDITIONAL GO:</strong> Memo approved with modifications. Revise and resubmit, or proceed with smaller size.
+                    </div>
+
+                    <div class="go">
+                        <strong>🟢 GO:</strong> Memo approved as-is. Proceed to position entry.
+                    </div>
+
+                    <div class="no-go">
+                        <strong>🔴 NO-GO:</strong> Memo rejected. Risk/return doesn't justify entry. Archive for future reconsideration.
+                    </div>
+                </div>
+            </div>
+
+            <div class="arrow">↓</div>
+
+            <!-- STAGE 5: POSITION ENTRY -->
+            <div class="flow-stage">
+                <span class="stage-number">5</span>
+                <span class="stage-title">Position Entry</span>
+                <div class="stage-content">
+                    <p>Execute trade at approved entry point and size. Document in Holdings tab.</p>
+                    <div class="checkpoint">
+                        <strong>Action:</strong> Add position to Holdings. Set thesis comment. Link to Decision Memo.
+                    </div>
+                    <div class="checkpoint">
+                        <strong>Target Setup:</strong> Enter target price from memo. Set stop-loss if applicable.
+                    </div>
+                    <p><strong>Size Check:</strong> Verify HHI &lt; 0.20 post-entry. Adjust other positions if needed.</p>
+                </div>
+            </div>
+
+            <div class="arrow">↓</div>
+
+            <!-- STAGE 6: MONITORING & REBALANCING -->
+            <div class="flow-stage">
+                <span class="stage-number">6</span>
+                <span class="stage-title">Monitoring &amp; Rebalancing</span>
+                <div class="stage-content">
+                    <p>Track position performance. Watch for catalyst triggers and fundamental changes.</p>
+                    <div class="checkpoint">
+                        <strong>Monthly Check:</strong> Portfolio Research tab. Is conviction still valid? Any negative catalyst?
+                    </div>
+                    <div class="checkpoint">
+                        <strong>Quarterly Rebalance:</strong> Use Asset Research + Backtest tabs. Optimize allocation via CAPM.
+                    </div>
+
+                    <div class="conditional">
+                        <strong>🟡 THESIS AT RISK:</strong> Catalyst delayed, or new headwind. Reduce size or add to observation list.
+                    </div>
+
+                    <div class="go">
+                        <strong>🟢 ON TRACK:</strong> Catalyst playing out as expected. Hold or add if target not yet met.
+                    </div>
+
+                    <div class="no-go">
+                        <strong>🔴 THESIS BROKEN:</strong> Original bull case no longer valid. Exit position. Document post-mortem in Decision Memo.
+                    </div>
+                </div>
+            </div>
+
+            <div class="arrow">↓</div>
+
+            <!-- STAGE 7: EXIT & POST-MORTEM -->
+            <div class="flow-stage">
+                <span class="stage-number">7</span>
+                <span class="stage-title">Exit &amp; Post-Mortem</span>
+                <div class="stage-content">
+                    <p>Liquidate position at target or stop-loss. Document what went right and what went wrong.</p>
+                    <div class="checkpoint">
+                        <strong>Action:</strong> Remove from Holdings. Archive Decision Memo with exit notes.
+                    </div>
+                    <div class="checkpoint">
+                        <strong>Post-Mortem:</strong> Compare target vs. actual return. Analyze catalyst timing. Was thesis timing off or thesis wrong?
+                    </div>
+                    <p><strong>Learning:</strong> Feed insights back into future thesis-building. Store in Research archive for institutional memory.</p>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- GOVERNANCE -->
+        <div class="governance-box">
+            <h3>🏛️ Governance &amp; Approvals</h3>
+            <p><strong>Position Size Thresholds:</strong></p>
+            <ul>
+                <li><strong>&lt; 1%:</strong> Team lead (portfolio manager) approval sufficient</li>
+                <li><strong>1–2%:</strong> One Investment Committee member sign-off</li>
+                <li><strong>&gt; 2%:</strong> Full Investment Committee approval required</li>
+                <li><strong>&gt; 5%:</strong> Escalate to Fund Advisor (Dalio or designated)</li>
+            </ul>
+            <p style="margin-top: 15px;"><strong>Decision Memo Requirements:</strong></p>
+            <ul>
+                <li>Clear investment thesis (1–2 sentences)</li>
+                <li>Bull case with catalysts and timeline</li>
+                <li>Bear case with downside probability estimate</li>
+                <li>Valuation: entry price, target price, stop-loss</li>
+                <li>Position size and HHI impact check</li>
+                <li>Risk disclosure (liquidity, geopolitical, sector headwinds)</li>
+            </ul>
+        </div>
+
+        <div class="summary-section">
+            <h3>📋 Workflow Summary</h3>
+            <p><strong>Fast Track (Minor Position &lt; 1%):</strong> Sourcing → Quick Due Diligence → Simple Memo → Lead Approval → Entry → Monitor</p>
+            <p style="margin-top: 10px;"><strong>Standard Track (1–2% Position):</strong> Sourcing → DD → Full Memo → Committee Review → Entry → Monitor → Rebalance</p>
+            <p style="margin-top: 10px;"><strong>Major Position (&gt; 2%):</strong> Sourcing → Deep DD → Formal Memo → Full Committee + Advisor Approval → Entry → Active Monitoring → Quarterly Rebalance + Monthly Check-ins</p>
+        </div>
+    </div>
+</body>
+</html>
