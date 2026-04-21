@@ -1,88 +1,87 @@
-# Blue Eagle Capital Portfolio Dashboard 🦅
+# Blue Eagle Capital Portfolio Dashboard
 
-Production-grade portfolio analytics web app for the Emory Practicum cohort.
+A full-stack portfolio analytics platform built for the Emory Practicum cohort. Manage portfolios, run CAPM/mean-variance optimizations, validate strategies with research-grade statistical tests, and monitor risk — all from a single browser tab.
 
-**Stack**: Next.js 16 (App Router, TypeScript, Tailwind v4) + FastAPI (Python 3.11) + PostgreSQL
-**Charts**: Recharts | **Optimizer**: CAPM + Analyst Views (scipy SLSQP) | **Identity**: Actor-header (X-Actor-Name)
+**Stack:** Next.js 16 · React 19 · TypeScript 5 · Tailwind v4 · FastAPI · Python 3.12 · PostgreSQL 16 · Alembic · SQLAlchemy 2 · Recharts · scipy SLSQP
 
-## Features
+---
 
-| Feature | Details |
-|---------|---------|
-| **Overview** | Equity curve, rolling vol, drawdown, correlation heatmap, performance table |
-| **Optimization** | Min-Variance · Max-Sharpe (historical) · Max-Sharpe CAPM with analyst views + per-asset bounds |
-| **Technicals** | SMA(20/50), RSI(14), MACD(12,26,9) for any ticker |
-| **Portfolios** | CRUD portfolios; add/remove/edit holdings from Universe; simulated analytics (CAGR, Sharpe, MaxDD, β, α + equity curve vs SPY); per-position signal badges; portfolio-level min-variance / max-Sharpe optimization with implied-trades rebalance plan |
-| **Alert Rules** | 8 rule types (SMA/RSI/MACD cross + price threshold); scope to ticker, watchlist, or portfolio; cooldown enforcement; *Evaluate Now* synchronous sweep; events inbox with evidence payload |
-| **Alerts** | SMA crossover, RSI threshold, price threshold — with email stub (SendGrid-ready) |
-| **Universe** | 15 pre-seeded tickers; CSV import (header or headerless); active/inactive toggle |
-| **Watchlists** | Full CRUD watchlists; add/remove tickers; one-click refresh populates SMA/RSI/MACD signal badges |
-| **Ticker Detail** | OHLCV bar chart, ATR14, signal panel (no look-ahead), help glossary |
-| **Identity** | Display name entered once at `/login`; stored in localStorage; sent as `X-Actor-Name` header on every request; logged to Postgres `audit_log` |
+## Who this README is for
+
+| You are… | Start here |
+|---|---|
+| A developer who wants to run it locally | [Quick Start](#quick-start) below |
+| A non-technical evaluator setting up from scratch | [SETUP.md](SETUP.md) — full click-by-click guide |
+| Looking to understand the architecture | [Architecture](#architecture) |
+| Deploying to production | [Deploy](#deploy) |
+
+---
+
+## What it does
+
+Blue Eagle is organized around a 5-tab portfolio workflow plus a separate Research & Validation suite.
+
+### Portfolio workflow (`/portfolios/[id]`)
+
+1. **Holdings** — manage positions (shares, cost basis, cash). Add holdings manually or via CSV import; unknown tickers are auto-backfilled into the universe and enriched via yfinance.
+2. **Outlook** — forward-looking expected returns, CAPM β/α, analyst views.
+3. **Rebalance** — implied trades from target weights; supports optimizer, tilt, and manual target sources.
+4. **Monitor** — live prices, daily/lifetime P&L, per-position signal states (SMA/RSI/MACD/ATR).
+5. **Risk & Performance** — concentration (HHI, N_eff), drawdown, factor scenarios, tear sheet.
+
+### Research & Validation suite (`/research`)
+
+- **Overview** — composite score blending statistical validation (Lo 2002 Sharpe t-test, block permutation, bootstrap CI, stationarity, autocorrelation, normality, drawdown significance), concentration, performance, drawdown.
+- **Asset research** — per-ticker enrichment, technicals, data quality audit.
+- **Universe audit** — grade A/B/C/F for every ticker based on history length, gap rate, volume.
+- **Strategy** — walk-forward optimization across multiple modes.
+- **Stress / scenarios** — factor replay, historical regime analysis.
+- **Decision memo** — capture rationale, red flags, go/no-go decision.
+
+### Cross-cutting
+
+- **Optimization** — Min-Variance, Max-Sharpe (historical), Max-Sharpe CAPM with analyst views + per-asset bounds + reserved cash.
+- **Universe management** — CSV import, active/inactive toggle, yfinance metadata enrichment.
+- **Watchlists** — signal badges with on-demand refresh.
+- **Alerts** — 8 rule types, scope-based (ticker / watchlist / portfolio), cooldown enforcement, events inbox.
+- **Identity** — actor-header based (`X-Actor-Name`), no passwords or JWT. Optional `CLASS_WRITE_KEY` gate for public deployments.
 
 ---
 
 ## Quick Start
 
-### Prerequisites
-
-- Python 3.11+
-- Node.js 20+
-- PostgreSQL 16 (local install or hosted)
-
-### 1. Environment
+Prerequisites: Python 3.12+, Node.js 20+, PostgreSQL 16.
 
 ```bash
+# 1. Clone
+git clone https://github.com/ngrom17/blue-eagle.git
+cd blue-eagle
+
+# 2. Database (defaults match .env.example)
+createdb blueeagle
+psql blueeagle -c "CREATE USER blueeagle WITH PASSWORD 'blueeagle' SUPERUSER;"
+
+# 3. Env files
 cp .env.example .env
-# Edit .env: set DATABASE_URL and NEXT_PUBLIC_API_URL as needed
-```
+cp .env.example backend/.env
+echo 'NEXT_PUBLIC_API_URL=http://localhost:8000' > frontend/.env.local
 
-### 2. Backend
-
-```bash
+# 4. Backend (one terminal)
 cd backend
-python3.11 -m venv .venv && source .venv/bin/activate
+python3.12 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-
-alembic upgrade head          # run migrations
+alembic upgrade head
 uvicorn main:app --reload --port 8000
-```
 
-API docs: `http://localhost:8000/docs`
-
-### 3. Frontend
-
-```bash
+# 5. Frontend (second terminal)
 cd frontend
 npm install
-npm run dev          # binds to 0.0.0.0:3000 — accessible from iPad on same Wi-Fi
+npm run dev
 ```
 
-App: `http://localhost:3000` → redirects to `/login`
+Open `http://localhost:3000` and enter your name to begin. API docs are at `http://localhost:8000/docs`.
 
----
-
-## Authentication / Identity
-
-No passwords, no JWT. Anyone can use the app:
-
-1. Visit `/login`
-2. Enter your display name (e.g. "Alice Chen") → stored in `localStorage`
-3. Every API request sends `X-Actor-Name: <name>` → logged to `audit_log.actor`
-
-**Optional write-key gate** (for public deployments): set `CLASS_WRITE_KEY` in `.env`. When set, all mutation requests must include a matching `X-Class-Key` header — the frontend reads `NEXT_PUBLIC_CLASS_WRITE_KEY` and adds it automatically.
-
----
-
-## iPad / LAN Access
-
-Set `NEXT_PUBLIC_API_URL` in `.env` to your machine's IP (or Tailscale address):
-
-```
-NEXT_PUBLIC_API_URL=http://100.108.230.75:8000
-```
-
-Then restart the frontend. The value is baked into the JS bundle at build time.
+For a step-by-step guide from zero — including installing every dependency on a fresh Mac or Windows machine — see **[SETUP.md](SETUP.md)**.
 
 ---
 
@@ -90,196 +89,172 @@ Then restart the frontend. The value is baked into the JS bundle at build time.
 
 ```
 blue-eagle/
-├── backend/
-│   ├── main.py              # FastAPI app factory, CORS, AuditMiddleware, lifespan
-│   ├── config.py            # pydantic-settings (CLASS_WRITE_KEY optional, DATABASE_URL required)
-│   ├── auth.py              # get_actor_name(), require_write_key() dependency
-│   ├── middleware/audit.py  # AuditMiddleware — writes every POST/PUT/PATCH/DELETE to DB
-│   ├── db/                  # SQLAlchemy engine, Base, models (all Sprint 2+3 tables)
-│   ├── alembic/             # 0001_baseline (audit_log, universe), 0002_sprint2_schema (7 tables)
-│   ├── routers/             # portfolio, portfolios, optimize, technicals, alerts, alert_rules,
-│   │                        #   universe, watchlists, ticker
-│   ├── core/                # portfolio, indicators, cache (TTLCache), signals, provider (YFinance),
-│   │                        #   alert_evaluation (extracted from alert_rules router)
-│   └── tests/               # test_signals.py (34 tests), test_universe_import.py
-└── frontend/
-    ├── app/                 # Next.js App Router pages: overview, optimize, technicals, alerts,
-    │                        #   universe, watchlists/[id], ticker/[symbol], login
-    ├── components/          # Charts, AuthNav, Providers, SignalBadge, InfoTooltip, HelpSidebar
-    ├── types/               # sprint2.ts (Sprint 2), sprint3.ts (portfolios, alert rules, events)
-    ├── hooks/useAuth.ts     # Auth guard — redirects to /login if no actor name set
-    └── lib/                 # api.ts (typed fetch), auth.ts (actor helpers), utils.ts
+├── backend/                        FastAPI · Python 3.12
+│   ├── main.py                     app factory, CORS, audit middleware, lifespan
+│   ├── config.py                   pydantic-settings (DATABASE_URL required)
+│   ├── auth.py                     X-Actor-Name / X-Class-Key dependencies
+│   ├── middleware/audit.py         writes every mutation to audit_log
+│   ├── db/                         SQLAlchemy engine, Base, models
+│   ├── alembic/                    13 migrations (baseline → portfolio_cash)
+│   ├── routers/                    portfolio, portfolios_*, research, universe,
+│   │                               technicals, ticker, watchlists, optimize, ops
+│   ├── core/                       portfolio, indicators, signals, provider (yfinance),
+│   │                               cache, risk, stats, walk_forward, price_loader
+│   └── tests/                      87 tests (integration + signal unit tests)
+└── frontend/                       Next.js 16 · React 19 · TypeScript 5
+    ├── app/                        App Router pages (see table below)
+    ├── components/                 charts, pickers, badges, tooltips
+    ├── hooks/useAuth.ts            redirects to /login if no actor name set
+    ├── lib/                        typed API client, utils
+    └── types/                      strongly-typed API responses
 ```
+
+### Top-level pages
+
+| Route | Purpose |
+|---|---|
+| `/login` | Enter display name (stored in `localStorage`, sent as `X-Actor-Name`) |
+| `/portfolios` | List + create portfolios |
+| `/portfolios/[id]/holdings` | Positions, CSV import, cash |
+| `/portfolios/[id]/outlook` | CAPM views, expected returns |
+| `/portfolios/[id]/rebalance` | Implied trades from targets |
+| `/portfolios/[id]/monitor` | Live P&L and signals |
+| `/portfolios/[id]/risk` | Concentration, drawdown, scenarios |
+| `/research` + subpages | Validation, universe audit, strategy, stress, decision memo |
+| `/optimize` | Standalone optimizer playground |
+| `/technicals` | Ticker OHLCV + signals |
+| `/universe` | Universe management (active/inactive, CSV import) |
+| `/watchlists` | Watchlist CRUD + signal refresh |
+| `/alerts` | Alert rules + events inbox |
 
 ---
 
-## Environment Variables
+## Development
 
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `DATABASE_URL` | ✅ | — | PostgreSQL connection string |
-| `NEXT_PUBLIC_API_URL` | | `http://localhost:8000` | Backend URL baked into JS bundle |
-| `CLASS_WRITE_KEY` | | unset | If set, mutations require matching `X-Class-Key` header |
-| `NEXT_PUBLIC_CLASS_WRITE_KEY` | | unset | Frontend counterpart — sent as `X-Class-Key` header |
-| `CORS_ORIGINS` | | `*` | Comma-separated allowed origins (production) |
-| `DATA_PROVIDER` | | `yfinance` | Data source stub |
+### Running tests
+
+```bash
+cd backend
+source .venv/bin/activate
+python -m pytest tests/ -q
+# 87 passed
+```
+
+### Creating a new migration
+
+```bash
+cd backend
+source .venv/bin/activate
+alembic revision -m "your change description"
+# Edit the new file in alembic/versions/
+alembic upgrade head
+```
+
+### Type-checking the frontend
+
+```bash
+cd frontend
+npx tsc --noEmit
+```
+
+### Hot reload
+
+Both `uvicorn --reload` (backend) and `next dev` (frontend) auto-restart on file changes. Edit and save — the browser will pick it up.
+
+---
+
+## Environment variables
+
+All variables are read from `backend/.env` (backend) and `frontend/.env.local` (frontend at build time).
+
+| Variable | Scope | Required | Default | Description |
+|---|---|---|---|---|
+| `DATABASE_URL` | backend | ✅ | — | PostgreSQL connection string |
+| `NEXT_PUBLIC_API_URL` | frontend | | `http://localhost:8000` | Backend URL baked into JS bundle |
+| `CLASS_WRITE_KEY` | backend | | unset | If set, mutations require `X-Class-Key` header |
+| `NEXT_PUBLIC_CLASS_WRITE_KEY` | frontend | | unset | Paired with above; sent automatically by API client |
+| `CORS_ORIGINS` | backend | | `*` | Comma-separated allowed origins for production |
+| `DATA_PROVIDER` | backend | | `yfinance` | Data source (currently only yfinance is implemented) |
+
+`NEXT_PUBLIC_*` vars are read at **build time**, not runtime. Restart `npm run dev` after changing them.
+
+---
+
+## Security model
+
+**Important:** Portfolios are shared across all users of a deployment — there is no per-user isolation. Identity is a display name (`X-Actor-Name` header) used only for audit logging, not access control.
+
+For any deployment reachable beyond `localhost`, you **must** set both:
+
+- Backend: `CLASS_WRITE_KEY=<strong random string>` (env var on the server)
+- Frontend: `NEXT_PUBLIC_CLASS_WRITE_KEY=<same value>` (env var at build time)
+
+Without this, anyone who discovers the URL can read, modify, or delete any portfolio, import CSVs, trigger expensive backtests, and run price refreshes. The `/health` endpoint exposes `write_key_set: true|false` so an operator can verify the gate is active.
+
+Also set `CORS_ORIGINS` to your actual frontend URL(s) — the default (`localhost:3000,localhost:3001`) covers local dev only.
 
 ---
 
 ## Deploy
 
 ### Backend → Render
+
 1. Connect GitHub repo, root directory: `backend`
-2. Build command: `pip install -r requirements.txt && alembic upgrade head`
-3. Start command: `uvicorn main:app --host 0.0.0.0 --port $PORT`
-4. Add env vars: `DATABASE_URL` (from Render's Postgres addon)
+2. Build: `pip install -r requirements.txt && alembic upgrade head`
+3. Start: `uvicorn main:app --host 0.0.0.0 --port $PORT`
+4. Env vars: `DATABASE_URL` (attach Render's Postgres), optional `CLASS_WRITE_KEY`, `CORS_ORIGINS=https://your-frontend.vercel.app`
 
 ### Frontend → Vercel
+
 1. Connect GitHub repo, root directory: `frontend`
-2. Environment variable: `NEXT_PUBLIC_API_URL=https://<render-service>.onrender.com`
+2. Env var: `NEXT_PUBLIC_API_URL=https://your-backend.onrender.com`
+3. (If backend `CLASS_WRITE_KEY` is set) `NEXT_PUBLIC_CLASS_WRITE_KEY=<same value>`
+
+Free-tier caveats: Render free web services sleep after 15 min idle — the first request after a quiet period takes ~30 s to wake. Suitable for demos, not production.
 
 ---
 
-## CAPM Optimizer
+## Identity & authentication
 
-The `max_sharpe_capm` mode (★ default) implements Black-Litterman-flavoured CAPM:
+No passwords, no JWT. Anyone can use the app:
+
+1. Visit `/login`, enter display name → stored in `localStorage`.
+2. Every API request sends `X-Actor-Name: <name>` → logged to `audit_log.actor`.
+3. For public deployments, set `CLASS_WRITE_KEY` to require an additional `X-Class-Key` header on all POST/PUT/PATCH/DELETE requests. The frontend reads `NEXT_PUBLIC_CLASS_WRITE_KEY` and attaches the header automatically.
+
+---
+
+## Data notes
+
+- Source: Yahoo Finance (`yfinance`), adjusted close prices
+- Server-side 1-hour TTL cache to avoid rate-limit hammering
+- `price_history` table backfills OHLCV for any ticker seen by the app; falls back to yfinance only on cache miss
+- Unknown tickers added to portfolios are auto-created in the universe and enriched with yfinance metadata (name, sector, market cap, P/E, dividend yield, 52-week range)
+- Covariance and beta use daily returns × 252 for annualisation
+
+---
+
+## CAPM optimizer
+
+`max_sharpe_capm` mode implements a Black-Litterman-flavoured CAPM:
 
 ```
 E[R_i] = rf + β_i × MRP + MRP × view_i
 ```
 
-- **β** calculated via OLS regression vs the market ticker (default: `VT`)
-- **Views** = analyst conviction that a stock is undervalued (additive boost)
-- **Per-asset bounds** = min/max weight constraints per ticker
-- **Reserved cash** = fraction of portfolio held in cash (excluded from optimization)
+- **β** — OLS regression vs the market ticker (default `VT`)
+- **Views** — analyst conviction that a stock is over/undervalued (additive boost)
+- **Per-asset bounds** — min/max weight constraints per ticker
+- **Reserved cash** — fraction of portfolio held in cash (excluded from optimization)
 
 ---
 
-## Data Notes
+## LAN / iPad access
 
-- Source: Yahoo Finance (`yfinance`), adjusted close prices
-- Cache: 1-hour TTL server-side cache (no rate-limit hammering)
-- Optimization uses annualised covariance (daily cov × 252)
+Blue Eagle binds the frontend to `0.0.0.0:3000`, so any device on the same Wi-Fi can reach it. Find your machine's IP (`ipconfig getifaddr en0` on Mac, `hostname -I` on Linux/WSL), then set:
 
----
-
-## Sprint 2 Verification
-
-```bash
-# All 34 unit tests pass
-cd backend && python -m pytest tests/ -v
-
-# Universe endpoint (15 seeded tickers)
-curl http://localhost:8000/api/universe | python3 -m json.tool
-
-# Create watchlist
-curl -X POST http://localhost:8000/api/watchlists \
-  -H "Content-Type: application/json" -H "X-Actor-Name: demo" \
-  -d '{"name": "Tech Picks"}'
-
-# Ticker technicals + signals (no look-ahead)
-curl "http://localhost:8000/api/ticker/AAPL/technicals?signals=1" \
-  -H "X-Actor-Name: demo"
-
-# Sprint 2 tables in DB
-psql -U blueeagle -c "\dt" | grep -E "universe_tickers|watchlists|portfolios|alerts|positions"
-
-# Actor captured in audit_log
-psql -U blueeagle -c "SELECT actor, method, path FROM audit_log ORDER BY ts DESC LIMIT 5;"
+```
+NEXT_PUBLIC_API_URL=http://<your-machine-ip>:8000
 ```
 
----
-
-## Sprint 3 Verification
-
-```bash
-# API version
-curl http://localhost:8000/health
-# → {"status":"ok","db":"ok","version":"3.0.0"}
-
-# Create portfolio
-curl -X POST http://localhost:8000/api/portfolios \
-  -H "Content-Type: application/json" -H "X-Actor-Name: demo" \
-  -d '{"name": "Core Holdings"}'
-
-# Add holdings (must be active universe tickers)
-PORT_ID=<id from above>
-curl -X POST "http://localhost:8000/api/portfolios/$PORT_ID/positions" \
-  -H "Content-Type: application/json" -H "X-Actor-Name: demo" \
-  -d '{"ticker": "AAPL", "weight": 0.4}'
-
-# Portfolio analytics (simulated — current weights held constant)
-curl "http://localhost:8000/api/portfolios/$PORT_ID/analytics"
-# → {simulated: true, metrics: {cagr, sharpe, max_dd, beta, alpha}, equity_curves, signals_by_ticker}
-
-# Portfolio optimization
-curl -X POST "http://localhost:8000/api/portfolios/$PORT_ID/optimize" \
-  -H "Content-Type: application/json" -H "X-Actor-Name: demo" \
-  -d '{"mode": "max_sharpe", "max_weight": 0.6}'
-# → {target_weights, implied_trades, metrics: {current, optimized}, equity_curves}
-
-# Create alert rule (default params auto-populated)
-curl -X POST http://localhost:8000/api/alert_rules \
-  -H "Content-Type: application/json" -H "X-Actor-Name: demo" \
-  -d '{"scope": "ticker", "ticker": "AAPL", "rule_type": "sma_cross_up", "cooldown_days": 3}'
-
-# Evaluate all enabled rules synchronously
-curl -X POST http://localhost:8000/api/alert_rules/evaluate_now -H "X-Actor-Name: demo"
-# → {evaluated: N, triggered: N, skipped: N, as_of_date, events}
-
-# Events inbox
-curl http://localhost:8000/api/alert_rules/events
-```
-
----
-
-## Sprint 3.5 Verification
-
-```bash
-# 1. Version
-curl http://localhost:8000/health
-# → {"status":"ok","db":"ok","version":"3.5.0"}
-
-# 2. as_of_date on technicals
-curl -X POST http://localhost:8000/api/technicals \
-  -H "Content-Type: application/json" -H "X-Actor-Name: test" \
-  -d '{"ticker":"AAPL","start":"2024-01-01","end":"2024-12-31"}' \
-  | python3 -m json.tool | grep -E "as_of|data_source"
-# → "as_of_date": "2024-12-31", "data_source": "Yahoo Finance"
-
-# 3. evaluate_now uses as_of_date (not asof_date)
-curl -X POST http://localhost:8000/api/alert_rules/evaluate_now \
-  -H "X-Actor-Name: test" | python3 -m json.tool | grep as_of_date
-# → "as_of_date": "YYYY-MM-DD"
-
-# 4. Nav order + login redirect (UI)
-# Login → lands on /portfolios
-# Nav: Universe | Portfolios | Optimization | Watchlists | Technicals | Alerts
-
-# 5. UniverseTickerPicker enforcement
-# /portfolios/{id} → Holdings tab → type "AA" in Add Holding → dropdown shows AAPL
-# /watchlists/{id} → Add ticker → same filtered dropdown
-# /alerts → Rules tab → scope=ticker → picker instead of raw input
-
-# 6. Hot reload
-# Edit frontend/app/portfolios/page.tsx → browser updates automatically
-# Edit backend/routers/portfolios.py → uvicorn logs "Detected change in..."
-```
-
----
-
-## 5-Minute Demo Script
-
-1. **Login** — enter your name → lands on **Portfolios**
-2. **Universe** — 15 seeded tickers; toggle TSLA inactive to see it blocked by the ticker picker
-3. **Portfolios** — Create "Core Holdings" → add AAPL 40%, MSFT 35%, NVDA 25% (picker enforces Universe)
-   - **Holdings tab** → click AAPL row ▶ to expand Quick Technicals (SMA/RSI/MACD badges + ATR14)
-   - **Analytics tab** → Load Analytics → equity curve vs SPY + per-holding exit signals (Simulated badge with tooltip; ? opens Help & Glossary)
-   - **Optimize tab** → Max Sharpe (tooltip explains mode), max weight 60% → Run → Sharpe jump + rebalance plan
-4. **Alerts** — create SMA Cross Up rule, scope=ticker, pick AAPL from picker, cooldown 3 days → **Evaluate Now** → check Inbox tab
-5. **Watchlists** — Create "Tech Picks" → add tickers via picker → Refresh → signal badges appear
-6. **Technicals** — look up any ticker → OHLCV bars + signals
-7. **Optimization** — Max Sharpe CAPM, analyst view NVDA = 0.5 → Run
-8. **Help & Glossary** — ? button in Analytics tab → sidebar with all indicator and metric definitions
-
-Total: ~7 minutes
+Restart the frontend and visit `http://<your-machine-ip>:3000` from your iPad.
