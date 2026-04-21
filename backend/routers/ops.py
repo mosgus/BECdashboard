@@ -63,6 +63,7 @@ def list_job_runs(limit: int = 10, db: Session = Depends(get_db)) -> dict:
 def refresh_prices_endpoint(
     body: RefreshPricesRequest,
     db: Session = Depends(get_db),
+    _: None = Depends(require_write_key),
 ) -> dict:
     """Manually refresh price_history from yfinance.
 
@@ -124,6 +125,7 @@ def refresh_prices_endpoint(
 def record_job_run(
     body: JobRunCreate,
     db: Session = Depends(get_db),
+    _: None = Depends(require_write_key),
 ) -> dict:
     """Record a job run result (called by jobs/run_nightly.py).
 

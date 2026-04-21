@@ -28,6 +28,9 @@ Thumbs.db
 .vscode/
 *.swp
 
+# Runtime logs
+logs/
+
 # Jupyter
 *.ipynb
 .ipynb_checkpoints/

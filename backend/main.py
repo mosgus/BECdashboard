@@ -30,10 +30,9 @@ app = FastAPI(title="Blue Eagle API", version="4.0.0", lifespan=lifespan)
 # AuditMiddleware must be inner so it sees final status codes from CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.cors_origins.split(","),
+    allow_origins=[o.strip() for o in settings.cors_origins.split(",") if o.strip()],
     allow_methods=["*"],
     allow_headers=["Content-Type", "X-Actor-Name", "X-Class-Key"],
-    allow_credentials=True,
 )
 app.add_middleware(AuditMiddleware)
 
@@ -63,4 +62,9 @@ def health() -> dict:
     except Exception:
         logging.getLogger(__name__).warning("Health check DB ping failed", exc_info=True)
         db_status = "error"
-    return {"status": "ok", "db": db_status, "version": "4.0.0"}
+    return {
+        "status": "ok",
+        "db": db_status,
+        "version": "4.0.0",
+        "write_key_set": bool(settings.class_write_key),
+    }

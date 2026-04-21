@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from auth import require_write_key
 from core.asset_research import (
     classify_portfolio_role,
     compute_asset_correlation,
@@ -124,6 +125,7 @@ def optimizer_comparison(
     portfolio_id: str,
     body: OptimizerComparisonRequest,
     db: Session = Depends(get_db),
+    _: None = Depends(require_write_key),
 ):
     """Run multiple optimizer modes and return side-by-side metrics."""
     portfolio, positions = _load_portfolio(portfolio_id, db)
@@ -199,6 +201,7 @@ def walk_forward(
     portfolio_id: str,
     body: WalkForwardRequest,
     db: Session = Depends(get_db),
+    _: None = Depends(require_write_key),
 ):
     """Run anchored walk-forward OOS backtest."""
     portfolio, positions = _load_portfolio(portfolio_id, db)
@@ -520,6 +523,7 @@ def composite_score(
 def create_decision_memo(
     body: DecisionMemoCreate,
     db: Session = Depends(get_db),
+    _: None = Depends(require_write_key),
 ):
     """Save a decision memo."""
     memo = DecisionMemo(
@@ -618,6 +622,7 @@ def universe_stats(db: Session = Depends(get_db)):
 def universe_audit(
     body: UniverseAuditRequest,
     db: Session = Depends(get_db),
+    _: None = Depends(require_write_key),
 ):
     """Data quality audit for universe tickers."""
     if body.tickers:
@@ -653,6 +658,7 @@ def universe_audit(
 def universe_screen(
     body: UniverseScreenRequest,
     db: Session = Depends(get_db),
+    _: None = Depends(require_write_key),
 ):
     """Screen universe tickers against fundamental and data quality filters."""
     tickers = _ticker_dicts(db)

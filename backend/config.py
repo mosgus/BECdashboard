@@ -17,8 +17,9 @@ class Settings(BaseSettings):
     # Leave unset for open cohort access.
     class_write_key: str | None = None
 
-    # CORS — comma-separated origins, "*" allows all (dev default)
-    cors_origins: str = "*"
+    # CORS — comma-separated origins. Default covers local dev only.
+    # Public deployments must set CORS_ORIGINS explicitly to their frontend URL(s).
+    cors_origins: str = "http://localhost:3000,http://localhost:3001"
 
     # Data provider
     data_provider: str = "yfinance"
