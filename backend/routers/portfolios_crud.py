@@ -16,7 +16,6 @@ from db.base import get_db
 from db.models import Portfolio, Position, UniverseTicker
 from routers._portfolio_helpers import (
     PositionUpsert,
-    _assert_universe,
     _fetch_position_prices,
     _get_or_404,
     _parse_portfolio_csv,
@@ -236,7 +235,22 @@ def add_or_update_position(
     _: None = Depends(require_write_key),
 ) -> dict:
     p = _get_or_404(db, portfolio_id)
-    _assert_universe(db, body.ticker)
+
+    # Auto-backfill: if ticker isn't in the universe (or is inactive),
+    # create/reactivate it and enrich with yfinance metadata. Mirrors the
+    # behavior of CSV import so manual adds work for any valid ticker.
+    if not _TICKER_RE.match(body.ticker):
+        raise HTTPException(status_code=422, detail=f"Invalid ticker format: {body.ticker}")
+    ut = db.query(UniverseTicker).filter(UniverseTicker.ticker == body.ticker).first()
+    if not ut:
+        ut = UniverseTicker(ticker=body.ticker, active=True)
+        _enrich(ut)
+        db.add(ut)
+        db.flush()
+    elif not ut.active:
+        ut.active = True
+        _enrich(ut)
+        db.flush()
 
     existing = db.query(Position).filter(
         Position.portfolio_id == p.id, Position.ticker == body.ticker

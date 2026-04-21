@@ -88,10 +88,30 @@ class TestPositions:
         res = seeded_client.delete(f"/api/portfolios/{pid}/positions/MSFT")
         assert res.status_code == 204
 
-    def test_position_requires_universe_ticker(self, seeded_client):
+    def test_position_backfills_missing_universe_ticker(self, seeded_client):
+        """Adding a position with a ticker not in the universe auto-creates
+        the universe entry (enriched via yfinance) so the ticker is available
+        for future lookups."""
         pid = self._create_portfolio(seeded_client)
+        # Pre-condition: ticker is not in the seeded universe
+        assert seeded_client.get("/api/universe/ZZZZZ").status_code == 404
+
         res = seeded_client.post(
             f"/api/portfolios/{pid}/positions",
             json={"ticker": "ZZZZZ", "shares": 10, "position_type": "stock"},
+        )
+        assert res.status_code == 201
+        assert res.json()["ticker"] == "ZZZZZ"
+
+        # Post-condition: ticker now exists in the universe (active)
+        u = seeded_client.get("/api/universe/ZZZZZ")
+        assert u.status_code == 200
+        assert u.json()["active"] is True
+
+    def test_position_rejects_invalid_ticker_format(self, seeded_client):
+        pid = self._create_portfolio(seeded_client)
+        res = seeded_client.post(
+            f"/api/portfolios/{pid}/positions",
+            json={"ticker": "TOO-LONG-TICKER", "shares": 10, "position_type": "stock"},
         )
         assert res.status_code == 422

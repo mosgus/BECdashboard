@@ -98,7 +98,9 @@ export default function UniverseTickerPicker({
         <ul className="absolute left-0 top-full z-20 mt-1 max-h-48 w-full overflow-auto rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-lg">
           {filtered.length === 0 ? (
             <li className="px-3 py-2 text-xs text-[var(--color-muted)]">
-              {value ? "No matching universe tickers" : "No active tickers"}
+              {value
+                ? `"${value.toUpperCase().trim()}" not in universe — will be added on submit`
+                : "No active tickers"}
             </li>
           ) : (
             filtered.map((t, i) => (

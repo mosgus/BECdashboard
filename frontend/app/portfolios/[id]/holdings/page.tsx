@@ -265,7 +265,7 @@ export default function HoldingsPage({
         <div className="mb-3 flex items-center justify-between">
           <h3 className="text-sm font-semibold text-[var(--color-text)]">
             Add Holding
-            <InfoTooltip text="Enter a ticker and number of shares. Weights are computed automatically from shares × live price. All tickers must be in the active Universe." />
+            <InfoTooltip text="Enter a ticker and number of shares. Weights are computed automatically from shares × live price. Any ticker not yet in the Universe is auto-added and enriched on submit." />
           </h3>
           <label
             className={`flex cursor-pointer items-center gap-1.5 rounded-[var(--radius-btn)] border border-[var(--color-border)] px-3 py-1.5 text-xs font-medium text-[var(--color-text)] hover:bg-gray-50 transition-colors ${csvMut.isPending ? "opacity-50 pointer-events-none" : ""}`}
