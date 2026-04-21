@@ -39,7 +39,10 @@ def _audit_single_ticker(
     }
 
     try:
-        # Fetch raw OHLCV (not the cache, which forward-fills)
+        # Fetch raw OHLCV (not the cache, which forward-fills).
+        # threads=False disables yfinance's internal threading, which races
+        # with our ThreadPoolExecutor and causes spurious "possibly delisted"
+        # failures for every ticker in a batch audit.
         raw = yf.download(
             [ticker],  # Use list to ensure consistent MultiIndex structure
             start=start,
@@ -47,6 +50,7 @@ def _audit_single_ticker(
             auto_adjust=True,
             progress=False,
             group_by="ticker",  # Consistent column structure
+            threads=False,
         )
         if raw.empty:
             result["issues"].append("No data returned from yfinance")

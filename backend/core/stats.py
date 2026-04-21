@@ -61,7 +61,10 @@ def test_sharpe_ttest(returns: np.ndarray, rf: float = 0.0) -> dict:
     rho1 = float(scipy_stats.pearsonr(returns[:-1], returns[1:])[0]) if n > 2 else 0.0
     rho1 = max(-0.99, min(0.99, rho1))
     denom = 1.0 - rho1**2
-    t_eff_factor = 1.0 + 2.0 * rho1 * (n - 1) / (n * denom) if denom > 0 else 1.0
+    if n > 0 and denom > 0:
+        t_eff_factor = 1.0 + 2.0 * rho1 * (n - 1) / (n * denom)
+    else:
+        t_eff_factor = 1.0
     t_eff_factor = max(0.01, t_eff_factor)
 
     sr_daily = sr_ann / np.sqrt(252)
@@ -233,6 +236,23 @@ def test_drawdown_significance(
 
 def run_validation_suite(returns: np.ndarray, quick: bool = True) -> dict:
     """Run all 7 tests. GO if n_passing >= 4."""
+    # Short-circuit when there isn't enough history for the tests to be
+    # meaningful — avoids divide-by-zero and spurious p-values on tiny
+    # samples (e.g., a portfolio with no overlapping price history).
+    returns = np.asarray(returns, dtype=float)
+    min_n = 30
+    if returns.size < min_n:
+        return {
+            "tests": [],
+            "n_passing": 0,
+            "n_total": 7,
+            "go_decision": False,
+            "quick_mode": quick,
+            "insufficient_data": True,
+            "n_observations": int(returns.size),
+            "min_required": min_n,
+        }
+
     n_perms = 500 if quick else 2000
     n_boot = 1000 if quick else 5000
 

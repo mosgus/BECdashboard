@@ -176,6 +176,13 @@ def signal_macd_cross(prices: pd.Series) -> dict:
 
 def compute_all_signals(prices: pd.Series) -> list[dict]:
     """Compute all three signals. Used by watchlist refresh and ticker endpoints."""
+    # Coerce to a 1-D Series. Some yfinance responses produce DataFrames
+    # with duplicate column names, so df["close"] upstream can return a
+    # DataFrame instead of a Series, which breaks scalar math downstream.
+    if isinstance(prices, pd.DataFrame):
+        prices = prices.iloc[:, 0]
+    prices = pd.Series(prices).astype(float)
+    prices = prices[~prices.index.duplicated(keep="last")]
     return [
         signal_sma_cross(prices),
         signal_rsi_threshold(prices),
