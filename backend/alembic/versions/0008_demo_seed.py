@@ -1,21 +1,23 @@
-"""Demo seed — two example portfolios for fresh installs
+"""Demo seed — three example portfolios for fresh installs
 
 Revision ID: 0008
 Revises: 0007
 Create Date: 2026-02-26
 
-Inserts two fully-populated demo portfolios so every fresh deployment has a
-working example to click through immediately.  All inserts are idempotent via
+Inserts three fully-populated demo portfolios so every fresh deployment has
+working examples to click through immediately. All inserts are idempotent via
 ON CONFLICT DO NOTHING; downgrade deletes only the demo rows (cascade removes
 positions and candidates automatically).
 
 Demo portfolios:
   1. "Demo — Mag 7 Growth"   $500 k   7 positions   last_target_set (max_sharpe)
   2. "Demo — Balanced Core"  $250 k   7 positions   no target set (shows CTA)
+  3. "BEC Holdings - Last Week" $300k  8 positions + 38% cash   no target set
 
 Fixed UUIDs:
   P1  aaaaaaaa-bbbb-4000-8000-000000000001
   P2  aaaaaaaa-bbbb-4000-8000-000000000002
+  P3  aaaaaaaa-bbbb-4000-8000-000000000003
 
 Weight unit convention (positions table): percentage units (25.0 = 25 %)
 Weight unit convention (last_target_set): fractions (0.25 = 25 %)
@@ -34,6 +36,7 @@ depends_on = None
 # ── Fixed UUIDs ────────────────────────────────────────────────────────────────
 _P1 = "aaaaaaaa-bbbb-4000-8000-000000000001"  # Demo — Mag 7 Growth
 _P2 = "aaaaaaaa-bbbb-4000-8000-000000000002"  # Demo — Balanced Core
+_P3 = "aaaaaaaa-bbbb-4000-8000-000000000003"  # BEC Holdings - Last Week
 
 # last_target_set blob for P1 (weights as fractions, sums to 1.0)
 _P1_TARGET_SET = json.dumps(
@@ -60,6 +63,17 @@ _P1_TARGET_SET = json.dumps(
 def upgrade() -> None:
     conn = op.get_bind()
 
+    # ── 0. Add missing tickers to universe ─────────────────────────────────────
+    conn.execute(
+        sa.text(
+            """
+            INSERT INTO universe_tickers (ticker)
+            VALUES ('VEA'), ('SETM'), ('XLK'), ('CEG'), ('XLP'), ('XLV'), ('MS')
+            ON CONFLICT (ticker) DO NOTHING
+            """
+        )
+    )
+
     # ── 1. Portfolios ──────────────────────────────────────────────────────────
     conn.execute(
         sa.text(
@@ -67,11 +81,12 @@ def upgrade() -> None:
             INSERT INTO portfolios (id, name, notional_value, last_target_set)
             VALUES
               (:p1, 'Demo — Mag 7 Growth',  500000.00, :p1_ts),
-              (:p2, 'Demo — Balanced Core', 250000.00, NULL  )
+              (:p2, 'Demo — Balanced Core', 250000.00, NULL  ),
+              (:p3, 'BEC Holdings - Last Week', 300000.00, NULL)
             ON CONFLICT DO NOTHING
             """
         ),
-        {"p1": _P1, "p1_ts": _P1_TARGET_SET, "p2": _P2},
+        {"p1": _P1, "p1_ts": _P1_TARGET_SET, "p2": _P2, "p3": _P3},
     )
 
     # ── 2. Positions — Mag 7 Growth (weights in %, sum = 100) ─────────────────
@@ -112,9 +127,30 @@ def upgrade() -> None:
         {"pid": _P2},
     )
 
-    # ── 4. Monitor candidates ──────────────────────────────────────────────────
+    # ── 4. Positions — BEC Holdings (weights in %, sum = 62 + 38% cash) ────────
+    conn.execute(
+        sa.text(
+            """
+            INSERT INTO positions (portfolio_id, ticker, weight)
+            VALUES
+              (:pid, 'VEA',  2.87),
+              (:pid, 'SETM', 4.03),
+              (:pid, 'XLK',  4.39),
+              (:pid, 'CEG',  5.65),
+              (:pid, 'GLD',  6.21),
+              (:pid, 'XLP',  6.29),
+              (:pid, 'XLV',  9.28),
+              (:pid, 'MS',  23.26)
+            ON CONFLICT DO NOTHING
+            """
+        ),
+        {"pid": _P3},
+    )
+
+    # ── 5. Monitor candidates ──────────────────────────────────────────────────
     # Mag 7 Growth watches index exposure as potential additions
     # Balanced Core watches growth names as potential additions
+    # BEC Holdings watches value/sector exposure
     conn.execute(
         sa.text(
             """
@@ -125,11 +161,14 @@ def upgrade() -> None:
               (:p1, 'IWM' ),
               (:p2, 'NVDA'),
               (:p2, 'META'),
-              (:p2, 'GOOGL')
+              (:p2, 'GOOGL'),
+              (:p3, 'XLY' ),
+              (:p3, 'XLE' ),
+              (:p3, 'VTI' )
             ON CONFLICT DO NOTHING
             """
         ),
-        {"p1": _P1, "p2": _P2},
+        {"p1": _P1, "p2": _P2, "p3": _P3},
     )
 
 
@@ -143,4 +182,8 @@ def downgrade() -> None:
     conn.execute(
         sa.text("DELETE FROM portfolios WHERE id = :p2"),
         {"p2": _P2},
+    )
+    conn.execute(
+        sa.text("DELETE FROM portfolios WHERE id = :p3"),
+        {"p3": _P3},
     )
