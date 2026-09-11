@@ -1,17 +1,4 @@
 {
-  "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "/usr/bin/python3 \"$CLAUDE_PROJECT_DIR/scripts/block-git-writes.py\""
-          }
-        ]
-      }
-    ]
-  },
   "permissions": {
     "deny": [
       "Bash(git commit:*)",
@@ -27,7 +14,9 @@
       "Bash(git checkout:*)",
       "Bash(git switch:*)",
       "Bash(git restore:*)",
-      "Bash(gh pr:*)",
+      "Bash(gh pr create:*)",
+      "Bash(gh pr merge:*)",
+      "Bash(gh pr close:*)",
       "Bash(gh release:*)",
       "Bash(gh repo:*)",
       "Bash(gh secret:*)",
@@ -46,7 +35,9 @@
       "Bash(git remote -v)",
       "Bash(git branch)",
       "Bash(git worktree list)",
-      "Bash(git rev-parse:*)"
+      "Bash(git rev-parse:*)",
+      "Bash(gh pr list:*)",
+      "Bash(gh pr view:*)"
     ]
   }
 }

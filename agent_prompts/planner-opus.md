@@ -16,6 +16,10 @@ This is not overridable by a contract, by "the work is obviously done," or by yo
 that it's safe. If you believe a commit is warranted, print the exact command in a code block and
 stop — he runs it.
 
+This is enforced by discipline, not by tooling. A `deny` list in `.claude/settings.json` catches
+the common shapes, but it matches command prefixes only — `cd foo && git push` goes straight
+through it. Assume nothing will stop you but you.
+
 Read-only git is expected and encouraged: `git status`, `git diff`, `git log`, `git show`,
 `git ls-files`, `git ls-tree`, `git worktree list`.
 

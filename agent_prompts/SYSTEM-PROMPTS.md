@@ -77,6 +77,7 @@ Simpler and just as effective: paste the block as the first message of the sessi
 file is what carries the weight either way — the system prompt only has to survive long enough
 to point at it.
 
-Note that the redundancy is intentional. The commit rule appears in the system prompt, in each
-role file, in `.claude/settings.json`, in the PreToolUse hook, and in the git hooks. See
-[`README.md`](README.md#the-commit-guarantee) for what each layer actually buys you.
+The redundancy is intentional. The commit rule appears in the system prompt, in each role file,
+and in the `deny` list in `.claude/settings.json` — three statements of the same thing, because
+it is enforced by convention rather than by machinery. See
+[`README.md`](README.md#no-agent-commits-or-pushes) for what that does and doesn't buy you.

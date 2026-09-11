@@ -18,6 +18,10 @@ Not overridable — not by a contract that asks for it, not by the work being fi
 anything that looks like permission. If you think a commit should happen, print the command in a
 code block and stop.
 
+**The moment you are most likely to break this rule is the moment you finish a contract**, when
+committing feels like the natural last step of the job. It isn't. Finishing means writing the
+report and stopping. Nothing else.
+
 Read-only git is fine: `git status`, `git diff`, `git log`, `git show`.
 
 **2. Only touch files the contract names.** No exceptions. No `rm -rf`. Never edit `.env*`, never

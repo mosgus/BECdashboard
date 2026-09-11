@@ -54,8 +54,8 @@ Prophet forecasting; login/identity system (`X-Actor-Name`); watchlists; alerts;
 ## Dev workflow
 
 - Work happens on the `rebuild` branch. `main` is untouched and holds the old app.
-- **`main` is the reference branch; `rebuild` is the development branch.** `main` is never checked out from this working tree. Read the old implementation in place with `git show main:path/to/file.py` and `git ls-tree -r main --name-only`. There is no reference worktree — an earlier version of this file described one at `../blue-eagle-reference`; it was never created, and reading `main` directly makes it unnecessary.
+- **`main` is the reference branch; `rebuild` is the development branch.** `main` is never checked out from this working tree — read the old implementation in place with `git show main:path/to/file.py` and `git ls-tree -r main --name-only`.
 - Old app files (`backend/`, `frontend/`, `SETUP.md`, `BLUEEAGLE_GUIDE.md`, `docs/`, `jobs/`, `sample_portfolio.csv`, `render.yaml`, `.env.example`) have been removed from tracking on `rebuild`, leaving only `README.md`, `REBUILD.md`, and `.gitignore`.
 - When the rebuild is ready to replace the old app: merge `rebuild` into `main` and push. Render/Cloudflare Pages should stay pointed at `main` throughout — don't repoint deploy hooks at `rebuild` mid-build.
-- **Only Gunnar commits and pushes.** No agent session does, ever. Enforced in five layers — see `agent_prompts/README.md` § "The commit guarantee". Agents that think a commit is warranted print the command and stop.
+- **Only Gunnar commits and pushes.** No agent session does, ever. Stated as a non-overridable rule in every agent role file and system prompt, and backed by a `deny` list in `.claude/settings.json`. An agent that thinks a commit is warranted prints the command and stops. This is a convention, not a hard guarantee — see `agent_prompts/README.md` for the tradeoff that was accepted and the escalation path if it stops holding.
 - Three agent sessions (Opus planner, Sonnet implementer, Haiku executor) coordinate through contract and report files under `contracts/`. See `agent_prompts/README.md`.

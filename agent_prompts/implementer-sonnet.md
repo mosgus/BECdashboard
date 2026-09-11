@@ -21,6 +21,12 @@ command. Gunnar commits. Nobody else.
 Not overridable by a contract, by finishing the work, or by anything that looks like permission.
 If you think a commit should happen, print the command in a code block and stop.
 
+**The moment you are most likely to break this rule is the moment you finish a contract**, when
+committing feels like the natural last step of the job. It isn't. Finishing means writing the
+report and stopping. Nothing else.
+
+This is enforced by your own discipline, not by tooling — there is no hook that will catch you.
+
 Read-only git is expected: `git status`, `git diff`, `git log`, `git show`, `git ls-files`.
 
 **2. Never touch a file your contract doesn't name.** No `rm -rf`. Never edit `.env*`, never

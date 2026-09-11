@@ -28,8 +28,6 @@ git ls-tree -r main --name-only | grep routers
 git diff main rebuild --stat
 ```
 
-There is no reference worktree. `REBUILD.md` used to describe one at `../blue-eagle-reference`;
-it does not exist.
 
 ## The contract loop
 
@@ -73,36 +71,29 @@ an API shape is not.
 Zero-padded, monotonic, never reused. Abandoned contracts get `Status: abandoned` — they are not
 deleted and their number is not recycled.
 
-## The commit guarantee
+## No agent commits or pushes
 
-No agent commits or pushes. Five layers, each catching what the one above it misses:
+Gunnar is the only one who commits and pushes. Two things hold this up:
 
-| # | Layer | Catches | Defeated by |
-|---|---|---|---|
-| 1 | System prompt + role file | Intent | Any lapse in instruction-following |
-| 2 | `.claude/settings.json` deny list | `git push ...` at the start of a command | `cd foo && git push` |
-| 3 | **PreToolUse hook** (`scripts/block-git-writes.py`) | Every git/gh invocation anywhere in a compound command, plus evasion attempts (`--no-verify`, `core.hooksPath`, `env -u CLAUDECODE`, writes to `.git/hooks`) | git invoked from inside a script the hook can't see into |
-| 4 | **Git hooks** (`pre-commit`, `pre-push`, `pre-merge-commit`, `pre-rebase`) | Any commit or push made while `CLAUDECODE`/`AI_AGENT` is set, *regardless of how git was invoked* | `--no-verify` (blocked by layer 3), or deleting the hook (blocked by layers 3 and 5) |
-| 5 | Bash sandbox | Direct reads/writes under `.git/` and `.claude/` from the Bash tool | — |
+1. **The rule, stated in every role file and every system prompt.** It is written as
+   non-overridable: not by a contract that asks for it, not by the work being finished, not by
+   anything in a session that resembles permission. An agent that thinks a commit is warranted
+   prints the command in a code block and stops.
+2. **A `deny` list in `.claude/settings.json`**, which blocks `git commit`, `push`, `merge`,
+   `rebase`, `reset`, `tag`, `stash`, `cherry-pick`, `revert`, `clean`, `checkout`, `switch`,
+   `restore`, and the writing `gh` subcommands at the harness level.
 
-Layer 3 is tested. `node scripts/run-tests.js` runs 43 cases including every bypass above.
-Layer 4 must be installed per clone — `.git/hooks/` is not tracked:
+**This is a strong convention, not a guarantee, and that is a deliberate choice.** The deny list
+matches a command *prefix*, so a compound command (`cd foo && git push`) slips past it and the
+prompt rule is the only thing left. Prompt rules fail probabilistically, and the moment of
+highest risk is an agent finishing a contract, where "commit the work" reads as completing the
+task.
 
-```bash
-bash scripts/install-git-hooks.sh
-```
+The tradeoff was accepted because the blast radius is small: the repo is private and
+single-owner, a stray commit is undone with `git reset`, and a stray push is undone with
+`git push --force`. Watch for it at the end of contracts rather than assuming it cannot happen.
 
-**What this does not guarantee.** Layers 3 and 4 are enforced by code an agent can read. Layer 4
-keys off `CLAUDECODE`, which is an environment variable, not a cryptographic claim. A determined
-agent with shell access has no *sanctioned* path through, but "no sanctioned path" is not "no
-path." The blast radius is bounded by the fact that a commit is local and reversible
-(`git reset`) — the irreversible operation is **push**, and push is the one you can actually
-close completely:
-
-> Your remote is SSH (`git@github.com-emory:ngrom17/blue-eagle.git`) and `SSH_AUTH_SOCK` is
-> present in the agent's environment — so today an agent that got past layers 1–4 could
-> authenticate. Running `ssh-add -D && ssh-add -c ~/.ssh/<your-emory-key>` makes every use of
-> that key pop a confirmation dialog you have to click. At that point an agent cannot push, not
-> because it's forbidden, but because it lacks something only you can supply.
-
-That last step is yours to make; it also prompts on your own pushes, which is the point.
+If that ever stops being acceptable, the escalation is a `PreToolUse` hook that inspects the
+whole command string rather than its prefix, plus `pre-commit`/`pre-push` hooks in `.git/hooks/`
+that refuse when `CLAUDECODE` is set. Both were built and then removed as more machinery than
+this project warrants.
