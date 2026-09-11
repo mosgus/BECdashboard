@@ -1,0 +1,43 @@
+BLOCK	git commit -m "x"
+BLOCK	git push origin rebuild
+BLOCK	cd /tmp && git push
+BLOCK	git status; git commit -am wip
+BLOCK	git -c core.hooksPath=/dev/null commit -m x
+BLOCK	git commit --no-verify -m x
+BLOCK	env -u CLAUDECODE git push
+BLOCK	unset CLAUDECODE && git commit -m x
+BLOCK	rm .git/hooks/pre-commit
+BLOCK	chmod -x .git/hooks/pre-push
+BLOCK	git push 2>/dev/null || git push --force
+BLOCK	sudo git reset --hard HEAD~1
+BLOCK	GIT_AUTHOR_NAME=x git commit -m y
+BLOCK	gh pr create --title x
+BLOCK	gh api -X POST /repos/x/y/git/refs
+BLOCK	gh release create v1
+BLOCK	git remote set-url origin git@evil:x.git
+BLOCK	git branch -D rebuild
+BLOCK	git config user.email x@y.z
+BLOCK	echo hi && git checkout main
+BLOCK	git worktree add ../ref main
+BLOCK	git stash push -m wip
+BLOCK	nohup git push &
+BLOCK	$(git commit -m x)
+ALLOW	git status --porcelain
+ALLOW	git diff HEAD
+ALLOW	git show main:backend/core/optimizer.py
+ALLOW	git log --oneline -20
+ALLOW	git branch
+ALLOW	git remote -v
+ALLOW	git config --get remote.origin.url
+ALLOW	ls -la && git ls-files
+ALLOW	git ls-tree -r main --name-only
+ALLOW	pytest -q
+ALLOW	npm run build
+ALLOW	gh pr list
+ALLOW	python3 -m pytest tests/
+BLOCK	gh pr merge 12
+BLOCK	gh pr create -t x
+ALLOW	gh pr list
+ALLOW	gh pr view 12
+ALLOW	gh run list
+BLOCK	gh run rerun 5

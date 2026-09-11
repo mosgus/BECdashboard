@@ -54,6 +54,8 @@ Prophet forecasting; login/identity system (`X-Actor-Name`); watchlists; alerts;
 ## Dev workflow
 
 - Work happens on the `rebuild` branch. `main` is untouched and holds the old app.
-- A second worktree at `../blue-eagle-reference` is checked out on `main`, for side-by-side reference while building — nothing gets committed there.
+- **`main` is the reference branch; `rebuild` is the development branch.** `main` is never checked out from this working tree. Read the old implementation in place with `git show main:path/to/file.py` and `git ls-tree -r main --name-only`. There is no reference worktree — an earlier version of this file described one at `../blue-eagle-reference`; it was never created, and reading `main` directly makes it unnecessary.
 - Old app files (`backend/`, `frontend/`, `SETUP.md`, `BLUEEAGLE_GUIDE.md`, `docs/`, `jobs/`, `sample_portfolio.csv`, `render.yaml`, `.env.example`) have been removed from tracking on `rebuild`, leaving only `README.md`, `REBUILD.md`, and `.gitignore`.
-- When the rebuild is ready to replace the old app: merge `rebuild` into `main` from the reference worktree (where `main` is checked out), push, then remove the reference worktree. Render/Cloudflare Pages should stay pointed at `main` throughout — don't repoint deploy hooks at `rebuild` mid-build.
+- When the rebuild is ready to replace the old app: merge `rebuild` into `main` and push. Render/Cloudflare Pages should stay pointed at `main` throughout — don't repoint deploy hooks at `rebuild` mid-build.
+- **Only Gunnar commits and pushes.** No agent session does, ever. Enforced in five layers — see `agent_prompts/README.md` § "The commit guarantee". Agents that think a commit is warranted print the command and stop.
+- Three agent sessions (Opus planner, Sonnet implementer, Haiku executor) coordinate through contract and report files under `contracts/`. See `agent_prompts/README.md`.
