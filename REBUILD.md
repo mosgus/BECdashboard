@@ -12,7 +12,7 @@ Limited hands-on development history with the existing app, so the goal is to re
 - Prophet's cmdstanpy/Stan toolchain was the one dependency without a clear 3.13 compatibility story — resolved by dropping Prophet (see below), not by staying on an older Python.
 - scipy 1.16.1 already requires Python ≥3.12 and dropped older versions — staying on 3.11 (the old app's version) would have capped future dependency upgrades from day one.
 - 3.14 was available but skipped: no feature benefit for this app, less ecosystem mileage than 3.13.
-- Conda env `blue-eagle` (confirmed Python 3.13.15) is the active rebuild env; `blue-eagle-old` exists separately.
+- Env: a dedicated conda env named `blue-eagle` on 3.13. An earlier version of this file claimed one already existed — it did not (`conda info --envs` shows only `base` and `Coding25`). Create it with `conda create -n blue-eagle python=3.13 -y`. Deliberately not reusing the general-purpose `Coding25` env: `requirements.txt` has to match what Render installs into a clean environment, and a shared env accumulates unrelated packages, so a missing dependency wouldn't surface locally.
 
 **Drop Prophet as a forecast method.**
 - Was one of four methods (`ewma`/`arima`/`prophet`/`ensemble`) in the old `backend/core/forecast.py`, using only generic yearly-seasonality-on-log-price — nothing Prophet-specific (no holidays, custom regressors, changepoint tuning).
