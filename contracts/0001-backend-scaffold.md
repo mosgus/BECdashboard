@@ -23,19 +23,47 @@ module rather than a rewrite. Get the boundary right even though the implementat
 
 ## Environment
 
-Assume conda env `blue-eagle` on Python 3.13 exists and is active. Verify first:
+A virtualenv at `backend/.venv` on Python 3.13.15 already exists — Gunnar created it. Do not
+create, modify, or delete virtualenvs, and do not `brew install` anything.
+
+**How to invoke it.** Prepend the venv's `bin` to `PATH` inside each command and call `python` by
+name. From the repo root:
 
 ```bash
-python --version        # must report 3.13.x
+PATH="$PWD/backend/.venv/bin:$PATH" python --version      # must report 3.13.x
 ```
 
-If it does not report 3.13.x, stop and report `BLOCKED`. Do not create, modify, or switch conda
-environments — that is Gunnar's to do.
+From inside `backend/`:
+
+```bash
+PATH="$PWD/.venv/bin:$PATH" python -m pytest -q
+```
+
+If the first command does not report 3.13.x, stop and report `BLOCKED`.
+
+Three ways of doing this are wrong, and each fails differently:
+
+- **`source .venv/bin/activate` in one command, then `pytest` in the next.** Shell state does not
+  persist between your tool calls. The second command silently runs against the system Python.
+- **Bare `python` or `python3`.** `python` does not exist on `PATH`; `python3` is the macOS system
+  3.9.6. Neither has this project's dependencies.
+- **`backend/.venv/bin/python` as an explicit path.** Verified 2026-09-11: the tool sandbox
+  rejects any executable named by path — including relative paths inside the repo — with "Access
+  to a sensitive path is not allowed." Only `PATH`-resolved command names run. The `PATH=` prefix
+  form above is the one that works, and it works in an unsandboxed shell too.
+
+Setting `PATH` inline on each command is deliberate: it makes every command self-contained, so it
+cannot be broken by the non-persistence above.
+
+There is no conda in this project. An earlier draft of this contract specified a conda env; that
+was reversed — see `REBUILD.md`, "Environment: a `venv` at `backend/.venv`, not conda."
 
 ## Files
 
 Create:
-- `backend/requirements.txt` — pinned top-level deps only
+- `backend/requirements.txt` — pinned runtime deps only, the file Render installs
+- `backend/requirements-dev.txt` — pinned test-only deps, never installed in production
+- `backend/.python-version` — a single line, `3.13`
 - `backend/app/__init__.py` — empty
 - `backend/app/main.py` — FastAPI app, CORS, `/health`
 - `backend/app/config.py` — settings read from environment
@@ -95,22 +123,41 @@ def health() -> dict:
     """Returns {"status": "ok", "python": "<major.minor.patch>"}"""
 ```
 
-### `requirements.txt`
+### `requirements.txt` and `requirements-dev.txt`
 
-Top-level only, pinned with `==`. Exactly these, nothing more:
+Two files. Top-level only, every line pinned with `==`.
+
+`requirements.txt` — what Render installs. Exactly these, nothing more:
 
 ```
 fastapi
 uvicorn[standard]
 pandas
 cachetools
+```
+
+`requirements-dev.txt` — local and CI only. First line is `-r requirements.txt`, then:
+
+```
 pytest
 httpx
 ```
 
-`httpx` is for FastAPI's `TestClient`. Resolve each to the current version that supports Python
-3.13 and pin it. Do not add `yfinance`, `scipy`, `statsmodels`, or `numpy` — they arrive when a
-contract actually needs them.
+`httpx` is for FastAPI's `TestClient`, which is why it is a dev dep and not a runtime one. Resolve
+each package to the current version that supports Python 3.13 and pin it — do not invent version
+numbers; install and read back what pip actually resolved. Do not add `yfinance`, `scipy`,
+`statsmodels`, or `numpy` — they arrive when a contract actually needs them.
+
+### `.python-version`
+
+One line, no trailing content:
+
+```
+3.13
+```
+
+Render's native Python runtime reads this to select the interpreter. Without it, Render picks its
+own default and the deployed Python silently differs from local.
 
 ## Out of scope
 
@@ -124,30 +171,45 @@ contract actually needs them.
 
 ## Acceptance criteria
 
-1. `python --version` reports 3.13.x.
-2. `pip install -r backend/requirements.txt` completes without error.
-3. `pytest -q` from `backend/` passes, with at least these cases in `test_cache.py`:
+1. `PATH="$PWD/backend/.venv/bin:$PATH" python --version` reports 3.13.x.
+2. `PATH="$PWD/backend/.venv/bin:$PATH" python -m pip install -r backend/requirements-dev.txt`
+   completes without error. (That file pulls in `requirements.txt`, so this covers both.)
+3. `requirements.txt` contains no test-only package. `pytest` and `httpx` appear in
+   `requirements-dev.txt` and nowhere else.
+4. `PATH="$PWD/.venv/bin:$PATH" python -m pytest -q` from `backend/` passes, with at least these
+   cases in `test_cache.py`:
    - `get_cached` returns `None` for a ticker never stored
    - `store` then `get_cached` round-trips a DataFrame intact (compare with
      `pandas.testing.assert_frame_equal`)
    - lookup is case-insensitive: `store("aapl", df)` then `get_cached("AAPL")` returns `df`
    - `clear()` empties the cache
-4. `uvicorn app.main:app --port 8000` from `backend/` starts without error.
-5. `curl -s localhost:8000/health` returns JSON with `"status": "ok"` and a `"python"` field
+5. `PATH="$PWD/.venv/bin:$PATH" python -m uvicorn app.main:app --port 8000` from `backend/` starts
+   without error.
+6. `curl -s localhost:8000/health` returns JSON with `"status": "ok"` and a `"python"` field
    beginning `3.13`.
-6. A browser request from `http://localhost:5173` is not CORS-blocked — verify with the
+7. A browser request from `http://localhost:5173` is not CORS-blocked — verify with the
    `Origin` header below and check for `access-control-allow-origin` in the response.
+8. `backend/.python-version` contains exactly `3.13`.
 
 ## Verification to run and paste
 
-Run each and paste the **complete, verbatim** output, including any failures.
+Run each and paste the **complete, verbatim** output, including any failures. Run from the repo
+root unless a command says otherwise. Copy the `PATH=` prefixes exactly — do not substitute bare
+`python`/`pip`/`pytest`/`uvicorn`, and do not rewrite them as `backend/.venv/bin/...`.
 
 ```bash
-python --version
-pip install -r backend/requirements.txt
-cd backend && pytest -q
-cd backend && (uvicorn app.main:app --port 8000 & sleep 3; curl -s localhost:8000/health; echo; curl -s -D- -o /dev/null -H "Origin: http://localhost:5173" localhost:8000/health | grep -i access-control; kill %1)
+PATH="$PWD/backend/.venv/bin:$PATH" python --version
+PATH="$PWD/backend/.venv/bin:$PATH" python -m pip install -r backend/requirements-dev.txt
+PATH="$PWD/backend/.venv/bin:$PATH" python -c "import sys; print(sys.prefix)"
+cat backend/requirements.txt backend/requirements-dev.txt backend/.python-version
+grep -nE '^(pytest|httpx)' backend/requirements.txt ; echo "exit=$? (1 means clean)"
+cd backend && PATH="$PWD/.venv/bin:$PATH" python -m pytest -q
+cd backend && (PATH="$PWD/.venv/bin:$PATH" python -m uvicorn app.main:app --port 8000 & sleep 3; curl -s localhost:8000/health; echo; curl -s -D- -o /dev/null -H "Origin: http://localhost:5173" localhost:8000/health | grep -i access-control; kill %1)
 ```
+
+The third command must print a path ending in `backend/.venv`. If it prints anything else, the
+`PATH` prefix did not take effect and every result after it is against the wrong interpreter —
+stop and report `BLOCKED` rather than continuing.
 
 ## Open questions — do NOT resolve these yourself
 

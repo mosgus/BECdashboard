@@ -68,6 +68,17 @@ block) and needs **no changes** to its contents. Two things around it do change:
    `Outfit` and `DM Sans`, matching the weights the CSS expects.
 2. Import it from `src/main.tsx`.
 
+The file's header comment says the fonts are "loaded via next/font/google in layout.tsx." That
+becomes untrue the moment it lands here. **Leave it.** Criterion 4 is byte-identical, and an
+accurate-but-modified copy fails the check that proves the port was faithful. A later contract
+corrects the comment.
+
+Note for when you write `App.tsx`: the `@theme inline` block exposes the color tokens
+(`brand-primary`, `brand-accent`, `brand-surface`, `brand-border`, `brand-positive`,
+`brand-negative`, `background`, `foreground`) but **not** the fonts — `--font-heading` and
+`--font-body` live only in `:root`, so there is no `font-heading` utility class. Typography comes
+from the `body` and `h1..h6` rules already in the file. Do not add font tokens to fix this.
+
 ## Interface
 
 ### `src/api/client.ts`
@@ -127,7 +138,10 @@ Manage state with `useState` + `useEffect`. No state library.
 5. With the 0001 backend running on port 8000, `npm run dev` serves a page that displays
    `status: ok` and a Python version beginning `3.13`, with no console errors and no CORS error.
 6. No `tailwind.config.js` and no `postcss.config.js` exist in `frontend/`.
-7. `grep -rn "any" frontend/src/api/client.ts` returns no type annotations using `any`.
+7. No `any` type and no non-null assertion in `frontend/src/api/client.ts`:
+   `grep -nE ':\s*any\b|<any>|\bas any\b|\)!|\w!\.' frontend/src/api/client.ts` matches nothing
+   (exit code 1). A bare `grep "any"` is not an acceptable substitute — it matches `company`,
+   `many`, and `anything`, so it cannot distinguish pass from fail.
 
 ## Verification to run and paste
 
@@ -139,6 +153,13 @@ cd frontend && npx tsc --noEmit && echo "typecheck clean"
 cd frontend && npm run build
 diff <(git show main:frontend/app/globals.css) frontend/src/styles/globals.css && echo "globals.css identical"
 ls frontend/tailwind.config.js frontend/postcss.config.js 2>&1
+grep -nE ':\s*any\b|<any>|\bas any\b|\)!|\w!\.' frontend/src/api/client.ts ; echo "exit=$? (1 means clean)"
+```
+
+Backend for criterion 5 is started with the 0001 venv, not a bare `uvicorn`:
+
+```bash
+cd backend && .venv/bin/python -m uvicorn app.main:app --port 8000
 ```
 
 For criterion 5, start the backend and the dev server, load the page, and paste what it renders

@@ -20,4 +20,4 @@ Everything else — page layout, which old-app features carry over as-is vs. get
 
 ## Reference
 
-The pre-rebuild implementation lives on `main` — check it out there (or in a separate worktree, if you have one set up locally) for how the old app worked. It won't be kept in sync with this branch.
+The pre-rebuild implementation lives on `main` and won't be kept in sync with this branch. Read it in place with `git show main:path/to/file.py` — `main` is never checked out from this working tree. A detached worktree at `~/WebstormProjects/blue-eagle-reference` holds it on disk for side-by-side browsing; see the Dev workflow section of `REBUILD.md` for how it was created and why.
