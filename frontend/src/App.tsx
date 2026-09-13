@@ -24,12 +24,12 @@ export default function App() {
   return (
     <div className="min-h-screen bg-background text-foreground">
       <Header />
-      <main className="max-w-screen-xl mx-auto px-4 sm:px-6 pt-16 pb-20">
+      <main className="max-w-screen-2xl mx-auto px-4 sm:px-6 pt-16 pb-20">
         <section>
           <h1 className="text-[2.5rem] font-bold tracking-tight text-brand-primary leading-[1.1]">
             Blue Eagle Capital
           </h1>
-          <p className="text-lg font-light text-[var(--color-muted)] max-w-xl mt-3.5">
+          <p className="text-lg font-light text-(--color-muted) max-w-xl mt-3.5">
             Portfolio construction, optimization, and risk analytics.
           </p>
         </section>
