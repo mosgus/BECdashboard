@@ -2,5 +2,7 @@ fastapi==0.141.1
 uvicorn[standard]==0.52.4
 pandas==3.0.5
 cachetools==7.1.8
+python-dotenv==1.2.3
 sqlalchemy==2.0.52
 psycopg[binary]==3.3.5
+yfinance==1.7.0

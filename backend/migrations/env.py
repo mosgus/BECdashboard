@@ -22,8 +22,9 @@ if config.config_file_name is not None:
 # alembic.ini. Render supplies the short "postgres://" form; normalize it the same
 # way app/db.py does, so migrations and the app agree on the driver.
 database_url = os.environ.get("DATABASE_URL")
-if database_url:
-    config.set_main_option("sqlalchemy.url", normalize_database_url(database_url))
+if not database_url:
+    raise RuntimeError("DATABASE_URL is not set. Migrations require a database connection.")
+config.set_main_option("sqlalchemy.url", normalize_database_url(database_url))
 
 target_metadata = Base.metadata
 

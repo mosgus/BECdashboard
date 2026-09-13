@@ -5,7 +5,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from app.db import is_enabled, session
-from app.models import PriceBar
+from app.models import PriceBar, TickerFundamentals
 
 _cache = TTLCache(maxsize=512, ttl=86400)
 
@@ -53,8 +53,43 @@ def store(ticker: str, df: pd.DataFrame) -> None:
 
 def clear() -> None:
     """Drop all cached entries. Exists for tests; do not call from app code.
-    Clears only the in-process cache — never touches the database."""
+    Clears only the in-process cache — never touches the database or fundamentals."""
     _cache.clear()
+
+
+def store_fundamentals(ticker: str, data: dict) -> None:
+    """Upsert one row into ticker_fundamentals. No-op when no database is configured —
+    fundamentals have no TTL-cache tier, so with no database there is nowhere to put them."""
+    if not is_enabled():
+        return
+
+    key = ticker.upper()
+    record = {**data, "ticker": key}
+
+    with session() as db:
+        dialect = db.get_bind().dialect.name
+        insert_fn = pg_insert if dialect == "postgresql" else sqlite_insert
+        stmt = insert_fn(TickerFundamentals).values(record)
+        set_ = {
+            col.name: getattr(stmt.excluded, col.name)
+            for col in TickerFundamentals.__table__.columns
+            if col.name != "ticker"
+        }
+        stmt = stmt.on_conflict_do_update(index_elements=["ticker"], set_=set_)
+        db.execute(stmt)
+
+
+def get_fundamentals(ticker: str) -> dict | None:
+    """Read one row back, or None. Case-insensitive on ticker."""
+    if not is_enabled():
+        return None
+
+    key = ticker.upper()
+    with session() as db:
+        row = db.get(TickerFundamentals, key)
+        if row is None:
+            return None
+        return {col.name: getattr(row, col.name) for col in TickerFundamentals.__table__.columns}
 
 
 def _looks_like_ohlcv(df: pd.DataFrame) -> bool:

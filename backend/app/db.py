@@ -12,10 +12,14 @@ _engine_url_key: object = object()
 
 
 def normalize_database_url(url: str) -> str:
-    """Rewrite Render's short 'postgres://' scheme to the psycopg v3 driver URL SQLAlchemy needs."""
-    prefix = "postgres://"
-    if url.startswith(prefix):
-        return "postgresql+psycopg://" + url[len(prefix) :]
+    """Rewrite Render's short 'postgres://' and 'postgresql://' schemes to the psycopg v3 driver URL SQLAlchemy needs.
+    Leave URLs that already name a driver (postgresql+psycopg://, postgresql+psycopg2://) alone."""
+    if url.startswith("postgresql+"):
+        return url
+    if url.startswith("postgres://"):
+        return "postgresql+psycopg://" + url[len("postgres://") :]
+    if url.startswith("postgresql://"):
+        return "postgresql+psycopg://" + url[len("postgresql://") :]
     return url
 
 

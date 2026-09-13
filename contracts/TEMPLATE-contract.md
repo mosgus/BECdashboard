@@ -61,7 +61,19 @@ failures. Do not summarize, do not trim, do not clean up.
 <command 2>
 ```
 
-## Open questions — do NOT resolve these yourself
+## Human verification — does Gunnar need to run anything?
+
+<Required section. One of:>
+
+- **Nothing to run.** This contract has no visible surface; the tests and the audit are the whole
+  verification. (Typical of backend-internal work — persistence, schema, refactors.)
+- **Run the frontend and look at it.** Say exactly what to look at and at what widths. The planner
+  cannot judge whether a page looks right.
+- **Run it against the real service.** Say which — real network, real Postgres — and what would
+  prove it works. Use this whenever tests cover a path with a mock, SQLite, or a fixture that
+  production replaces with something else.
+
+Be specific. "Check it works" is not an instruction. Include the commands and the ports.
 
 <Anything genuinely undecided. If the coder hits one, it reports BLOCKED and stops. Guessing here
 is worse than stopping, because a plausible guess gets silently accepted.>

@@ -84,6 +84,20 @@ Limited hands-on development history with the existing app, so the goal is to re
 **Verification standard: pytest on the backend, typecheck + build on the frontend.**
 - Any backend module doing math or data transformation ships with pytest tests. That's where silent wrongness lives — a wrong Sharpe ratio looks entirely plausible, which is exactly what an audit can't catch by reading.
 - Frontend contracts are verified by `npx tsc -p tsconfig.app.json --noEmit` and a clean `npm run build`, plus a human look at the running page. UI unit tests are skipped deliberately: high effort, low value while the layout is still moving.
+- **Scope grep-based acceptance criteria to files the contract owns, and to code rather than
+  comments.** Three contracts in a row (0003, 0005, 0006) produced grep criteria that failed on
+  things that were not violations: `globals.css`'s hex tokens, which the same contract forbade
+  touching; a docstring explaining why `currentPrice` is *not* used; fixture comments documenting
+  provenance the contract itself had demanded. A crude `grep -rn "currentPrice"` cannot tell a use
+  from an explanation. Match the actual construct — `grep -rnE '"currentPrice"'` for a dict key,
+  `':\s*any\b'` for a type annotation — and name the exact paths the contract created rather than a
+  whole directory. A criterion that fails on correct work trains coders to argue with criteria,
+  which is worse than having none.
+- **SQLite drops `tzinfo` on a `DateTime(timezone=True)` round trip; Postgres does not.** Found in
+  the 0006 tests, where `fetched_at` comes back naive. A test-harness artifact, not a bug — but it
+  means any test asserting on a stored timestamp must compare with `tzinfo` stripped, and that the
+  behaviour differs between the test backend and production. Worth re-checking during the Postgres
+  smoke test rather than assuming the SQLite result generalizes.
 - **`npx tsc --noEmit` is not a valid check in this project and must never be used as one.** Discovered 2026-09-13 during contract 0003. Vite's react-ts template makes the root `tsconfig.json` `{"files": [], "references": [...]}`, so plain `--noEmit` type-checks **zero** files and exits 0 unconditionally. It was an acceptance criterion in contracts 0002 and 0003 and passed vacuously; 0002 was audited and accepted partly on it. `tsc -b` is also unsuitable — it is incremental and no-ops when `.tsbuildinfo` is current. Use `-p tsconfig.app.json --noEmit`, which is neither vacuous nor skippable. A criterion that cannot fail is worse than no criterion, because it reads as coverage.
 - **Delete Vite's template leftovers at scaffold time.** `npm create vite` leaves files no contract ever names: `src/index.css`, `src/App.css`, `src/assets/{hero.png,react.svg,vite.svg}`, `public/icons.svg`, and `public/favicon.svg` — the last being Vite's purple lightning bolt, which ships as the tab icon until replaced. All were unreferenced dead weight (removed 2026-09-13, CSS bundle 13.33 → 11.65 kB). They are not merely untidy: `globals.css` and `main.tsx` leftovers made two of contract 0003's acceptance criteria **unsatisfiable**, because the greps were scoped to all of `frontend/src/` while the same contract forbade touching the files that matched. Any future scaffold contract must list the deletions explicitly.
 - **Page container is `max-w-screen-2xl` (1536px), matching the old app.** Corrected 2026-09-13. Contract 0003 and the mockup both specified `max-w-screen-xl` (1280px), which reads as visibly inset on a wide display next to `main`'s layout. Horizontal padding (`px-4 sm:px-6`) was already identical, so width was the entire difference. Applies to both the header inner container and `<main>`. The hero paragraph keeps its own `max-w-xl` — line measure should not track page width.
@@ -197,10 +211,13 @@ Checked before designing the Universe layout, because a layout is a claim about 
 - **Use `regularMarketPrice`, not `currentPrice`.** `currentPrice` is `MISSING` for ETFs (SPY) and
   present for equities; `regularMarketPrice` is present for both. Getting this wrong means every
   ETF shows a blank price.
-- **ETFs are missing five of the equity fields**: `sector`, `industry`, `currentPrice`,
-  `marketCap`, `beta`. SPY returns 103 keys vs ~180 for an equity. It has `totalAssets` and
+- **ETFs are missing six of the equity fields**: `sector`, `industry`, `currentPrice`, `marketCap`,
+  `beta`, **`forwardPE`**. SPY returns 103 keys vs ~180 for an equity. It has `totalAssets` and
   `navPrice` instead. Any fundamentals layout needs an explicit ETF variant or graceful holes —
   not `undefined` rendered into the page.
+  *(An earlier version of this entry said five, omitting `forwardPE`. The original probe checked
+  `forwardPE` only against equities. Corrected 2026-09-13 after the 0006 coder hit it live;
+  re-verified across SPY, QQQ and VTI — all three lack exactly these six.)*
 - **`dividendYield` is in percent units, not a fraction.** AAPL returns `0.33` meaning 0.33%. Do
   not multiply by 100. (Older yfinance returned a fraction; this changed.) Non-payers — TSLA,
   BRK-B — omit the key entirely rather than returning `0`, so render `—`, not `0.00%`.
@@ -262,7 +279,12 @@ not account for it.
   stored `adj_close` against fresh with a tight tolerance (`np.isclose(atol=1e-6, rtol=0)`). On
   mismatch the series has been restated — discard and refetch the full history rather than
   appending. One extra request finds a condition no forward-looking logic can.
-- Belongs to contract 0006, the fetch layer. It is why 0005 must add the column first.
+- Belongs to contract **0007**, not 0006. The fetch layer was split in two on 2026-09-13: 0006 gets
+  data in correctly *once*; 0007 keeps it correct *over time* (freshness rule, partial-bar guards,
+  drift detection). Split because drift detection is the piece where a wrong answer is invisible —
+  it earns its own audit rather than being the sixth thing checked in a large diff, per
+  `agent_prompts/planner-opus.md`'s "size contracts to the audit."
+- Remaining sequence: 0008 universe table + API, 0009 the `/universe` page.
 
 **Also worth carrying from `YF.py`, not yet scoped:**
 - **`get_effective_end_date()` (`YF.py:203-208`)** — a six-line `zoneinfo` check for whether it is
@@ -278,11 +300,42 @@ not account for it.
   stdout and string-matches `"PricesMissingError"` — an invalid symbol is better detected by the
   measured `{'trailingPegRatio': None}` shape.
 
-**The Postgres code path is untested against Postgres.** Contract 0004's upsert selects
-`postgresql.insert` or `sqlite.insert` by dialect at runtime, and only the SQLite branch has ever
-executed. `pg_insert`, `pool_pre_ping`, and the `postgres://` → `postgresql+psycopg://` rewrite are
-all unexercised against a real server. **Smoke-test them the day the Render instance exists**, before
-0005 depends on them; otherwise their first real run is in production.
+**Postgres smoke test: passed 2026-09-13 against a real Render instance.** Every path that had only
+ever run as its SQLite twin is now confirmed: Alembic `0001`→`0002` applied, `pg_insert` upsert
+written and read back, `pool_pre_ping` held, the scheme rewrite resolved the engine to
+`postgresql`/`psycopg`, and data survived across separate processes. `auto_adjust=False` verified
+decisively over a dividend-spanning window — 105/105 rows with `close != adj_close`.
+- **`fetched_at` keeps its timezone on Postgres (UTC), unlike SQLite.** The `tzinfo` drop noted
+  during 0006 is a SQLite test-harness artifact only and does not generalize. Do not write
+  production logic around it.
+- Two bugs this test caught that no unit test could have, both now fixed: `normalize_database_url`
+  handled only `postgres://` while Render actually issues `postgresql://` (which SQLAlchemy resolves
+  to psycopg**2**, not installed), and nothing loaded `backend/.env` at all, so `DATABASE_URL` had to
+  be exported per-terminal. This is the case for keeping a mandatory "Human verification" section on
+  any contract whose tests mock the thing that matters.
+- **Render gives two connection strings.** The **External** URL (`dpg-...-a.<region>-postgres.render.com`)
+  is for local development; the **Internal** one (bare `dpg-...-a`, no domain) resolves only inside
+  Render's network and is what the deployed backend should use. Using the internal URL locally fails
+  with a DNS error.
+
+**Tests must never inherit an ambient `DATABASE_URL`.** `backend/tests/conftest.py` strips it via an
+autouse fixture; opt-in fixtures re-set it to a `tmp_path` SQLite file.
+- Why, concretely: on 2026-09-13, minutes after `backend/.env` was created with a live Render URL,
+  `pytest` began issuing real `INSERT INTO price_bars` against production. `tests/test_cache.py`
+  calls `store()` and pins no URL of its own.
+- It surfaced only by luck. Contract 0001's fixtures are non-OHLCV frames with an integer index, so
+  Postgres rejected them (`cannot cast type smallint to date`). OHLCV-shaped fixtures would have
+  **succeeded**, silently seeding the live table.
+- Every prior test run passed because no `DATABASE_URL` existed anywhere in the project. The bug was
+  present from contract 0004 onward and invisible until configuration changed — a reminder that
+  "tests pass" means "tests pass in the environment they were run in."
+- Do not weaken this to skipping only production-looking URLs. The failure mode is a test writing to
+  whatever database the developer has configured, which is precisely when it looks legitimate.
+
+**`yf.download` with no `start`/`end` returns roughly one month (~22 bars), not full history.**
+Measured 2026-09-13. Relevant to the open question of how much history to fetch when a ticker is
+first added — the default is far too short for any of the analytics this app exists to do, so the
+caller must pass an explicit `start`.
 
 **If curation is added later, it goes in Postgres — not `localStorage`.** Direction, not a
 decision; nothing depends on it yet.
