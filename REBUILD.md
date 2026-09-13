@@ -174,7 +174,21 @@ shared header) was raised explicitly and declined.
   before committing** — expiry policy is the entire basis for the preference and it changes.
 - Rejected: SQLite (Render's filesystem is ephemeral; the file vanishes on deploy), Mongo (already
   rejected, and this workload is more relational now, not less).
-- **Two tables, nothing else, ever, without a decision:** price bars and ticker fundamentals.
+- **Three tables, nothing else, without a decision:** price bars, ticker fundamentals, and
+  membership. The third was added deliberately 2026-09-13 — see below.
+
+**Universe membership is its own table, not implied by presence in `ticker_fundamentals`.**
+Decided 2026-09-13, resolving contract 0004's open question.
+- `universe_tickers(ticker PK, added_at, active)`. Membership is an explicit fact, not a side effect
+  of having once cached some data.
+- The alternative — "in the universe" means "has a fundamentals row" — is simpler but conflates two
+  different things: *what we have data for* and *what the operator chose to track*. It also makes
+  de-listing impossible without deleting data.
+- With an `active` flag, removing a ticker is a flag flip that keeps its price history intact. That
+  is exactly what the no-foreign-key rule on `price_bars` was built to allow: cached market data
+  must not depend on a curated list, in either direction.
+- `added_at` exists because "when did this enter the universe" is a question that cannot be
+  reconstructed later from anything else.
 
 **Adding a ticker stores fundamentals *and* full daily price history.** Decided 2026-09-13.
 Fundamentals alone would leave the expensive data — thousands of OHLCV rows per ticker — back in
@@ -341,6 +355,14 @@ autouse fixture; opt-in fixtures re-set it to a `tmp_path` SQLite file.
   "tests pass" means "tests pass in the environment they were run in."
 - Do not weaken this to skipping only production-looking URLs. The failure mode is a test writing to
   whatever database the developer has configured, which is precisely when it looks legitimate.
+- **`conftest.py` protects `pytest` only — ad-hoc scripts are still exposed.** Because
+  `app/config.py` calls `load_dotenv()` at import, any `python -c` connects to the live database.
+  Found 2026-09-13 during contract 0008, when a routine sanity check issued a real query against
+  Render. It failed harmlessly, but the contracts' own verification blocks had the same shape —
+  0008's final command claimed to exercise degraded mode and would instead have hit production,
+  reporting the opposite of what it asserted. **Every ad-hoc `python -c` must be prefixed
+  `DATABASE_URL=""`**, now required by `contracts/TEMPLATE-contract.md`. Verified that the prefix
+  blocks `load_dotenv` from refilling the value.
 
 **`yf.download` with no `start`/`end` returns roughly one month (~22 bars), not full history.**
 Measured 2026-09-13. Relevant to the open question of how much history to fetch when a ticker is
@@ -368,7 +390,7 @@ decision; nothing depends on it yet.
 - ~~**Ticker validation source.**~~ **Resolved 2026-09-13 by the curated universe.** Two separate checks now exist and neither needs an SEC symbol file. (1) Adding to the universe: yfinance is the authority — a bad symbol returns `{'trailingPegRatio': None}` without raising, so validity is "does `.info` contain a required key." (2) Portfolio entry, later: validate against **the universe itself**, which is a served list the app already owns. This is strictly simpler than the served-symbol-list plan recorded under "Ticker validation" in Decided, which that entry should be read as superseded by.
 - ~~**Persistent price-cache table.**~~ **Resolved 2026-09-13 — it is being built.** See "First feature: a curated, shared, server-persisted Universe" in Decided. The deferral reasoning ("not before an initial deployment exists") was overtaken by the decision to share a universe across users, which requires persistence by definition.
 - **Whether `Research` and `/ops` survive as real features.** Two of the launch page's four nav destinations still contradict "Explicitly cut from the old app" below: `/research/*` includes decision memos and stress pages; `/ops` was backed by `job_runs`, `audit_log` and `email_config`, and `core/ops/data_status.py` reports on a database this rebuild does not have. The nav labels are settled; **what they eventually point to is not.** Either the cut list gets revised or the labels do. Do not resolve this by building either page. (`Universe` is resolved — see "First feature" above. `Portfolios` was never in doubt.)
-- **Routing.** The nav items imply real URLs, but no router exists and none is authorized. Whether the app gets `react-router-dom` with real routes, or stays a single page with inert nav, is undecided. Nav stays inert until this is settled.
+- ~~**Routing.**~~ **Decided 2026-09-13: real URLs via `react-router-dom`.** Reverses contract 0002's "no router — there is one page," deliberately rather than by drift. `/universe` is a real address that can be linked, bookmarked, and reloaded; the alternative — the header nav swapping views inside one page with the URL never changing — breaks the browser back button and makes every future page a special case. The cost is one dependency and a route tree, both of which `REBUILD.md` had deferred precisely until a second page existed. It now does. The header nav items stop being inert `<span>`s and become real links when the frontend contract lands; until then they stay as built.
 
 ## Explicitly cut from the old app
 

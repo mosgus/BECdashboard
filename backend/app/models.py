@@ -1,6 +1,6 @@
 from datetime import date as date_, datetime
 
-from sqlalchemy import BigInteger, Date, DateTime, Float, Index, String, func
+from sqlalchemy import BigInteger, Boolean, Date, DateTime, Float, Index, String, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -52,3 +52,15 @@ class TickerFundamentals(Base):
     beta: Mapped[float | None] = mapped_column(Float)
     average_volume: Mapped[int | None] = mapped_column(BigInteger)
     fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class UniverseTicker(Base):
+    """Curated universe membership — a flag, not a cascade. Neither price_bars nor
+    ticker_fundamentals reference this table in either direction: the old app's cascade
+    meant de-listing a ticker silently destroyed its price history (REBUILD.md)."""
+
+    __tablename__ = "universe_tickers"
+
+    ticker: Mapped[str] = mapped_column(String, primary_key=True)
+    added_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)

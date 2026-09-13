@@ -53,6 +53,13 @@ tempting work that is NOT part of this contract.>
 
 ## Verification to run and paste
 
+> **Every ad-hoc `python -c` in this section must be prefixed `DATABASE_URL=""`.**
+> `app/config.py` calls `load_dotenv()` at import, and `backend/.env` holds a live Render
+> connection string — so any script run without that prefix talks to the **production database**.
+> `tests/conftest.py` strips the variable for `pytest` only; it does not cover scripts.
+> A command intended to exercise degraded mode will otherwise silently exercise production and
+> report the opposite of what it claims. Found 2026-09-13, during contract 0008.
+
 Run each of these and paste the **complete, verbatim** output into the report — including
 failures. Do not summarize, do not trim, do not clean up.
 

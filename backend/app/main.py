@@ -2,6 +2,7 @@ import sys
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.config import Settings
+from app.routers import universe
 
 app = FastAPI(title="Blue Eagle API")
 settings = Settings()
@@ -13,6 +14,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(universe.router)
 
 
 @app.get("/health")
