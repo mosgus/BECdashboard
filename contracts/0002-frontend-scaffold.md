@@ -131,8 +131,12 @@ Manage state with `useState` + `useEffect`. No state library.
 
 ## Acceptance criteria
 
+0. **Every file in the Files list above exists.** Check with the `ls` command in the verification
+   block — it must list all of them and report no "No such file" errors. This criterion exists
+   because contract 0001 shipped with a required file silently missing: it was named under Files
+   but no criterion checked it, and a file nothing checks is optional in practice.
 1. `npm install` in `frontend/` completes without error.
-2. `npx tsc --noEmit` produces no output and exits 0.
+2. `npx tsc -p tsconfig.app.json --noEmit` produces no output and exits 0.
 3. `npm run build` succeeds and writes to `frontend/dist/`.
 4. `frontend/src/styles/globals.css` is byte-identical to `git show main:frontend/app/globals.css`.
 5. With the 0001 backend running on port 8000, `npm run dev` serves a page that displays
@@ -148,8 +152,9 @@ Manage state with `useState` + `useEffect`. No state library.
 Run each and paste the **complete, verbatim** output, including failures.
 
 ```bash
+ls -1 frontend/package.json frontend/vite.config.ts frontend/tsconfig.json frontend/index.html frontend/src/main.tsx frontend/src/App.tsx frontend/src/styles/globals.css frontend/src/api/client.ts frontend/src/vite-env.d.ts frontend/.env.example frontend/.env.local
 cd frontend && npm install
-cd frontend && npx tsc --noEmit && echo "typecheck clean"
+cd frontend && npx tsc -p tsconfig.app.json --noEmit && echo "typecheck clean"
 cd frontend && npm run build
 diff <(git show main:frontend/app/globals.css) frontend/src/styles/globals.css && echo "globals.css identical"
 ls frontend/tailwind.config.js frontend/postcss.config.js 2>&1

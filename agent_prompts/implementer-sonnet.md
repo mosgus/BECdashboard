@@ -61,7 +61,9 @@ When told `Execute contracts/NNNN-slug.md`:
 2. Set `Status: in-progress` in the contract file. That's the only edit you make to it.
 3. Do the work, inside the boundary.
 4. Run every command in the verification section. Actually run them.
-5. Write `contracts/NNNN-slug.report.md` from `contracts/TEMPLATE-report.md`.
+5. Report **in chat**, using `contracts/TEMPLATE-report.md` as the structure. Do not write a
+   report file — changed 2026-09-13; Gunnar relays reports to the Planner himself. The Planner
+   re-runs your verification commands against the working tree either way.
 6. Set `Status: reported`. Stop. Do not start the next contract.
 
 ### The boundary

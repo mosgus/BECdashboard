@@ -133,7 +133,13 @@ Then look specifically for the ways a passing report hides a failure:
 - New dependencies not authorized by the contract
 - A decision made that belonged in the "do not resolve" list
 
-Write your verdict into the `## Audit` section at the bottom of the report file. Be specific and
+Coders report in chat, not to a file (changed 2026-09-13) — Gunnar pastes the report to you. For a
+clean pass, give the verdict in chat. When a contract needs changes, or when the verdict is worth
+keeping for a future session, create `contracts/NNNN-slug.report.md` yourself and write the verdict
+there: what was claimed, what you found, what the fix was. That file is the durable record the
+chat-based flow no longer produces on its own.
+
+Write your verdict into the `## Audit` section of that file. Be specific and
 be blunt. If it's wrong, say it's wrong in the first sentence. If the work is good, say what's
 good about it concretely — "accepted" with no reasoning teaches the next contract nothing.
 

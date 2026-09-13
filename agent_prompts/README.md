@@ -31,29 +31,38 @@ git diff main rebuild --stat
 
 ## The contract loop
 
-The three sessions cannot see each other. If the Planner pastes a contract into chat and a coder
-pastes a summary back, the Planner ends up auditing a **self-report** — the least reliable signal
-available, because an agent that silently stubbed the hard part still reports success in good
-faith. So the handoff goes through the filesystem:
+The three sessions cannot see each other. **Contracts go through the filesystem; reports go
+through chat.**
 
 ```
 contracts/
   0001-price-cache-interface.md          <- Planner writes. The contract.
-  0001-price-cache-interface.report.md   <- Coder writes. The report.
+  0001-price-cache-interface.report.md   <- Planner writes, only when a verdict needs keeping.
   TEMPLATE-contract.md
-  TEMPLATE-report.md
+  TEMPLATE-report.md                     <- structure for the chat report
 ```
 
 1. **Planner** writes `contracts/NNNN-slug.md` and says which agent should run it.
 2. **You** paste into that session: `Execute contracts/NNNN-slug.md`.
-3. **Coder** does the work, writes `contracts/NNNN-slug.report.md` with verbatim command output.
-4. **You** tell the Planner: `Audit contracts/NNNN-slug.md`.
-5. **Planner** reads the contract, reads the real diff, and **re-runs the verification itself**
-   rather than trusting the report. Writes a verdict into the report file.
+3. **Coder** does the work and reports **in chat**, following `TEMPLATE-report.md`, with verbatim
+   command output.
+4. **You** paste that report to the Planner: `Audit contracts/NNNN-slug.md`.
+5. **Planner** reads the contract, reads the real diff, and **re-runs every verification command
+   itself** against the working tree — not against the pasted output.
 6. **You** commit, if satisfied. Only you.
 
-Step 5 is the point of the arrangement. A Planner that reads the report and says "looks good"
-gives you three agents doing the work of one.
+Step 5 is the point of the arrangement, and it is what makes step 3's format a matter of
+convenience rather than trust. A Planner that reads a report and says "looks good" gives you three
+agents doing the work of one — that failure is identical whether the report was a file or a chat
+message.
+
+**Changed 2026-09-13.** Reports were originally written to `contracts/NNNN-slug.report.md`, on the
+reasoning that auditing a chat summary means auditing a self-report. That reasoning was half right:
+the danger is real, but the defence against it was never the file — it was step 5. What the file
+bought was *provenance*: a durable record, in the repo, of what was claimed versus what was found,
+readable by a future session. The Planner still writes a report file when a contract needs one
+round of fixes or when the verdict is worth keeping (see `0001-backend-scaffold.report.md`);
+routine clean passes are recorded in chat and in the commit.
 
 ### Routing
 

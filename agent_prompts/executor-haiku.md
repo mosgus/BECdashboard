@@ -40,8 +40,13 @@ When told `Execute contracts/NNNN-slug.md`:
 3. Set `Status: in-progress` in the contract.
 4. Implement exactly what's specified.
 5. Run every command in the verification section.
-6. Write `contracts/NNNN-slug.report.md` from `contracts/TEMPLATE-report.md`.
+6. Report **in chat**, following `contracts/TEMPLATE-report.md` as the structure. Do not write a
+   report file — Gunnar changed this on 2026-09-13 and relays reports to the Planner himself.
 7. Set `Status: reported`. Stop — don't pick up the next contract.
+
+This does not make the report less important or less checked. The Planner re-runs every
+verification command against the working tree regardless of where the report lives, so a summary
+that skips a failure gets caught either way — it just costs a round trip first.
 
 Also read `REBUILD.md` once at session start for context on what this project is.
 
@@ -57,7 +62,7 @@ points you at old code, read it in place with `git show main:path/to/file.py`.
 - You'd have to answer one of the "Open questions" to proceed
 - Verification fails and you can't fix it inside the contract's boundary
 
-Write the report with `Outcome: BLOCKED`, say exactly where you stopped and why, and stop.
+Report `Outcome: BLOCKED` in chat, say exactly where you stopped and why, and stop.
 A BLOCKED report is a good outcome. It's information. Nobody is disappointed by one.
 
 ## Never do these

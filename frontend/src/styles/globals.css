@@ -1,0 +1,60 @@
+@import "tailwindcss";
+
+/*
+ * ── Blue Eagle Capital design tokens ─────────────────────────────────────────
+ * Brand colors from the Blue Eagle Capital / Emory Goizueta brand doc.
+ *   Primary navy  #012169  — Emory blue, buttons, links, active states
+ *   Gold          #F2A900  — Emory gold, accents, badges, highlights
+ *   Deep navy     #0C2340  — body text, headings
+ *
+ * Fonts: Outfit (headings, ~Area Normal Bold) · DM Sans (body, ~Avenir Light)
+ * Both loaded via next/font/google in layout.tsx.
+ */
+
+:root {
+  /* Brand palette */
+  --color-primary:  #012169;
+  --color-accent:   #F2A900;
+
+  /* Surface */
+  --color-bg:       #f4f6fb;
+  --color-surface:  #ffffff;
+  --color-border:   #dde3f0;
+
+  /* Text */
+  --color-text:     #0C2340;
+  --color-muted:    #4a5d7a;
+
+  /* Semantic */
+  --color-positive: #16a34a;
+  --color-negative: #dc2626;
+
+  /* Shape */
+  --radius-card: 0.75rem;
+  --radius-btn:  0.5rem;
+
+  /* Typography */
+  --font-heading: "Outfit", system-ui, sans-serif;
+  --font-body:    "DM Sans", system-ui, sans-serif;
+}
+
+@theme inline {
+  --color-background:     var(--color-bg);
+  --color-foreground:     var(--color-text);
+  --color-brand-primary:  var(--color-primary);
+  --color-brand-accent:   var(--color-accent);
+  --color-brand-surface:  var(--color-surface);
+  --color-brand-border:   var(--color-border);
+  --color-brand-positive: var(--color-positive);
+  --color-brand-negative: var(--color-negative);
+}
+
+body {
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-body);
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-heading);
+}

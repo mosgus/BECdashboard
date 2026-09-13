@@ -1,6 +1,6 @@
 # Contract 0003 — Launch page shell
 
-**Status:** open
+**Status:** reported
 **Assigned to:** sonnet
 **Author:** planner (opus)
 
@@ -232,7 +232,9 @@ tokens to `globals.css` and do not inline `style={{fontFamily: ...}}`.
 
 ## Acceptance criteria
 
-1. `npx tsc --noEmit` in `frontend/` produces no output and exits 0.
+0. **Every file in the Files list above exists** — see the `ls` command in the verification block.
+   (Contract 0001 shipped with a required file silently missing because nothing checked for it.)
+1. `npx tsc -p tsconfig.app.json --noEmit` in `frontend/` produces no output and exits 0.
 2. `npm run build` in `frontend/` succeeds and writes to `frontend/dist/`.
 3. `git diff --stat frontend/package.json` is empty — no dependency added.
 4. `frontend/public/logo-nav.png` is byte-identical to `assets/logo-nav.png`
@@ -258,7 +260,8 @@ actually stopping the backend and actually narrowing the viewport.
 Run each and paste the **complete, verbatim** output, including failures.
 
 ```bash
-cd frontend && npx tsc --noEmit && echo "typecheck clean"
+ls -1 frontend/public/logo-nav.png frontend/src/components/Header.tsx frontend/src/components/NavItem.tsx frontend/src/components/SettingsIcon.tsx frontend/src/components/EntryCard.tsx frontend/src/components/BackendStatus.tsx frontend/src/App.tsx
+cd frontend && npx tsc -p tsconfig.app.json --noEmit && echo "typecheck clean"
 cd frontend && npm run build
 git diff --stat frontend/package.json ; echo "(empty above = no deps added)"
 cmp assets/logo-nav.png frontend/public/logo-nav.png && echo "logo identical"
