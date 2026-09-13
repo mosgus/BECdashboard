@@ -196,11 +196,12 @@ cost: adding a ticker takes seconds, not milliseconds, and writes thousands of r
   incomplete close, permanently. So: (a) take the newest reference bar **strictly before today** as
   the last session, and (b) on fetch, refetch from the last stored date *inclusive* and overwrite,
   never blind-append. Both need a test.
-- Sub-decision, reversible: (a) means that on a weekday evening after the close, the app still
-  considers the previous session current and will not pull that day's bar until tomorrow. Chosen
-  because the alternative requires market-hours and US/Eastern timezone logic, which is more
-  failure modes than one session of lag is worth. Matches the literal reading of "as recent as the
-  prior close."
+- **Superseded 2026-09-13.** That sub-decision — "strictly before today, always" — was the
+  overcautious option and is replaced by the composed rule: **the newest reference bar, excluding
+  today unless it is past 16:00 ET.** The reference ticker still supplies the set of real sessions
+  empirically (holidays, half-days, no calendar dependency); the 16:00 check from `YF.py:203-208`
+  decides only whether today counts yet. Six lines of `zoneinfo`, and it removes a full session of
+  lag on weekday evenings. Specified in contract 0007.
 - **No foreign key from price bars to the universe table.** The old `PriceBar` had
   `ticker → universe_tickers.ticker ON DELETE CASCADE`, so removing a ticker silently destroyed its
   price history. Cached market data must not depend on a curated list existing.
@@ -275,10 +276,19 @@ not account for it.
   split date is wrong by a factor of four while the newest bar is perfectly current — so the rule
   reports "fresh" and serves corrupted data indefinitely. Every downstream number (returns, vol,
   Sharpe, correlation) is then wrong and looks entirely plausible.
-- **Detection, carried over from `YF.py:149-201`:** re-fetch one historical anchor date and compare
-  stored `adj_close` against fresh with a tight tolerance (`np.isclose(atol=1e-6, rtol=0)`). On
-  mismatch the series has been restated — discard and refetch the full history rather than
-  appending. One extra request finds a condition no forward-looking logic can.
+- **Detection, carried over from `YF.py:149-201`:** compare stored `adj_close` against freshly
+  fetched `adj_close` with a tight tolerance (`np.isclose(atol=1e-6, rtol=0)`). On mismatch the
+  series has been restated — refetch the full stored span and upsert over it rather than appending.
+- **The correct probe is the *most recent* stored bar, not an old one.** Corrected 2026-09-13 during
+  the 0007 audit; contract 0007's stated rationale had this backwards. An action with ex-date D
+  restates every bar **before** D. A newly-occurring action therefore has an ex-date *after* the
+  whole stored series, so it restates the newest stored bar too — and that bar is already re-fetched
+  every update by the partial-bar guard. Detection is free; no extra request is needed.
+- `pick_drift_anchors` still returns three dates (first, middle, last), but only anchors falling
+  inside the fetched window are compared, which in the routine path is the last one. The other two
+  engage only on a wide refetch. **This is a known and accepted limitation**: the uncovered case is
+  Yahoo retroactively revising old data with *no* corporate action, which is a different failure
+  mode and is not currently scoped.
 - Belongs to contract **0007**, not 0006. The fetch layer was split in two on 2026-09-13: 0006 gets
   data in correctly *once*; 0007 keeps it correct *over time* (freshness rule, partial-bar guards,
   drift detection). Split because drift detection is the piece where a wrong answer is invisible —

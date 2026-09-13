@@ -3,11 +3,29 @@ in it is pure and tested against captured shapes in tests/fixtures/yf_samples.py
 network, no database required to verify this module."""
 
 from datetime import date, datetime, timezone
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import yfinance as yf
+from cachetools import TTLCache
 
-from app.cache import _normalize_ohlcv, store, store_fundamentals
+from app.cache import _normalize_ohlcv, get_cached, store, store_fundamentals
+from app.freshness import (
+    REFERENCE_TICKER,
+    detect_drift,
+    is_stale,
+    last_completed_session,
+    missing_range,
+    pick_drift_anchors,
+)
+
+# REBUILD.md: the reference ticker's last completed session "changes once a day" and should
+# be cached briefly. Keyed on (ET date, whether it's past 16:00) rather than plain TTL alone,
+# so the moment 16:00 ET passes, the next call re-derives immediately instead of serving a
+# pre-4pm answer for up to an hour afterward. Refreshing N tickers costs one SPY fetch per
+# key, not N — this is what makes a bulk "update all" not hammer Yahoo with a duplicate
+# request per ticker.
+_last_session_cache: TTLCache = TTLCache(maxsize=8, ttl=3600)
 
 # --- network boundary: thin, no logic, not unit-tested ---------------------------------
 
@@ -95,3 +113,85 @@ def fetch_fundamentals(ticker: str) -> dict:
     data = extract_fundamentals(ticker, info, datetime.now(timezone.utc))
     store_fundamentals(ticker, data)
     return data
+
+
+def _now_et() -> datetime:
+    """The one place this module calls datetime.now() — freshness.py's functions are pure
+    and take today/now_et_hour as arguments precisely so this doesn't have to live there."""
+    return datetime.now(ZoneInfo("America/New_York"))
+
+
+def _cached_last_session(today: date, now_et_hour: int) -> date | None:
+    """last_completed_session, behind a TTL cache keyed on (today, past 4pm ET) so refreshing
+    N tickers in the same hour-ish window costs one reference-ticker download, not N."""
+    key = (today, now_et_hour >= 16)
+    if key in _last_session_cache:
+        return _last_session_cache[key]
+
+    reference_raw = _download_history(REFERENCE_TICKER, None, None)
+    reference_bars = normalize_history(reference_raw)
+    result = last_completed_session(today, now_et_hour, reference_bars)
+
+    _last_session_cache[key] = result
+    return result
+
+
+def refresh_ticker(ticker: str, force: bool = False) -> dict:
+    """Bring a ticker's stored history up to the last completed session, repairing it if a
+    split or dividend has restated it. Returns a summary of what happened.
+
+    Order matters: session derivation costs at most one reference-ticker fetch per
+    (ET date, past-4pm) key — see _cached_last_session — and nothing past that happens
+    unless the ticker is actually stale or force is set. That idempotence is what makes
+    repeated calls on an already-current ticker free, and refreshing many tickers in one
+    pass cost one reference fetch rather than one per ticker."""
+    ticker_upper = ticker.upper()
+    stored = get_cached(ticker)
+    bars_before = 0 if stored is None else len(stored)
+
+    def summary(action: str, last_session: date | None, bars_after: int, drift_detected: bool) -> dict:
+        return {
+            "ticker": ticker_upper,
+            "action": action,
+            "last_session": last_session,
+            "bars_before": bars_before,
+            "bars_after": bars_after,
+            "drift_detected": drift_detected,
+        }
+
+    now_et = _now_et()
+    last_session = _cached_last_session(now_et.date(), now_et.hour)
+
+    if last_session is None:
+        return summary("unknown_session", None, bars_before, False)
+
+    if not is_stale(stored, last_session) and not force:
+        return summary("none", last_session, bars_before, False)
+
+    fetch_range = missing_range(stored, last_session)
+    if fetch_range is None:
+        if stored is None or stored.empty or not force:
+            # Nothing missing, and either there's no existing series to re-check (a first
+            # fetch is the caller's job, not a repair here) or force wasn't set.
+            return summary("none", last_session, bars_before, False)
+        # force=True on already-current data: still re-check the most recent stored bar.
+        fetch_range = (stored.index.max().date(), last_session)
+
+    start, end = fetch_range
+    raw = _download_history(ticker, start, end)
+    fresh = normalize_history(raw)
+
+    anchors = pick_drift_anchors(stored)
+    drift = detect_drift(stored, fresh, anchors)
+
+    if drift:
+        full_start = stored.index.min().date()
+        full_raw = _download_history(ticker, full_start, last_session)
+        full_fresh = normalize_history(full_raw)
+        store(ticker, full_fresh)
+        return summary("refetched", last_session, len(full_fresh), True)
+
+    combined = pd.concat([stored, fresh])
+    combined = combined[~combined.index.duplicated(keep="last")].sort_index()
+    store(ticker, combined)
+    return summary("appended", last_session, len(combined), False)
