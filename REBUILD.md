@@ -216,7 +216,10 @@ Checked before designing the Universe layout, because a layout is a claim about 
 **The stored-DataFrame shape is a contract. Normalize on the way in, not just on the way to the
 database.** Established 2026-09-13 during the contract 0004 audit.
 - Canonical shape: index is a `DatetimeIndex` named **`date`** at `datetime64[us]`; columns are
-  lowercase `open, high, low, close` as `float64` and `volume` as `Int64` (nullable).
+  lowercase `open, high, low, close, adj_close` as `float64` and `volume` as `Int64` (nullable),
+  **always all six, in that order** — normalization fills a missing column with NA rather than
+  omitting it, so a frame read from the TTL cache and one read from the database are identical
+  regardless of what the caller supplied. (`adj_close` added by contract 0005.)
 - **yfinance does not produce this shape.** Measured live: index name `Date`, `datetime64[s]`,
   `volume` as `int64`. Anything feeding `store()` must normalize first, and `store()` must cache
   the *normalized* frame — otherwise `get_cached()` returns one shape from the TTL cache and a
@@ -228,8 +231,52 @@ database.** Established 2026-09-13 during the contract 0004 audit.
   the cache behaves differently depending on its input's column names. This exists only because
   contract 0001's tests store arbitrary non-OHLCV frames (`date`/`price`) and contract 0004 required
   they pass unmodified — the two requirements were in direct tension and the contract did not notice.
-  **Clear it after 0005:** migrate `tests/test_cache.py` to OHLCV-shaped frames, drop the guard, and
+  **Clear it after 0006:** migrate `tests/test_cache.py` to OHLCV-shaped frames, drop the guard, and
   normalize unconditionally. The cache stores price history; it should not have a passthrough mode.
+  Second reason, found in the 0005 audit: the guard matches on bare `.lower()` while
+  `_normalize_ohlcv` also maps spaces and hyphens to underscores, so the two disagree about whether
+  a column named `Adj Close` counts as adjusted close. Unreachable in practice — yfinance always
+  returns the full column set — but it means the heuristic's definition of "OHLCV-shaped" is not the
+  same as the normalizer's, which is exactly the kind of near-miss that becomes a real bug later.
+
+**Store raw OHLCV *and* `adj_close`; fetch with `auto_adjust=False`.** Decided 2026-09-13 after
+reading `reference files/old_yfinance_project/YF.py`.
+- Raw OHLC is an **invariant**: a raw close that changes means genuine data corruption or a vendor
+  correction, never a corporate action. `adj_close` is the **restatement-prone** value: it changes
+  retroactively across the entire history on every split and dividend.
+- Holding both gives one canary and one signal. `auto_adjust=True` — what `main`'s `provider.py`
+  used, and what contract 0004 was specified against — collapses them into a single column that is
+  silently rewritten by Yahoo, leaving nothing to verify against.
+- Contract 0004 shipped without an `adj_close` column. Corrected by contract 0005 before anything
+  fetches, because data written without it can never be integrity-checked afterwards.
+
+**Splits and dividends retroactively restate stored history. The freshness rule cannot detect
+this.** Found 2026-09-13 in the old yfinance script, which solved it; `REBUILD.md`'s own rule did
+not account for it.
+- The freshness rule ("is the newest stored bar current through the last completed session?")
+  detects **forward** staleness only. After a 4:1 split, every stored adjusted price before the
+  split date is wrong by a factor of four while the newest bar is perfectly current — so the rule
+  reports "fresh" and serves corrupted data indefinitely. Every downstream number (returns, vol,
+  Sharpe, correlation) is then wrong and looks entirely plausible.
+- **Detection, carried over from `YF.py:149-201`:** re-fetch one historical anchor date and compare
+  stored `adj_close` against fresh with a tight tolerance (`np.isclose(atol=1e-6, rtol=0)`). On
+  mismatch the series has been restated — discard and refetch the full history rather than
+  appending. One extra request finds a condition no forward-looking logic can.
+- Belongs to contract 0006, the fetch layer. It is why 0005 must add the column first.
+
+**Also worth carrying from `YF.py`, not yet scoped:**
+- **`get_effective_end_date()` (`YF.py:203-208`)** — a six-line `zoneinfo` check for whether it is
+  past 16:00 America/New_York. An earlier entry above rejected timezone logic as "more failure modes
+  than one session of lag is worth"; that was overcautious. It *composes* with the reference-ticker
+  trick rather than replacing it: the reference ticker says empirically which sessions exist
+  (holidays, half-days, no calendar dependency), and the 4pm check says whether today counts yet.
+- **Prepending, not just appending (`YF.py:496-561`)** — fetching missing data at *both* edges of
+  the stored range. Needed when someone wants more history than was first stored. Currently unscoped.
+- **Not carried:** the CSV layer, `input()`/CLI, `_OLD.csv` backups (upserts replace them),
+  `pandas_market_calendars` (the reference-ticker approach needs no native dependency and cannot
+  disagree with what yfinance actually serves), and `fetch_data`'s error handling, which redirects
+  stdout and string-matches `"PricesMissingError"` — an invalid symbol is better detected by the
+  measured `{'trailingPegRatio': None}` shape.
 
 **The Postgres code path is untested against Postgres.** Contract 0004's upsert selects
 `postgresql.insert` or `sqlite.insert` by dialect at runtime, and only the SQLite branch has ever

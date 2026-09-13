@@ -9,7 +9,7 @@ from app.models import PriceBar
 
 _cache = TTLCache(maxsize=512, ttl=86400)
 
-_OHLCV_COLUMNS = ("open", "high", "low", "close", "volume")
+_OHLCV_COLUMNS = ("open", "high", "low", "close", "adj_close", "volume")
 
 
 def get_cached(ticker: str) -> pd.DataFrame | None:
@@ -65,20 +65,28 @@ def _looks_like_ohlcv(df: pd.DataFrame) -> bool:
 
 def _normalize_ohlcv(df: pd.DataFrame) -> pd.DataFrame:
     """Canonicalize any caller-shaped OHLCV frame to the DataFrame contract: a DatetimeIndex
-    named 'date' at datetime64[us] resolution, lowercase open/high/low/close as float64, and
-    volume as nullable Int64. yfinance, for example, hands back index name 'Date' at
-    datetime64[s] with int64 volume — this is the one place that gets normalized, so every
-    other codepath (TTL cache, database round trip) can assume the contract already holds."""
+    named 'date' at datetime64[us] resolution, and all six canonical columns — open, high,
+    low, close, adj_close, volume — always present in that order, float64 for the five price
+    columns and nullable Int64 for volume. A caller that omits adj_close (or any other
+    column) gets it back filled with NA, not dropped: `_read_from_db` always returns six
+    columns because they always exist as table columns, so filtering down to only the
+    columns a caller happened to supply would make a TTL read and a database read disagree
+    in shape — the exact bug the 0004 audit rejected, reintroduced one column later.
+
+    yfinance's `auto_adjust=False` output uses index name 'Date' at datetime64[s], and names
+    the adjusted-close column literally 'Adj Close' — lowercasing alone yields 'adj close',
+    not 'adj_close', so both spaces and hyphens are mapped to underscores here."""
     out = df.copy()
-    out.columns = [str(col).lower() for col in out.columns]
-    out = out[[col for col in _OHLCV_COLUMNS if col in out.columns]]
+    out.columns = [str(col).lower().replace(" ", "_").replace("-", "_") for col in out.columns]
     out.index = pd.DatetimeIndex(out.index).astype("datetime64[us]")
     out.index.name = "date"
-    for col in ("open", "high", "low", "close"):
-        if col in out.columns:
-            out[col] = out[col].astype("float64")
-    if "volume" in out.columns:
-        out["volume"] = out["volume"].astype("Int64")
+
+    out = out.reindex(columns=list(_OHLCV_COLUMNS))
+
+    for col in ("open", "high", "low", "close", "adj_close"):
+        out[col] = out[col].astype("float64")
+    out["volume"] = out["volume"].astype("Int64")
+
     return out
 
 
@@ -98,6 +106,7 @@ def _read_from_db(ticker: str) -> pd.DataFrame | None:
             "high": [row.high for row in rows],
             "low": [row.low for row in rows],
             "close": [row.close for row in rows],
+            "adj_close": [row.adj_close for row in rows],
             "volume": [row.volume for row in rows],
         }
 
@@ -120,6 +129,7 @@ def _write_to_db(ticker: str, df: pd.DataFrame) -> None:
                 "high": _clean(row.get("high"), float),
                 "low": _clean(row.get("low"), float),
                 "close": _clean(row.get("close"), float),
+                "adj_close": _clean(row.get("adj_close"), float),
                 "volume": _clean(row.get("volume"), int),
             }
         )
