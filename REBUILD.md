@@ -213,6 +213,30 @@ Checked before designing the Universe layout, because a layout is a claim about 
   `forwardPE`, `fiftyTwoWeekHigh`, `fiftyTwoWeekLow`, `beta`, `currency`, `exchange`, `quoteType`,
   `averageVolume`.
 
+**The stored-DataFrame shape is a contract. Normalize on the way in, not just on the way to the
+database.** Established 2026-09-13 during the contract 0004 audit.
+- Canonical shape: index is a `DatetimeIndex` named **`date`** at `datetime64[us]`; columns are
+  lowercase `open, high, low, close` as `float64` and `volume` as `Int64` (nullable).
+- **yfinance does not produce this shape.** Measured live: index name `Date`, `datetime64[s]`,
+  `volume` as `int64`. Anything feeding `store()` must normalize first, and `store()` must cache
+  the *normalized* frame — otherwise `get_cached()` returns one shape from the TTL cache and a
+  different one from the database, and which you get depends on cache timing rather than on input.
+  That failure is invisible in tests whose fixtures are already in the output shape.
+- Lesson for future contracts: a round-trip test whose **input shape equals its output shape**
+  cannot fail. Require the input to differ.
+- **Known debt: `app/cache.py` normalizes conditionally**, via a `_looks_like_ohlcv()` heuristic, so
+  the cache behaves differently depending on its input's column names. This exists only because
+  contract 0001's tests store arbitrary non-OHLCV frames (`date`/`price`) and contract 0004 required
+  they pass unmodified — the two requirements were in direct tension and the contract did not notice.
+  **Clear it after 0005:** migrate `tests/test_cache.py` to OHLCV-shaped frames, drop the guard, and
+  normalize unconditionally. The cache stores price history; it should not have a passthrough mode.
+
+**The Postgres code path is untested against Postgres.** Contract 0004's upsert selects
+`postgresql.insert` or `sqlite.insert` by dialect at runtime, and only the SQLite branch has ever
+executed. `pg_insert`, `pool_pre_ping`, and the `postgres://` → `postgresql+psycopg://` rewrite are
+all unexercised against a real server. **Smoke-test them the day the Render instance exists**, before
+0005 depends on them; otherwise their first real run is in production.
+
 **If curation is added later, it goes in Postgres — not `localStorage`.** Direction, not a
 decision; nothing depends on it yet.
 - Reverses "No hosted database, deferred not rejected" *if it happens*. Deliberately chosen over

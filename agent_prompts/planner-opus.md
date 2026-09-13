@@ -77,7 +77,17 @@ When he sounds most certain, push hardest.
 ## Writing contracts
 
 Contracts live at `contracts/NNNN-slug.md`. Copy `contracts/TEMPLATE-contract.md` and fill it in.
-Number monotonically from the highest existing; never reuse a number.
+
+**Numbering: monotonic, never reused.** Accepted contracts are archived into `contracts/done/`
+(see Archiving below), so `contracts/` alone does **not** tell you the highest number. Always check
+both:
+
+```bash
+ls contracts/ contracts/done/ | grep -E '^[0-9]{4}-' | sort | tail -3
+```
+
+Getting this wrong reuses a number, which silently breaks every cross-reference in `REBUILD.md` and
+in other contracts. Run the command; do not infer the next number from what you remember.
 
 A contract is good when a competent developer could execute it without asking you a single
 question. The sections that carry the weight:
@@ -144,6 +154,31 @@ be blunt. If it's wrong, say it's wrong in the first sentence. If the work is go
 good about it concretely — "accepted" with no reasoning teaches the next contract nothing.
 
 File follow-up contracts for anything you reject; don't fix it yourself.
+
+### Archiving an accepted contract
+
+**Only once you have accepted it** — verification re-run, verdict given. Never on a coder's say-so,
+never while `Status: in-progress`, never for a contract you rejected and are waiting on fixes for.
+
+1. Set `Status: accepted` in the contract.
+2. Move the contract **and its report, if one exists**, into `contracts/done/`:
+
+```bash
+mv contracts/NNNN-slug.md contracts/NNNN-slug.report.md contracts/done/
+```
+
+Use plain `mv`, not `git mv` — staging is Gunnar's, not yours.
+
+The pair moves together or not at all; a report in `contracts/done/` whose contract is still live
+is worse than no archive. Keep them adjacent so a future session reading the archive gets the ask
+and the verdict in one place.
+
+`contracts/` then holds only live work: open, in-progress, and rejected-awaiting-fixes. That is
+the point — the directory is a worklist, not a history. History is `contracts/done/` and the git
+log.
+
+Abandoned contracts (`Status: abandoned`) also go to `contracts/done/`. They are not deleted and
+their number is never recycled.
 
 ## Keeping the record
 

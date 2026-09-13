@@ -36,11 +36,17 @@ through chat.**
 
 ```
 contracts/
-  0001-price-cache-interface.md          <- Planner writes. The contract.
-  0001-price-cache-interface.report.md   <- Planner writes, only when a verdict needs keeping.
+  0004-postgres-persistence.md           <- live work only: open / in-progress / awaiting fixes
   TEMPLATE-contract.md
   TEMPLATE-report.md                     <- structure for the chat report
+  done/
+    0001-backend-scaffold.md             <- archived by the Planner, only after acceptance
+    0001-backend-scaffold.report.md      <- moves with its contract, always as a pair
 ```
+
+`contracts/` is a worklist, not a history — if it's sitting there, it still needs something. The
+Planner moves a contract and its report into `done/` as the last step of accepting it. Abandoned
+contracts go there too; nothing is ever deleted and no number is ever recycled.
 
 1. **Planner** writes `contracts/NNNN-slug.md` and says which agent should run it.
 2. **You** paste into that session: `Execute contracts/NNNN-slug.md`.
@@ -79,6 +85,16 @@ an API shape is not.
 
 Zero-padded, monotonic, never reused. Abandoned contracts get `Status: abandoned` — they are not
 deleted and their number is not recycled.
+
+**Because accepted contracts move to `contracts/done/`, the live directory no longer shows the
+highest number.** Check both before numbering a new one:
+
+```bash
+ls contracts/ contracts/done/ | grep -E '^[0-9]{4}-' | sort | tail -3
+```
+
+This is the one way archiving can bite. A reused number silently breaks cross-references in
+`REBUILD.md` and in other contracts, and nothing catches it.
 
 ## No agent commits or pushes
 
