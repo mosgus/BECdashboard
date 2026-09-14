@@ -41,7 +41,41 @@ Limited hands-on development history with the existing app, so the goal is to re
 
 **No hosted database, deferred not rejected.** Considered MongoDB explicitly and rejected it — "free" isn't a Mongo-specific advantage (Neon/Supabase give free Postgres too), and the schema's relational shape (composite keys, cascades) would just move the referential-integrity work into application code. Since portfolio state is now client-side and the price cache is in-process, there's no current need for a hosted DB at all. A small Postgres table scoped just to the price cache is a plausible later addition if cold-cache-on-restart proves costly in practice — not before an initial deployment exists.
 
-**Deploy: GitHub + Render + Cloudflare Pages. Two services, no DB service for now.**
+**Deploy: everything on Render. Changed 2026-09-13 — Cloudflare Pages dropped.**
+- Three Render services: a **Web Service** (backend), a **Static Site** (frontend), and
+  **Postgres**. One dashboard, one account, one place to look when something breaks.
+- Cloudflare was the earlier choice and its CDN is genuinely faster globally — which matters not at
+  all for a single-operator app. Consolidation wins on operational simplicity.
+- **Render Static Sites are free permanently**, on free and paid plans alike; there is no server to
+  bill for. Consolidating does not save money, and it does not cost any either.
+- **Static sites do not sleep.** Only the web service does, so the page always loads instantly and
+  only the first API call after idle is slow.
+
+**Live deployment configuration, as built 2026-09-13.**
+- **Backend** — Web Service, root directory `backend`, build `pip install -r requirements.txt`,
+  start `uvicorn app.main:app --host 0.0.0.0 --port $PORT`. Python version comes from
+  `backend/.python-version` (contract 0001 added it for exactly this). Env: `DATABASE_URL` set to
+  the Postgres **Internal** URL — both services are inside Render, so internal is correct and
+  faster — plus `CORS_ORIGINS` set to the static site's origin, no trailing slash.
+- **Frontend** — Static Site, root directory `frontend`, build `npm run build`, publish `dist`.
+  Env: `VITE_API_URL` set to the backend's public URL. **Baked in at build time**, so changing it
+  requires a rebuild, not a restart.
+- **SPA rewrite is required**: source `/*`, destination `/index.html`, action **Rewrite** (not
+  Redirect — a redirect rewrites the URL bar and breaks routing). Without it, reloading directly on
+  `/universe` returns 404, because that path exists only in the client-side router.
+  **Render does not honour `frontend/public/_redirects`** — verified 2026-09-13 against the live
+  site: `/universe` returned 404 while `/_redirects` itself returned **200**, i.e. Render publishes
+  it as an ordinary static asset rather than interpreting it. That file is Cloudflare's format and
+  is now dead weight; the dashboard rule is the only thing that works here. Leave the file or delete
+  it, but do not read its presence as evidence that routing is handled.
+- **Deploy order is forced**: backend first (to have a URL) → frontend (bakes that URL in) →
+  backend redeploy with `CORS_ORIGINS` pointing at the frontend. There is no way to shortcut it.
+- **Measured 2026-09-13: a cold start takes ~43 seconds.** `GET /health` on a sleeping free-tier
+  instance returned 200 in 42.7s. The frontend will show `Connecting…` and then `API offline` if
+  its health check gives up first. Expected behaviour, not a bug — and the same cold-start problem
+  that justified persisting the price cache in Postgres rather than in process.
+
+**Superseded: GitHub + Render + Cloudflare Pages.**
 - Render hosts the backend (Python/FastAPI). **No Docker** — Render's native Python runtime, with a build command (`pip install -r requirements.txt`) and a start command (`uvicorn app.main:app --host 0.0.0.0 --port $PORT`). The old app's Dockerfile/`render.yaml` pattern is dropped; it added a container build step this project doesn't need.
 - Cloudflare Pages hosts the frontend, auto-deploy on push. Chosen over GitHub Pages: Cloudflare auto-detects the build and runs it on push; GitHub Pages only serves static files and requires hand-rolling a GitHub Actions workflow. Cloudflare cannot run the Python backend (no scipy/statsmodels-class native support even in its Python Workers), so it's frontend-only.
 - Both platforms can scope their "watch" to a subdirectory (`backend/` vs `frontend/`) so a push to one doesn't trigger a rebuild of the other.
@@ -54,6 +88,18 @@ Limited hands-on development history with the existing app, so the goal is to re
 - This resolves the old "Next.js render mode" open question. There is no render mode; the frontend is a static SPA.
 
 **Portfolio persistence: browser `localStorage`, behind an interface.**
+- **Re-confirmed 2026-09-13, after deployment, with a sharper reason than the original.** This was
+  first decided when the app was a single-operator prototype; it is now deployed, shared, and still
+  has no auth. That change strengthens the decision rather than weakening it: **without auth,
+  `localStorage` is the only mechanism that gives each person their own portfolios.** Server-side
+  storage with no login means one global list that anyone who finds the URL can see, edit, or
+  delete, with no way to tell whose is whose. Browser-local storage provides per-user isolation for
+  free.
+- The split is therefore principled, not incidental: **shared reference data lives on the server
+  (the Universe), personal state lives on the client (portfolios).** Rejected at the same time:
+  shared Postgres portfolios (no ownership without auth) and Postgres-plus-real-auth (reverses the
+  foundational "no auth, no multi-user concerns" decision and is more work than the portfolio
+  feature itself).
 - Confirms and sharpens the client-side decision above. No SQL, no hosted database, no server-side portfolio storage.
 - All reads/writes go through a small module (`save` / `load` / `list`), so swapping in a server-backed store later is a change to one file rather than a rewrite. Same reasoning as the price-cache interface.
 - Known limits, accepted: portfolios are tied to one browser on one machine, and clearing site data loses them. CSV export is the backup story.

@@ -1,6 +1,6 @@
 # Contract 0011 — Universe table reads market cap, P/E and yield
 
-**Status:** open
+**Status:** accepted
 **Assigned to:** haiku
 **Author:** planner (opus)
 
