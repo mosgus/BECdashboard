@@ -84,6 +84,12 @@ Limited hands-on development history with the existing app, so the goal is to re
 **Verification standard: pytest on the backend, typecheck + build on the frontend.**
 - Any backend module doing math or data transformation ships with pytest tests. That's where silent wrongness lives — a wrong Sharpe ratio looks entirely plausible, which is exactly what an audit can't catch by reading.
 - Frontend contracts are verified by `npx tsc -p tsconfig.app.json --noEmit` and a clean `npm run build`, plus a human look at the running page. UI unit tests are skipped deliberately: high effort, low value while the layout is still moving.
+- **A mockup must be built from the response the page will actually receive.** `mockup-universe.html`
+  was built from a `UniverseDetail` body (what `POST /universe` returns) while the table it depicts
+  is fed by `GET /universe`, which returns the narrower `UniverseEntry`. Contract 0009 therefore
+  specified Mkt Cap, P/E and Yield columns *and* a type with none of those fields — an internal
+  contradiction nobody could satisfy. Caught by the 0009 coder, fixed by 0010. When a mockup shows a
+  value, name the endpoint it comes from.
 - **Scope grep-based acceptance criteria to files the contract owns, and to code rather than
   comments.** Three contracts in a row (0003, 0005, 0006) produced grep criteria that failed on
   things that were not violations: `globals.css`'s hex tokens, which the same contract forbade
