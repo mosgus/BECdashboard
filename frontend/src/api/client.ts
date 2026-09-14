@@ -9,6 +9,9 @@ export interface UniverseEntry {
   sector: string | null
   quote_type: string | null
   regular_market_price: number | null
+  market_cap: number | null
+  trailing_pe: number | null
+  dividend_yield: number | null
   bar_count: number
   first_bar: string | null
   last_bar: string | null
@@ -22,10 +25,7 @@ export interface UniverseDetail extends UniverseEntry {
   currency: string | null
   exchange: string | null
   previous_close: number | null
-  market_cap: number | null
-  trailing_pe: number | null
   forward_pe: number | null
-  dividend_yield: number | null
   fifty_two_week_high: number | null
   fifty_two_week_low: number | null
   beta: number | null

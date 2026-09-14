@@ -80,18 +80,14 @@ export function UniverseTable({ rows, onRowRefreshed }: UniverseTableProps): JSX
                 <td className={`${TD} ${NOWRAP} text-right tabular-nums`}>
                   {formatPrice(row.regular_market_price)}
                 </td>
-                {/* GET /universe's list shape has no market_cap/trailing_pe/dividend_yield —
-                    only the per-ticker detail view does. These three columns exist structurally
-                    to match the mockup but always render "—" until a future contract widens the
-                    list endpoint or this table fetches per-row detail. */}
                 <td className={`${TD} ${NOWRAP} text-right tabular-nums hidden lg:table-cell text-[var(--color-muted)]`}>
-                  {formatMarketCap(null)}
+                  {formatMarketCap(row.market_cap)}
                 </td>
                 <td className={`${TD} ${NOWRAP} text-right tabular-nums hidden lg:table-cell text-[var(--color-muted)]`}>
-                  {formatRatio(null)}
+                  {formatRatio(row.trailing_pe)}
                 </td>
                 <td className={`${TD} ${NOWRAP} text-right tabular-nums hidden md:table-cell text-[var(--color-muted)]`}>
-                  {formatPercent(null)}
+                  {formatPercent(row.dividend_yield)}
                 </td>
                 <td className={`${TD} ${NOWRAP} text-right tabular-nums hidden sm:table-cell`}>
                   {formatCount(row.bar_count)}
