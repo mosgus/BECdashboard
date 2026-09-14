@@ -2,12 +2,14 @@
 in it is pure and tested against captured shapes in tests/fixtures/yf_samples.py — no
 network, no database required to verify this module."""
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 import pandas as pd
 import yfinance as yf
 from cachetools import TTLCache
+from curl_cffi.requests.exceptions import RequestException as CurlRequestException
+from yfinance.exceptions import YFException
 
 from app.cache import _normalize_ohlcv, get_cached, store, store_fundamentals
 from app.freshness import (
@@ -27,12 +29,27 @@ from app.freshness import (
 # request per ticker.
 _last_session_cache: TTLCache = TTLCache(maxsize=8, ttl=3600)
 
+
+class UpstreamUnavailable(RuntimeError):
+    """Yahoo was reachable but refused the request — not a statement about the symbol.
+
+    Raised only where "we couldn't tell" must not be silently treated as "confirmed no" —
+    see symbol_has_history. fetch_fundamentals never raises this: fundamentals are
+    best-effort enrichment, so any failure there degrades to None instead."""
+
+
 # --- network boundary: thin, no logic, not unit-tested ---------------------------------
 
 
 def _download_history(ticker: str, start: date | None, end: date | None) -> pd.DataFrame:
+    """Download historical price data from yfinance.
+
+    `end` is INCLUSIVE here. yfinance's end is exclusive, so one day is added before calling
+    yfinance. Every other date in this codebase is inclusive; this function is the only place
+    that converts."""
+    yf_end = end + timedelta(days=1) if end is not None else None
     return yf.download(
-        ticker, start=start, end=end, auto_adjust=False, progress=False, threads=False
+        ticker, start=start, end=yf_end, auto_adjust=False, progress=False, threads=False
     )
 
 
@@ -94,6 +111,28 @@ def extract_fundamentals(ticker: str, info: dict, fetched_at: datetime) -> dict:
 # --- composition: fetch, transform, persist ---------------------------------------------
 
 
+def symbol_has_history(ticker: str) -> bool:
+    """True when yf.download returns at least one bar in a short recent window. The
+    crumb-free existence check: the chart endpoint behind yf.download doesn't need the
+    crumb token that quoteSummary (behind .info) does, so this keeps working even when
+    Yahoo's crumb handshake is failing (see fetch_fundamentals).
+
+    A short window (~10 days), not ten years — this is an existence probe that runs before
+    the expensive full-history fetch, not the fetch itself.
+
+    Raises UpstreamUnavailable if the download itself fails outright (network/HTTP error).
+    That is deliberately not the same as returning False: a failed request means we don't
+    know whether the symbol exists, not that it doesn't — collapsing the two would reject
+    real tickers during exactly the kind of outage this contract exists to tolerate."""
+    end = date.today()
+    start = end - timedelta(days=10)
+    try:
+        raw = _download_history(ticker, start, end)
+    except (YFException, CurlRequestException) as exc:
+        raise UpstreamUnavailable(f"Could not check price history for {ticker}") from exc
+    return not raw.empty
+
+
 def fetch_history(ticker: str, start: date | None = None, end: date | None = None) -> pd.DataFrame:
     """Download, normalize, and persist price history for ticker. Returns what was fetched."""
     raw = _download_history(ticker, start, end)
@@ -102,13 +141,20 @@ def fetch_history(ticker: str, start: date | None = None, end: date | None = Non
     return normalized
 
 
-def fetch_fundamentals(ticker: str) -> dict:
-    """Download, validate, extract, and persist fundamentals for ticker. Returns what was
-    fetched. Raises ValueError for an invalid symbol — the message names the ticker, never
-    the raw info dict."""
-    info = _download_info(ticker)
+def fetch_fundamentals(ticker: str) -> dict | None:
+    """Download, validate, extract, and persist fundamentals for ticker. Returns None when
+    Yahoo refuses the request (e.g. the crumb/401 failure that motivated this contract) or
+    the response doesn't look like a real quote — never raises. Fundamentals are best-effort
+    enrichment, not a gate: price history (symbol_has_history) is the sole authority on
+    whether a ticker exists. Nothing is written when this returns None — persisting a row of
+    all-nulls would be indistinguishable from a real ETF's genuinely-absent fields."""
+    try:
+        info = _download_info(ticker)
+    except (YFException, CurlRequestException):
+        return None
+
     if not is_valid_symbol(info):
-        raise ValueError(f"Unknown symbol: {ticker}")
+        return None
 
     data = extract_fundamentals(ticker, info, datetime.now(timezone.utc))
     store_fundamentals(ticker, data)

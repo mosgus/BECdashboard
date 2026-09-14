@@ -4,7 +4,7 @@ import pandas as pd
 import pytest
 from sqlalchemy import event, func as sa_func, select as sa_select
 
-from app.cache import clear, store, store_fundamentals
+from app.cache import clear, get_fundamentals, store, store_fundamentals
 from app.db import get_engine, session
 from app.models import Base, UniverseTicker
 from app.universe import (
@@ -118,12 +118,36 @@ def _raising_fetch_fundamentals(*_args, **_kwargs):
     raise AssertionError("fetch_fundamentals must not be called here")
 
 
+def _raising_symbol_has_history(*_args, **_kwargs):
+    raise AssertionError("symbol_has_history must not be called here")
+
+
+def _patch_add(
+    monkeypatch,
+    has_history: bool = True,
+    fundamentals_overrides: dict | None = None,
+    fundamentals_fake=None,
+    history_capture=None,
+):
+    """Patch the three things add() calls, in universe.py's own namespace — symbol_has_history
+    included, since add() now checks it before ever reaching fetch_history/fetch_fundamentals.
+    Every existing test that exercises add() needs this, not just the ones added for this
+    contract: without it, a fake ticker like "AAA" hits the real network."""
+    monkeypatch.setattr("app.universe.symbol_has_history", lambda ticker: has_history)
+    monkeypatch.setattr(
+        "app.universe.fetch_fundamentals",
+        fundamentals_fake or _make_fake_fetch_fundamentals(fundamentals_overrides),
+    )
+    monkeypatch.setattr(
+        "app.universe.fetch_history", _make_fake_fetch_history(capture=history_capture)
+    )
+
+
 # --- 1. add on a new ticker ----------------------------------------------------------------
 
 
 def test_add_new_ticker_creates_row_and_returns_detail(db_mode, monkeypatch):
-    monkeypatch.setattr("app.universe.fetch_fundamentals", _make_fake_fetch_fundamentals())
-    monkeypatch.setattr("app.universe.fetch_history", _make_fake_fetch_history())
+    _patch_add(monkeypatch)
 
     result = add("aapl")
 
@@ -144,10 +168,7 @@ def test_add_new_ticker_creates_row_and_returns_detail(db_mode, monkeypatch):
 
 def test_add_fetches_ten_years_of_history(db_mode, monkeypatch):
     captured: dict = {}
-    monkeypatch.setattr("app.universe.fetch_fundamentals", _make_fake_fetch_fundamentals())
-    monkeypatch.setattr(
-        "app.universe.fetch_history", _make_fake_fetch_history(capture=captured)
-    )
+    _patch_add(monkeypatch, history_capture=captured)
 
     add("AAPL")
 
@@ -164,10 +185,10 @@ def test_add_fetches_ten_years_of_history(db_mode, monkeypatch):
 
 
 def test_add_already_active_raises_and_does_not_refetch(db_mode, monkeypatch):
-    monkeypatch.setattr("app.universe.fetch_fundamentals", _make_fake_fetch_fundamentals())
-    monkeypatch.setattr("app.universe.fetch_history", _make_fake_fetch_history())
+    _patch_add(monkeypatch)
     add("AAPL")
 
+    monkeypatch.setattr("app.universe.symbol_has_history", _raising_symbol_has_history)
     monkeypatch.setattr("app.universe.fetch_fundamentals", _raising_fetch_fundamentals)
     monkeypatch.setattr("app.universe.fetch_history", _raising_fetch_history)
 
@@ -179,11 +200,11 @@ def test_add_already_active_raises_and_does_not_refetch(db_mode, monkeypatch):
 
 
 def test_add_unknown_symbol_raises_and_leaves_no_row(db_mode, monkeypatch):
-    def fake_fetch_fundamentals(ticker: str) -> dict:
-        raise ValueError(f"Unknown symbol: {ticker}")
-
-    monkeypatch.setattr("app.universe.fetch_fundamentals", fake_fetch_fundamentals)
+    """symbol_has_history is the sole authority now — False raises UnknownSymbol before
+    fetch_history or fetch_fundamentals is ever reached."""
+    monkeypatch.setattr("app.universe.symbol_has_history", lambda ticker: False)
     monkeypatch.setattr("app.universe.fetch_history", _raising_fetch_history)
+    monkeypatch.setattr("app.universe.fetch_fundamentals", _raising_fetch_fundamentals)
 
     with pytest.raises(UnknownSymbol):
         add("NOTREAL")
@@ -193,6 +214,19 @@ def test_add_unknown_symbol_raises_and_leaves_no_row(db_mode, monkeypatch):
     assert count == 0
 
 
+def test_add_unknown_symbol_overrides_a_populated_fundamentals_response(db_mode, monkeypatch):
+    """History is the authority even when fundamentals would have looked fine — a case
+    contract 0006's design couldn't distinguish, since it gated on fundamentals alone."""
+    monkeypatch.setattr("app.universe.symbol_has_history", lambda ticker: False)
+    monkeypatch.setattr("app.universe.fetch_history", _raising_fetch_history)
+    monkeypatch.setattr(
+        "app.universe.fetch_fundamentals", _make_fake_fetch_fundamentals()
+    )  # would happily "succeed" if ever called — it must not be
+
+    with pytest.raises(UnknownSymbol):
+        add("GHOST")
+
+
 # --- 5. add on an inactive ticker reactivates it ----------------------------------------
 
 
@@ -200,8 +234,7 @@ def test_add_reactivates_inactive_ticker(db_mode, monkeypatch):
     with session() as db:
         db.add(UniverseTicker(ticker="AAPL", active=False))
 
-    monkeypatch.setattr("app.universe.fetch_fundamentals", _make_fake_fetch_fundamentals())
-    monkeypatch.setattr("app.universe.fetch_history", _make_fake_fetch_history())
+    _patch_add(monkeypatch)
 
     result = add("aapl")
     assert result["ticker"] == "AAPL"
@@ -217,8 +250,7 @@ def test_add_reactivates_inactive_ticker(db_mode, monkeypatch):
 
 
 def test_list_all_returns_only_active_ordered(db_mode, monkeypatch):
-    monkeypatch.setattr("app.universe.fetch_fundamentals", _make_fake_fetch_fundamentals())
-    monkeypatch.setattr("app.universe.fetch_history", _make_fake_fetch_history())
+    _patch_add(monkeypatch)
 
     add("MSFT")
     add("AAPL")
@@ -237,8 +269,7 @@ def test_list_all_empty_universe_returns_empty_list(db_mode):
 
 
 def test_list_all_query_count_does_not_scale_with_ticker_count(db_mode, monkeypatch):
-    monkeypatch.setattr("app.universe.fetch_fundamentals", _make_fake_fetch_fundamentals())
-    monkeypatch.setattr("app.universe.fetch_history", _make_fake_fetch_history())
+    _patch_add(monkeypatch)
 
     def query_count_for_list_all() -> int:
         count = {"n": 0}
@@ -308,8 +339,7 @@ def test_refresh_raises_not_in_universe(db_mode):
 
 
 def test_refresh_returns_refresh_ticker_action_verbatim(db_mode, monkeypatch):
-    monkeypatch.setattr("app.universe.fetch_fundamentals", _make_fake_fetch_fundamentals())
-    monkeypatch.setattr("app.universe.fetch_history", _make_fake_fetch_history())
+    _patch_add(monkeypatch)
     add("AAPL")
 
     fake_summary = {
@@ -351,8 +381,7 @@ def test_etf_entry_round_trips_with_none_fields(db_mode, monkeypatch):
         store_fundamentals(ticker, etf_data)
         return etf_data
 
-    monkeypatch.setattr("app.universe.fetch_fundamentals", fake_fetch_fundamentals)
-    monkeypatch.setattr("app.universe.fetch_history", _make_fake_fetch_history())
+    _patch_add(monkeypatch, fundamentals_fake=fake_fetch_fundamentals)
 
     result = add("SPY")
 
@@ -362,6 +391,9 @@ def test_etf_entry_round_trips_with_none_fields(db_mode, monkeypatch):
     assert result["beta"] is None
     assert result["forward_pe"] is None
     assert result["regular_market_price"] == 650.0
+    # Absent fields and an absent fundamentals row are different things — this ETF has both
+    # real absent fields *and* a row (it was fetched successfully).
+    assert result["has_fundamentals"] is True
 
 
 # --- 13. dividend_yield passes through unscaled -------------------------------------------
@@ -374,8 +406,7 @@ def test_dividend_yield_passes_through_unscaled(db_mode, monkeypatch):
         store_fundamentals(ticker, data)
         return data
 
-    monkeypatch.setattr("app.universe.fetch_fundamentals", fake_fetch_fundamentals)
-    monkeypatch.setattr("app.universe.fetch_history", _make_fake_fetch_history())
+    _patch_add(monkeypatch, fundamentals_fake=fake_fetch_fundamentals)
 
     result = add("AAPL")
 
@@ -386,8 +417,7 @@ def test_dividend_yield_passes_through_unscaled(db_mode, monkeypatch):
 
 
 def test_list_all_returns_market_cap_trailing_pe_dividend_yield(db_mode, monkeypatch):
-    monkeypatch.setattr("app.universe.fetch_fundamentals", _make_fake_fetch_fundamentals())
-    monkeypatch.setattr("app.universe.fetch_history", _make_fake_fetch_history())
+    _patch_add(monkeypatch)
 
     add("MSFT")
 
@@ -414,8 +444,7 @@ def test_list_all_etf_market_cap_is_none(db_mode, monkeypatch):
         store_fundamentals(ticker, etf_data)
         return etf_data
 
-    monkeypatch.setattr("app.universe.fetch_fundamentals", fake_fetch_fundamentals)
-    monkeypatch.setattr("app.universe.fetch_history", _make_fake_fetch_history())
+    _patch_add(monkeypatch, fundamentals_fake=fake_fetch_fundamentals)
 
     add("QQQ")
 
@@ -425,3 +454,95 @@ def test_list_all_etf_market_cap_is_none(db_mode, monkeypatch):
 
     assert entry["market_cap"] is None
     assert entry["regular_market_price"] == 350.0
+
+
+# --- 2. add succeeds when fetch_fundamentals returns None (best-effort) ------------------
+
+
+def test_add_succeeds_when_fundamentals_unavailable(db_mode, monkeypatch):
+    """The production bug this contract fixes: Yahoo's fundamentals endpoint can fail
+    (crumb/401) while price history still works. add() must not treat that as a reason to
+    reject the ticker — a membership row and price history are created; no fundamentals row
+    is written, and none of that is an error."""
+    _patch_add(monkeypatch, fundamentals_fake=lambda ticker: None)
+
+    result = add("SPY")
+
+    assert result["ticker"] == "SPY"
+    assert result["bar_count"] == 2
+    assert result["has_fundamentals"] is False
+    assert result["short_name"] is None
+
+    with session() as db:
+        row = db.get(UniverseTicker, "SPY")
+        assert row is not None
+        assert row.active is True
+
+    assert get_fundamentals("SPY") is None
+
+
+# --- 8. list_all reports has_fundamentals accurately --------------------------------------
+
+
+def test_list_all_reports_has_fundamentals(db_mode, monkeypatch):
+    _patch_add(monkeypatch, fundamentals_fake=lambda ticker: None)
+    add("SPY")  # fundamentals unavailable
+
+    monkeypatch.setattr("app.universe.symbol_has_history", lambda ticker: True)
+    monkeypatch.setattr("app.universe.fetch_history", _make_fake_fetch_history())
+    monkeypatch.setattr("app.universe.fetch_fundamentals", _make_fake_fetch_fundamentals())
+    add("AAPL")  # fundamentals available
+
+    entries = {e["ticker"]: e for e in list_all()}
+    assert entries["SPY"]["has_fundamentals"] is False
+    assert entries["AAPL"]["has_fundamentals"] is True
+
+
+# --- 9. refresh backfills fundamentals when absent, never refetches when present ---------
+
+
+def test_refresh_backfills_fundamentals_when_absent(db_mode, monkeypatch):
+    _patch_add(monkeypatch, fundamentals_fake=lambda ticker: None)
+    add("SPY")
+    assert get_fundamentals("SPY") is None
+
+    monkeypatch.setattr(
+        "app.universe.refresh_ticker",
+        lambda ticker, force=False: {
+            "ticker": "SPY",
+            "action": "none",
+            "last_session": None,
+            "bars_before": 2,
+            "bars_after": 2,
+            "drift_detected": False,
+        },
+    )
+    monkeypatch.setattr("app.universe.fetch_fundamentals", _make_fake_fetch_fundamentals())
+
+    result = refresh("SPY")
+
+    assert get_fundamentals("SPY") is not None
+    assert result["detail"]["has_fundamentals"] is True
+
+
+def test_refresh_does_not_refetch_fundamentals_when_present(db_mode, monkeypatch):
+    _patch_add(monkeypatch)
+    add("AAPL")
+    assert get_fundamentals("AAPL") is not None
+
+    monkeypatch.setattr(
+        "app.universe.refresh_ticker",
+        lambda ticker, force=False: {
+            "ticker": "AAPL",
+            "action": "none",
+            "last_session": None,
+            "bars_before": 2,
+            "bars_after": 2,
+            "drift_detected": False,
+        },
+    )
+    monkeypatch.setattr("app.universe.fetch_fundamentals", _raising_fetch_fundamentals)
+
+    result = refresh("AAPL")  # must not raise — fetch_fundamentals must not be called
+
+    assert result["detail"]["has_fundamentals"] is True

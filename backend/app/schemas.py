@@ -17,6 +17,7 @@ class UniverseEntry(BaseModel):
     market_cap: int | None
     trailing_pe: float | None
     dividend_yield: float | None
+    has_fundamentals: bool
     bar_count: int
     first_bar: date | None
     last_bar: date | None

@@ -394,6 +394,48 @@ decisively over a dividend-spanning window — 105/105 rows with `close != adj_c
   Render's network and is what the deployed backend should use. Using the internal URL locally fails
   with a DNS error.
 
+**`yf.download`'s `end` is EXCLUSIVE. Every date parameter in this codebase is INCLUSIVE.**
+`app/market_data.py:_download_history` is the single place that converts, adding one day on the way
+out. Do not add the day at any call site.
+- Proven 2026-09-14: `end=2026-09-14` returned only `['2026-09-11']`; `end=2026-09-15` returned
+  `['2026-09-11', '2026-09-14']`.
+- The bug this caused was subtle and total: `missing_range` returns `(newest_stored, last_session)`,
+  so the last session was never fetched, the stored bar could never reach it, `is_stale` was
+  permanently `True`, and **`refresh` looped forever** — reporting `"appended"` with an unchanged
+  bar count on every call. It destroyed the idempotence property contract 0007 was written to
+  guarantee, and each wasted call added load to Render's shared IP.
+- **`YF.py:258` documented this and contract 0007 missed it.** The reference script was read for its
+  drift detection and its 4pm rule; its most important line was a comment about `end` exclusivity.
+- **Why 102 tests missed it:** the freshness tests are pure-function tests whose fake downloader
+  returned everything in `[start, end]` *inclusive*. A fixture that models the vendor's semantics
+  wrongly passes whether or not the code is right. **When mocking a third-party API, the fake must
+  reproduce its actual convention, not the convention you wish it had.**
+
+**Yahoo's fundamentals endpoint fails from Render; price history does not.** Measured 2026-09-14.
+- `Ticker(x).info` hits `quoteSummary`, which requires a "crumb" token. From Render's shared
+  datacenter IP the crumb fetch is rate-limited (429) and the fallback is rejected (401), so `.info`
+  returns an empty dict. `yf.download` hits the chart endpoint, needs no crumb, and works fine —
+  `POST /universe/MSFT/refresh` returned 200 at the same moment `POST /universe` returned 404 for
+  SPY.
+- **Design consequence, contract 0013: price history is the authority on whether a symbol exists**
+  (`symbol_has_history`, a ~10-day probe), and fundamentals are best-effort enrichment that may be
+  absent. `fetch_fundamentals` returns `None` rather than raising, and writes nothing when it does —
+  an all-null row would be indistinguishable from a real ETF. `refresh` backfills fundamentals when
+  absent, so a ticker added during an outage heals itself.
+- `has_fundamentals: bool` exists on `UniverseEntry` because `—` otherwise means two different
+  things: *this ETF has no market cap* and *we never got this ticker's data at all*.
+- **Root cause deliberately not chased.** Whether it is IP throttling or `curl_cffi` TLS
+  fingerprinting differing on Linux does not change the fix. No proxy, no user-agent override, no
+  impersonation setting.
+- **Known gap:** if `symbol_has_history` itself fails, it raises `UpstreamUnavailable`, which is not
+  mapped to an HTTP status and surfaces as a **500**. Honest but ugly — 503 would be better. Not yet
+  observed in production; fix it when it fires.
+
+**Clarification on the ETF null count.** "ETFs lack six fields" is a statement about *yfinance*:
+`sector`, `industry`, `currentPrice`, `marketCap`, `beta`, `forwardPE`. In *our schema* it is
+**five** — `currentPrice` never became a column, because `regular_market_price` was chosen precisely
+to avoid it. Contracts have conflated the two counts; the schema number is five.
+
 **Tests must never inherit an ambient `DATABASE_URL`.** `backend/tests/conftest.py` strips it via an
 autouse fixture; opt-in fixtures re-set it to a `tmp_path` SQLite file.
 - Why, concretely: on 2026-09-13, minutes after `backend/.env` was created with a live Render URL,

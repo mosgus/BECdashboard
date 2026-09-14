@@ -30,7 +30,7 @@ def client():
     return TestClient(app)
 
 
-def _patch_fetches(monkeypatch, fundamentals_overrides=None):
+def _patch_fetches(monkeypatch, fundamentals_overrides=None, has_history=True):
     def fake_fetch_fundamentals(ticker):
         data = _fundamentals(ticker, **(fundamentals_overrides or {}))
         store_fundamentals(ticker, data)
@@ -41,12 +41,10 @@ def _patch_fetches(monkeypatch, fundamentals_overrides=None):
         store(ticker, df)
         return df
 
+    # add() now checks symbol_has_history before ever reaching fetch_history/fetch_fundamentals.
+    monkeypatch.setattr("app.universe.symbol_has_history", lambda ticker: has_history)
     monkeypatch.setattr("app.universe.fetch_fundamentals", fake_fetch_fundamentals)
     monkeypatch.setattr("app.universe.fetch_history", fake_fetch_history)
-
-
-def _fail_fetch_fundamentals(ticker):
-    raise ValueError(f"Unknown symbol: {ticker}")
 
 
 # --- 14. GET /universe returns 200 and a JSON list -----------------------------------------
@@ -74,7 +72,7 @@ def test_post_universe_201_then_duplicate_409(db_mode, client, monkeypatch):
 
 
 def test_post_universe_unknown_symbol_404(db_mode, client, monkeypatch):
-    monkeypatch.setattr("app.universe.fetch_fundamentals", _fail_fetch_fundamentals)
+    monkeypatch.setattr("app.universe.symbol_has_history", lambda ticker: False)
 
     response = client.post("/universe", json={"ticker": "NOTREAL"})
     assert response.status_code == 404
@@ -152,6 +150,42 @@ def test_get_universe_includes_three_new_fields(db_mode, client, monkeypatch):
     assert entry["market_cap"] == 1_000_000_000
     assert entry["trailing_pe"] == 20.0
     assert entry["dividend_yield"] == 0.33
+
+
+# --- 11. GET /universe includes has_fundamentals on every row -----------------------------
+
+
+def test_get_universe_includes_has_fundamentals(db_mode, client, monkeypatch):
+    _patch_fetches(monkeypatch)
+    client.post("/universe", json={"ticker": "MSFT"})
+
+    response = client.get("/universe")
+    assert response.status_code == 200
+    entries = response.json()
+    assert len(entries) == 1
+    assert entries[0]["has_fundamentals"] is True
+
+
+def test_post_universe_succeeds_when_fundamentals_unavailable(db_mode, client, monkeypatch):
+    """The production bug, reproduced end-to-end through the API: Yahoo's fundamentals
+    endpoint failing (crumb/401) must not turn into a 404 for a real symbol."""
+    monkeypatch.setattr("app.universe.symbol_has_history", lambda ticker: True)
+    monkeypatch.setattr("app.universe.fetch_fundamentals", lambda ticker: None)
+
+    def fake_fetch_history(ticker, start=None, end=None):
+        df = _history(["2016-01-04", "2016-01-05"])
+        store(ticker, df)
+        return df
+
+    monkeypatch.setattr("app.universe.fetch_history", fake_fetch_history)
+
+    response = client.post("/universe", json={"ticker": "SPY"})
+    assert response.status_code == 201
+    body = response.json()
+    assert body["ticker"] == "SPY"
+    assert body["bar_count"] == 2
+    assert body["has_fundamentals"] is False
+    assert body["short_name"] is None
 
 
 # --- 20. degraded mode: every universe endpoint 503, /health still 200 --------------------
