@@ -13,7 +13,7 @@ from app.db import session
 from app.market_data import fetch_fundamentals, fetch_history, refresh_ticker, symbol_has_history
 from app.models import PriceBar, TickerFundamentals, UniverseTicker
 
-HISTORY_YEARS = 10
+HISTORY_START = date(2016, 1, 1)
 
 
 class UnknownSymbol(Exception):
@@ -32,7 +32,7 @@ class NotInUniverse(Exception):
 
 
 def _history_start(today: date) -> date:
-    return today.replace(year=today.year - HISTORY_YEARS)
+    return HISTORY_START
 
 
 def add(ticker: str) -> dict:
