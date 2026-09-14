@@ -380,3 +380,48 @@ def test_dividend_yield_passes_through_unscaled(db_mode, monkeypatch):
     result = add("AAPL")
 
     assert result["dividend_yield"] == 0.33
+
+
+# --- 14. list_all returns three new fields for an equity with real values -----------------
+
+
+def test_list_all_returns_market_cap_trailing_pe_dividend_yield(db_mode, monkeypatch):
+    monkeypatch.setattr("app.universe.fetch_fundamentals", _make_fake_fetch_fundamentals())
+    monkeypatch.setattr("app.universe.fetch_history", _make_fake_fetch_history())
+
+    add("MSFT")
+
+    entries = list_all()
+    assert len(entries) == 1
+    entry = entries[0]
+
+    assert entry["market_cap"] == 1_000_000_000
+    assert entry["trailing_pe"] == 20.0
+    assert entry["dividend_yield"] == 0.33
+
+
+# --- 15. list_all returns market_cap as None for ETF ------------------------------------
+
+
+def test_list_all_etf_market_cap_is_none(db_mode, monkeypatch):
+    etf_data = _fundamentals(
+        "QQQ",
+        market_cap=None,
+        regular_market_price=350.0,
+    )
+
+    def fake_fetch_fundamentals(ticker: str) -> dict:
+        store_fundamentals(ticker, etf_data)
+        return etf_data
+
+    monkeypatch.setattr("app.universe.fetch_fundamentals", fake_fetch_fundamentals)
+    monkeypatch.setattr("app.universe.fetch_history", _make_fake_fetch_history())
+
+    add("QQQ")
+
+    entries = list_all()
+    assert len(entries) == 1
+    entry = entries[0]
+
+    assert entry["market_cap"] is None
+    assert entry["regular_market_price"] == 350.0

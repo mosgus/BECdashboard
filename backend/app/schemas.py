@@ -14,6 +14,9 @@ class UniverseEntry(BaseModel):
     sector: str | None
     quote_type: str | None
     regular_market_price: float | None
+    market_cap: int | None
+    trailing_pe: float | None
+    dividend_yield: float | None
     bar_count: int
     first_bar: date | None
     last_bar: date | None
@@ -27,10 +30,7 @@ class UniverseDetail(UniverseEntry):
     currency: str | None
     exchange: str | None
     previous_close: float | None
-    market_cap: int | None
-    trailing_pe: float | None
     forward_pe: float | None
-    dividend_yield: float | None
     fifty_two_week_high: float | None
     fifty_two_week_low: float | None
     beta: float | None

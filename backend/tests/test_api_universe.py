@@ -133,7 +133,28 @@ def test_post_refresh_404_when_not_in_universe(db_mode, client):
     assert response.status_code == 404
 
 
-# --- 18. degraded mode: every universe endpoint 503, /health still 200 --------------------
+# --- 18. GET /universe includes market_cap, trailing_pe, dividend_yield in response -------
+
+
+def test_get_universe_includes_three_new_fields(db_mode, client, monkeypatch):
+    _patch_fetches(monkeypatch)
+    client.post("/universe", json={"ticker": "MSFT"})
+
+    response = client.get("/universe")
+    assert response.status_code == 200
+    entries = response.json()
+    assert len(entries) == 1
+
+    entry = entries[0]
+    assert "market_cap" in entry
+    assert "trailing_pe" in entry
+    assert "dividend_yield" in entry
+    assert entry["market_cap"] == 1_000_000_000
+    assert entry["trailing_pe"] == 20.0
+    assert entry["dividend_yield"] == 0.33
+
+
+# --- 20. degraded mode: every universe endpoint 503, /health still 200 --------------------
 
 
 def test_degraded_mode_returns_503_for_every_universe_endpoint(client):
@@ -152,7 +173,7 @@ def test_degraded_mode_error_body(client):
     assert response.json() == {"detail": "Database not configured"}
 
 
-# --- 19. no error body contains a connection string ---------------------------------------
+# --- 21. no error body contains a connection string ---------------------------------------
 
 
 def test_error_bodies_never_contain_a_connection_string(db_mode, client, monkeypatch):

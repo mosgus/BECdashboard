@@ -132,6 +132,9 @@ def list_all() -> list[dict]:
                     "regular_market_price": (
                         fundamentals.regular_market_price if fundamentals else None
                     ),
+                    "market_cap": fundamentals.market_cap if fundamentals else None,
+                    "trailing_pe": fundamentals.trailing_pe if fundamentals else None,
+                    "dividend_yield": fundamentals.dividend_yield if fundamentals else None,
                     "bar_count": stats.bar_count if stats else 0,
                     "first_bar": stats.first_bar if stats else None,
                     "last_bar": stats.last_bar if stats else None,
