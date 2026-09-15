@@ -33,8 +33,15 @@ def quotes_market_closed_by_default(monkeypatch):
     the kind of hidden real-network call the DATABASE_URL-stripping fixture in conftest.py
     exists to prevent on the database side. Reporting the market closed by default makes every
     existing test in this file deterministic and network-free regardless of when it happens to
-    run; tests that specifically exercise quote behavior override this themselves."""
+    run; tests that specifically exercise quote behavior override this themselves.
+
+    Patched in both namespaces, not just app.quotes: universe.py does `from app.quotes import
+    is_market_open`, which binds its own independent name at import time. Patching only
+    app.quotes.is_market_open leaves universe.py's _live_quote (and therefore current_price)
+    reading the real, unpatched clock — this was discovered because it made a test flake
+    against the real wall-clock's actual market state rather than the state it asked for."""
     monkeypatch.setattr("app.quotes.is_market_open", lambda now_et: False)
+    monkeypatch.setattr("app.universe.is_market_open", lambda now_et: False)
 
 
 @pytest.fixture
@@ -570,7 +577,10 @@ def test_list_all_current_price_populated_when_quote_fresh_and_market_open(db_mo
     def _raising_download_quotes(_tickers):
         raise AssertionError("a fresh quote must not trigger another fetch")
 
+    # Both namespaces: universe.py's `from app.quotes import is_market_open` binds its own
+    # name at import time, so app.universe.is_market_open is what _live_quote actually reads.
     monkeypatch.setattr("app.quotes.is_market_open", lambda now_et: True)
+    monkeypatch.setattr("app.universe.is_market_open", lambda now_et: True)
     monkeypatch.setattr("app.quotes._download_quotes", _raising_download_quotes)
 
     from app.cache import store_quotes
@@ -581,6 +591,7 @@ def test_list_all_current_price_populated_when_quote_fresh_and_market_open(db_mo
     entries = {e["ticker"]: e for e in list_all()}
     assert entries["AAPL"]["current_price"] == 123.45
     assert entries["AAPL"]["last_close"] == 101.0  # the newer of _history's default two bars
+    assert entries["AAPL"]["quote_fetched_at"] == now
 
 
 def test_list_all_current_price_null_when_quote_older_than_ttl(db_mode, monkeypatch):
@@ -588,6 +599,7 @@ def test_list_all_current_price_null_when_quote_older_than_ttl(db_mode, monkeypa
     add("AAPL")
 
     monkeypatch.setattr("app.quotes.is_market_open", lambda now_et: True)
+    monkeypatch.setattr("app.universe.is_market_open", lambda now_et: True)
     monkeypatch.setattr("app.quotes._download_quotes", lambda tickers: pd.DataFrame())
 
     from datetime import timedelta
@@ -600,3 +612,24 @@ def test_list_all_current_price_null_when_quote_older_than_ttl(db_mode, monkeypa
     entries = {e["ticker"]: e for e in list_all()}
     assert entries["AAPL"]["current_price"] is None
     assert entries["AAPL"]["last_close"] == 101.0
+    # 6. quote_fetched_at agrees with current_price — null whenever current_price is null, even
+    # though a quote row genuinely exists (it's just stale). A timestamp beside a price that
+    # isn't a live quote would be a lie about what's on screen.
+    assert entries["AAPL"]["quote_fetched_at"] is None
+
+
+def test_list_all_quote_fetched_at_null_when_market_closed_even_with_fresh_quote(db_mode, monkeypatch):
+    """The more common real-world case than staleness: outside market hours, a perfectly fresh
+    quote still must not be shown as current — quote_fetched_at must agree and stay null too."""
+    _patch_add(monkeypatch)
+    add("AAPL")
+    # Market closed by default via the autouse fixture — no override here.
+
+    from app.cache import store_quotes
+
+    now = datetime.now(timezone.utc)
+    store_quotes({"AAPL": (123.45, now)}, now)
+
+    entries = {e["ticker"]: e for e in list_all()}
+    assert entries["AAPL"]["current_price"] is None
+    assert entries["AAPL"]["quote_fetched_at"] is None

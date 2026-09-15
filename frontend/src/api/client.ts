@@ -11,6 +11,7 @@ export interface UniverseEntry {
   regular_market_price: number | null
   current_price: number | null
   last_close: number | null
+  quote_fetched_at: string | null
   market_cap: number | null
   trailing_pe: number | null
   dividend_yield: number | null

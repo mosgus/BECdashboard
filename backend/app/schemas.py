@@ -25,6 +25,7 @@ class UniverseEntry(BaseModel):
     added_at: datetime
     current_price: float | None
     last_close: float | None
+    quote_fetched_at: datetime | None
 
 
 class UniverseDetail(UniverseEntry):

@@ -37,21 +37,24 @@ def _history_start(today: date) -> date:
     return HISTORY_START
 
 
-def _current_price(quote: dict | None) -> float | None:
-    """None when the market is closed or the stored quote is older than the TTL — the backend
-    decides this, not the frontend, so the client has no market-hours logic to duplicate."""
+def _live_quote(quote: dict | None) -> tuple[float | None, datetime | None]:
+    """(current_price, quote_fetched_at) — always null together, by construction: both come
+    from the same branch, so a timestamp can never appear beside a price that isn't a live
+    quote. None when the market is closed or the stored quote is older than the TTL — the
+    backend decides this, not the frontend, so the client has no market-hours logic to
+    duplicate."""
     if quote is None:
-        return None
+        return None, None
 
     now_et = datetime.now(ZoneInfo("America/New_York"))
     if not is_market_open(now_et):
-        return None
+        return None, None
 
     now_utc = datetime.now(timezone.utc)
     if now_utc - quote["fetched_at"] > timedelta(minutes=QUOTE_TTL_MINUTES):
-        return None
+        return None, None
 
-    return quote["price"]
+    return quote["price"], quote["fetched_at"]
 
 
 def add(ticker: str) -> dict:
@@ -204,6 +207,7 @@ def list_all() -> list[dict]:
     for ticker in tickers:
         fundamentals = fundamentals_by_ticker.get(ticker)
         stats = bar_stats_by_ticker.get(ticker)
+        current_price, quote_fetched_at = _live_quote(quotes_by_ticker.get(ticker))
         entries.append(
             {
                 "ticker": ticker,
@@ -222,8 +226,9 @@ def list_all() -> list[dict]:
                 "last_bar": stats.last_bar if stats else None,
                 "fetched_at": fundamentals["fetched_at"] if fundamentals else None,
                 "added_at": added_at_by_ticker[ticker],
-                "current_price": _current_price(quotes_by_ticker.get(ticker)),
+                "current_price": current_price,
                 "last_close": last_close_by_ticker.get(ticker),
+                "quote_fetched_at": quote_fetched_at,
             }
         )
 
@@ -255,6 +260,7 @@ def get_one(ticker: str) -> dict:
             last_close = float(non_null_closes.iloc[-1])
 
     quote = get_quotes([key]).get(key)
+    current_price, quote_fetched_at = _live_quote(quote)
 
     return {
         "ticker": key,
@@ -281,6 +287,7 @@ def get_one(ticker: str) -> dict:
         "first_bar": prices.index.min().date() if has_prices else None,
         "last_bar": prices.index.max().date() if has_prices else None,
         "added_at": added_at,
-        "current_price": _current_price(quote),
+        "current_price": current_price,
         "last_close": last_close,
+        "quote_fetched_at": quote_fetched_at,
     }
