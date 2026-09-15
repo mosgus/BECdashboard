@@ -15,10 +15,12 @@ from app.cache import _normalize_ohlcv, get_cached, store, store_fundamentals
 from app.freshness import (
     REFERENCE_TICKER,
     detect_drift,
+    earliest_session_on_or_after,
     is_stale,
     last_completed_session,
     missing_range,
     pick_drift_anchors,
+    prepend_range,
 )
 
 # REBUILD.md: the reference ticker's last completed session "changes once a day" and should
@@ -28,6 +30,12 @@ from app.freshness import (
 # key, not N — this is what makes a bulk "update all" not hammer Yahoo with a duplicate
 # request per ticker.
 _last_session_cache: TTLCache = TTLCache(maxsize=8, ttl=3600)
+
+# The earliest real trading session on or after a given HISTORY_START never changes once
+# computed, unlike last_completed_session — so this is cached far longer (a day) and keyed on
+# history_start itself rather than on the current date. Refreshing N tickers against the same
+# HISTORY_START costs one narrow reference-ticker fetch, not N.
+_earliest_session_cache: TTLCache = TTLCache(maxsize=8, ttl=86400)
 
 
 class UpstreamUnavailable(RuntimeError):
@@ -182,20 +190,52 @@ def _cached_last_session(today: date, now_et_hour: int) -> date | None:
     return result
 
 
-def refresh_ticker(ticker: str, force: bool = False) -> dict:
+def _cached_earliest_session(history_start: date) -> date | None:
+    """earliest_session_on_or_after, behind a TTL cache keyed on history_start alone — the
+    answer never changes once computed, so refreshing N tickers against the same
+    HISTORY_START costs one narrow reference-ticker fetch, not N.
+
+    The window is deliberately narrow — history_start to history_start + 30 days, not full
+    history — this is a probe for one date, not a data fetch."""
+    if history_start in _earliest_session_cache:
+        return _earliest_session_cache[history_start]
+
+    window_end = history_start + timedelta(days=30)
+    reference_raw = _download_history(REFERENCE_TICKER, history_start, window_end)
+    reference_bars = normalize_history(reference_raw)
+    result = earliest_session_on_or_after(history_start, reference_bars)
+
+    _earliest_session_cache[history_start] = result
+    return result
+
+
+def refresh_ticker(ticker: str, force: bool = False, history_start: date | None = None) -> dict:
     """Bring a ticker's stored history up to the last completed session, repairing it if a
-    split or dividend has restated it. Returns a summary of what happened.
+    split or dividend has restated it, then (when history_start is given) extend it
+    backwards to history_start's earliest real session too. Returns a summary of what
+    happened.
 
     Order matters: session derivation costs at most one reference-ticker fetch per
     (ET date, past-4pm) key — see _cached_last_session — and nothing past that happens
     unless the ticker is actually stale or force is set. That idempotence is what makes
     repeated calls on an already-current ticker free, and refreshing many tickers in one
-    pass cost one reference fetch rather than one per ticker."""
+    pass cost one reference fetch rather than one per ticker.
+
+    The backward extension runs after the forward path unconditionally (history_start is not
+    None) — including when the forward path was a no-op. A ticker can be current at the
+    front and short at the back. history_start=None (the default) skips this entirely, so
+    every existing caller keeps its current behaviour unchanged."""
     ticker_upper = ticker.upper()
     stored = get_cached(ticker)
     bars_before = 0 if stored is None else len(stored)
 
-    def summary(action: str, last_session: date | None, bars_after: int, drift_detected: bool) -> dict:
+    def summary(
+        action: str,
+        last_session: date | None,
+        bars_after: int,
+        drift_detected: bool,
+        bars_prepended: int = 0,
+    ) -> dict:
         return {
             "ticker": ticker_upper,
             "action": action,
@@ -203,41 +243,62 @@ def refresh_ticker(ticker: str, force: bool = False) -> dict:
             "bars_before": bars_before,
             "bars_after": bars_after,
             "drift_detected": drift_detected,
+            "bars_prepended": bars_prepended,
         }
 
     now_et = _now_et()
     last_session = _cached_last_session(now_et.date(), now_et.hour)
 
     if last_session is None:
-        return summary("unknown_session", None, bars_before, False)
-
-    if not is_stale(stored, last_session) and not force:
-        return summary("none", last_session, bars_before, False)
-
-    fetch_range = missing_range(stored, last_session)
-    if fetch_range is None:
-        if stored is None or stored.empty or not force:
+        result = summary("unknown_session", None, bars_before, False)
+    elif not is_stale(stored, last_session) and not force:
+        result = summary("none", last_session, bars_before, False)
+    else:
+        fetch_range = missing_range(stored, last_session)
+        if fetch_range is None and (stored is None or stored.empty or not force):
             # Nothing missing, and either there's no existing series to re-check (a first
             # fetch is the caller's job, not a repair here) or force wasn't set.
-            return summary("none", last_session, bars_before, False)
-        # force=True on already-current data: still re-check the most recent stored bar.
-        fetch_range = (stored.index.max().date(), last_session)
+            result = summary("none", last_session, bars_before, False)
+        else:
+            if fetch_range is None:
+                # force=True on already-current data: still re-check the most recent stored bar.
+                fetch_range = (stored.index.max().date(), last_session)
 
-    start, end = fetch_range
-    raw = _download_history(ticker, start, end)
-    fresh = normalize_history(raw)
+            start, end = fetch_range
+            raw = _download_history(ticker, start, end)
+            fresh = normalize_history(raw)
 
-    anchors = pick_drift_anchors(stored)
-    drift = detect_drift(stored, fresh, anchors)
+            anchors = pick_drift_anchors(stored)
+            drift = detect_drift(stored, fresh, anchors)
 
-    if drift:
-        full_start = stored.index.min().date()
-        full_raw = _download_history(ticker, full_start, last_session)
-        full_fresh = normalize_history(full_raw)
-        store(ticker, full_fresh)
-        return summary("refetched", last_session, len(full_fresh), True)
+            if drift:
+                full_start = stored.index.min().date()
+                full_raw = _download_history(ticker, full_start, last_session)
+                full_fresh = normalize_history(full_raw)
+                store(ticker, full_fresh)
+                result = summary("refetched", last_session, len(full_fresh), True)
+            else:
+                combined = pd.concat([stored, fresh])
+                combined = combined[~combined.index.duplicated(keep="last")].sort_index()
+                store(ticker, combined)
+                result = summary("appended", last_session, len(combined), False)
 
-    combined = pd.concat([stored, fresh])
-    combined = combined[~combined.index.duplicated(keep="last")].sort_index()
-    store(ticker, combined)
-    return summary("appended", last_session, len(combined), False)
+    if history_start is not None:
+        earliest_session = _cached_earliest_session(history_start)
+        if earliest_session is not None:
+            current_stored = get_cached(ticker)
+            prepend = prepend_range(current_stored, earliest_session)
+            if prepend is not None:
+                prepend_start, prepend_end = prepend
+                prepend_raw = _download_history(ticker, prepend_start, prepend_end)
+                prepend_fresh = normalize_history(prepend_raw)
+                if not prepend_fresh.empty:
+                    # Concatenate with the CURRENT frame, never store() the prepended chunk
+                    # alone — that would replace the TTL cache entry with just those bars.
+                    merged = pd.concat([prepend_fresh, current_stored])
+                    merged = merged[~merged.index.duplicated(keep="last")].sort_index()
+                    store(ticker, merged)
+                    result["bars_prepended"] = len(prepend_fresh)
+                    result["bars_after"] = len(merged)
+
+    return result

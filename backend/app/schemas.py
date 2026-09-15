@@ -45,6 +45,7 @@ class RefreshResult(BaseModel):
     bars_before: int
     bars_after: int
     drift_detected: bool
+    bars_prepended: int
     detail: UniverseDetail
 
 

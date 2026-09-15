@@ -2,8 +2,11 @@ import { useEffect, useRef, useState } from 'react'
 import type { JSX } from 'react'
 import { AddTickerForm } from '../components/AddTickerForm'
 import { UniverseTable } from '../components/UniverseTable'
+import { FilterDialog } from '../components/FilterDialog'
 import { ApiError, getUniverse, refreshTicker } from '../api/client'
 import type { UniverseDetail, UniverseEntry } from '../api/client'
+import { activeFilterCount, applyFilters, EMPTY_FILTERS } from '../lib/filters'
+import type { FilterState } from '../lib/filters'
 
 type State =
   | { status: 'loading' }
@@ -23,9 +26,12 @@ type BulkRefreshState =
 const CARD = 'bg-brand-surface border border-brand-border rounded-[var(--radius-card)]'
 
 export function UniversePage(): JSX.Element {
+  const messages = ['Loading universe…', 'Loading takes up to 90s…', 'Bazinga 😃']
   const [state, setState] = useState<State>({ status: 'loading' })
-  const [showHint, setShowHint] = useState(false)
+  const [messageIndex, setMessageIndex] = useState(0)
   const [bulkRefresh, setBulkRefresh] = useState<BulkRefreshState>({ status: 'idle' })
+  const [filters, setFilters] = useState<FilterState>(EMPTY_FILTERS)
+  const [filterDialogOpen, setFilterDialogOpen] = useState(false)
   const isMountedRef = useRef(true)
 
   useEffect(() => {
@@ -36,7 +42,7 @@ export function UniversePage(): JSX.Element {
   }, [])
 
   useEffect(() => {
-    const interval = setInterval(() => setShowHint((prev) => !prev), 3000)
+    const interval = setInterval(() => setMessageIndex((prev) => (prev + 1) % 3), 3000)
     return () => clearInterval(interval)
   }, [])
 
@@ -111,10 +117,20 @@ export function UniversePage(): JSX.Element {
     }
   }
 
+  const totalCount = state.status === 'ready' ? state.entries.length : 0
+
   const bulkRefreshLabel =
     bulkRefresh.status === 'running'
       ? `Refreshing ${bulkRefresh.completed + 1} of ${bulkRefresh.total}…`
-      : 'Refresh all'
+      : `Update all ${totalCount}`
+
+  const filterResult = state.status === 'ready' ? applyFilters(state.entries, filters) : null
+  const activeCount = activeFilterCount(filters)
+  const isFiltering = filters.query.trim() !== '' || activeCount > 0
+
+  function clearAllFilters(): void {
+    setFilters(EMPTY_FILTERS)
+  }
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -133,7 +149,7 @@ export function UniversePage(): JSX.Element {
 
         {state.status === 'loading' && (
           <div className={`${CARD} p-16 text-center text-[var(--color-muted)]`}>
-            {showHint ? 'Loading takes up to 90s…' : 'Loading universe…'}
+            {messages[messageIndex]}
           </div>
         )}
 
@@ -162,12 +178,73 @@ export function UniversePage(): JSX.Element {
 
         {state.status === 'ready' && state.entries.length > 0 && (
           <>
-            <div className="flex items-center justify-between gap-4 mb-3">
+            <div className="flex items-center gap-2 mb-3">
+              <div className="relative flex-[0_1_20rem] min-w-[9rem]">
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth={2.2}
+                  strokeLinecap="round"
+                  className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--color-muted)] pointer-events-none"
+                >
+                  <circle cx={11} cy={11} r={7} />
+                  <path d="m20 20-3.5-3.5" />
+                </svg>
+                <input
+                  type="text"
+                  value={filters.query}
+                  onChange={(event) => setFilters((prev) => ({ ...prev, query: event.target.value }))}
+                  placeholder="Search ticker or name"
+                  autoComplete="off"
+                  className="w-full text-sm pl-8 pr-3 py-2 rounded-[var(--radius-btn)] border border-brand-border bg-brand-surface text-foreground"
+                />
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setFilterDialogOpen(true)}
+                className="inline-flex items-center gap-1.5 flex-shrink-0 text-sm font-medium px-4 py-2 rounded-[var(--radius-btn)] bg-brand-surface border border-brand-border text-[var(--color-muted)] hover:bg-brand-border hover:text-foreground"
+              >
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                  strokeLinecap="round"
+                >
+                  <path d="M3 5h18M7 12h10M10 19h4" />
+                </svg>
+                <span className="hidden sm:inline">Filters</span>
+                {activeCount > 0 && (
+                  <span className="inline-flex items-center justify-center min-w-[1.15rem] h-[1.15rem] px-1 rounded-full bg-brand-primary text-white text-[0.6875rem] font-semibold">
+                    {activeCount}
+                  </span>
+                )}
+              </button>
+
+              {isFiltering && (
+                <button
+                  type="button"
+                  onClick={clearAllFilters}
+                  title="Clear all filters"
+                  className="inline-flex items-center justify-center w-[1.15rem] h-[1.15rem] rounded-full text-[var(--color-muted)] hover:bg-brand-border hover:text-foreground flex-shrink-0"
+                >
+                  ×
+                </button>
+              )}
+
+              <div className="flex-1" />
+
               <button
                 type="button"
                 onClick={() => void handleRefreshAll()}
                 disabled={bulkRefresh.status === 'running'}
-                className="text-sm font-medium px-4 py-2 rounded-[var(--radius-btn)] bg-brand-surface border border-brand-border text-[var(--color-muted)] hover:bg-brand-border hover:text-foreground disabled:opacity-50 disabled:cursor-not-allowed"
+                className="flex-shrink-0 text-sm font-medium px-4 py-2 rounded-[var(--radius-btn)] bg-brand-surface border border-brand-border text-[var(--color-muted)] hover:bg-brand-border hover:text-foreground disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {bulkRefreshLabel}
               </button>
@@ -198,7 +275,34 @@ export function UniversePage(): JSX.Element {
               </p>
             )}
 
-            <UniverseTable rows={state.entries} />
+            <p className="text-xs mb-3 min-h-[1rem]">
+              {isFiltering && filterResult && (
+                <>
+                  {`Showing ${filterResult.shown.length} of ${state.entries.length}`}
+                  {filterResult.hiddenForMissingData > 0 && (
+                    <span className="text-brand-accent">
+                      {` · ${filterResult.hiddenForMissingData} hidden — no ${filterResult.missingFields.join(', ')} data`}
+                    </span>
+                  )}
+                </>
+              )}
+            </p>
+
+            {filterResult && filterResult.shown.length === 0 && isFiltering ? (
+              <div className={`${CARD} p-16 text-center text-[var(--color-muted)]`}>
+                No securities match these filters.
+              </div>
+            ) : (
+              <UniverseTable rows={filterResult ? filterResult.shown : state.entries} />
+            )}
+
+            <FilterDialog
+              open={filterDialogOpen}
+              rows={state.entries}
+              filters={filters}
+              onChange={setFilters}
+              onClose={() => setFilterDialogOpen(false)}
+            />
           </>
         )}
       </main>

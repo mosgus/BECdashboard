@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -8,21 +8,25 @@ from app.cache import clear, get_cached, store
 from app.freshness import (
     DRIFT_TOLERANCE,
     detect_drift,
+    earliest_session_on_or_after,
     is_stale,
     last_completed_session,
     missing_range,
     pick_drift_anchors,
+    prepend_range,
 )
-from app.market_data import _last_session_cache, refresh_ticker
+from app.market_data import _earliest_session_cache, _last_session_cache, refresh_ticker
 
 
 @pytest.fixture(autouse=True)
 def reset_ttl_cache():
     clear()
     _last_session_cache.clear()
+    _earliest_session_cache.clear()
     yield
     clear()
     _last_session_cache.clear()
+    _earliest_session_cache.clear()
 
 
 def _bars(dates, adj_closes=None, closes=None, volumes=None) -> pd.DataFrame:
@@ -349,3 +353,235 @@ def test_refresh_ticker_caches_reference_session_across_tickers(monkeypatch):
     assert result_aapl["action"] == "none"
     assert result_msft["action"] == "none"
     assert spy_call_count == 1
+
+
+# --- 1-3. earliest_session_on_or_after -----------------------------------------------------
+
+HISTORY_START = date(2016, 1, 1)
+
+
+def test_earliest_session_on_or_after_returns_first_bar_on_or_after():
+    ref = _bars(["2016-01-04", "2016-01-05", "2016-01-06"])
+    assert earliest_session_on_or_after(HISTORY_START, ref) == date(2016, 1, 4)
+
+
+def test_earliest_session_on_or_after_none_for_empty_or_all_before():
+    assert earliest_session_on_or_after(HISTORY_START, pd.DataFrame()) is None
+    before = _bars(["2015-12-30", "2015-12-31"])
+    assert earliest_session_on_or_after(HISTORY_START, before) is None
+
+
+def test_earliest_session_on_or_after_bar_falls_exactly_on_history_start():
+    ref = _bars(["2016-01-01", "2016-01-02"])
+    assert earliest_session_on_or_after(HISTORY_START, ref) == date(2016, 1, 1)
+
+
+# --- 4-7. prepend_range ----------------------------------------------------------------------
+
+
+def test_prepend_range_computes_one_day_before_first_bar():
+    stored = _bars(["2016-09-13", "2016-09-14"])
+    assert prepend_range(stored, date(2016, 1, 4)) == (date(2016, 1, 4), date(2016, 9, 12))
+
+
+def test_prepend_range_none_when_first_bar_equals_earliest_session():
+    stored = _bars(["2016-01-04", "2016-01-05"])
+    assert prepend_range(stored, date(2016, 1, 4)) is None
+
+
+def test_prepend_range_none_when_first_bar_before_earliest_session():
+    stored = _bars(["2015-06-01", "2015-06-02"])
+    assert prepend_range(stored, date(2016, 1, 4)) is None
+
+
+def test_prepend_range_none_for_none_or_empty_stored():
+    assert prepend_range(None, date(2016, 1, 4)) is None
+    assert prepend_range(pd.DataFrame(), date(2016, 1, 4)) is None
+
+
+# --- 8-13. refresh_ticker's backward extension ------------------------------------------------
+
+
+def _spy_dispatch(spy_full, spy_narrow, narrow_calls=None):
+    """A fake_download branch for the reference ticker: (None, None) is the full-history
+    forward-session fetch, anything else is the narrow earliest-session probe."""
+
+    def dispatch(start, end):
+        if start is None and end is None:
+            return spy_full
+        if narrow_calls is not None:
+            narrow_calls.append((start, end))
+        return spy_narrow
+
+    return dispatch
+
+
+def test_refresh_ticker_prepend_terminates_after_first_success(monkeypatch):
+    """Case 8. The whole reason this contract has a test section: a ticker stored from
+    2016-09-13 gets prepended to 2016-01-04 on the first refresh; a second refresh must not
+    download anything for the prepend range at all."""
+    stored = _bars(["2016-09-13", "2016-09-14"], adj_closes=[100.0, 101.0])
+    store("AAPL", stored)
+
+    spy_dispatch = _spy_dispatch(
+        _bars(["2016-09-13", "2016-09-14"]), _bars(["2016-01-04", "2016-01-05", "2016-01-06"])
+    )
+    prepend_bars = _bars(["2016-01-04", "2016-01-05"], adj_closes=[10.0, 10.5])
+    prepend_calls = []
+
+    def fake_download(ticker, start, end):
+        if ticker == "SPY":
+            return spy_dispatch(start, end)
+        assert ticker == "AAPL"
+        prepend_calls.append((start, end))
+        assert (start, end) == (date(2016, 1, 4), date(2016, 9, 12))
+        return prepend_bars
+
+    monkeypatch.setattr("app.market_data._download_history", fake_download)
+    _patch_now(monkeypatch, datetime(2016, 9, 14, 17, tzinfo=ZoneInfo("America/New_York")))
+
+    result = refresh_ticker("AAPL", history_start=HISTORY_START)
+    assert result["action"] == "none"  # forward path: already current
+    assert result["bars_prepended"] == 2
+
+    stored_after = get_cached("AAPL")
+    assert stored_after.index.min().date() == date(2016, 1, 4)
+
+    result2 = refresh_ticker("AAPL", history_start=HISTORY_START)
+    assert len(prepend_calls) == 1  # no second prepend download
+    assert result2["bars_prepended"] == 0
+
+
+def test_refresh_ticker_prepend_merges_with_existing_cache_not_replaces_it(monkeypatch):
+    """Case 9. The TTL-cache trap: store(ticker, fresh) with only the prepended chunk would
+    silently truncate the in-process cache to just those bars. get_cached() after a prepend
+    must return the full merged frame — both the new and the pre-existing bars."""
+    stored = _bars(["2016-09-13", "2016-09-14"], adj_closes=[100.0, 101.0])
+    store("MSFT", stored)
+
+    spy_dispatch = _spy_dispatch(
+        _bars(["2016-09-13", "2016-09-14"]), _bars(["2016-01-04", "2016-01-05"])
+    )
+    prepend_bars = _bars(["2016-01-04", "2016-01-05"], adj_closes=[10.0, 10.5])
+
+    def fake_download(ticker, start, end):
+        if ticker == "SPY":
+            return spy_dispatch(start, end)
+        assert ticker == "MSFT"
+        return prepend_bars
+
+    monkeypatch.setattr("app.market_data._download_history", fake_download)
+    _patch_now(monkeypatch, datetime(2016, 9, 14, 17, tzinfo=ZoneInfo("America/New_York")))
+
+    refresh_ticker("MSFT", history_start=HISTORY_START)
+
+    merged = get_cached("MSFT")
+    assert merged.index.min().date() == date(2016, 1, 4)
+    assert merged.index.max().date() == date(2016, 9, 14)
+    assert len(merged) == 4  # 2 prepended + 2 pre-existing, not just the 2 prepended
+
+
+def test_refresh_ticker_prepend_young_ticker_gets_empty_frame_and_no_crash(monkeypatch):
+    """Case 10. A genuinely young ticker (e.g. RDDT, IPO'd 2024) re-probes once per refresh
+    and gets nothing back. Must not raise, must store nothing, bars_prepended == 0."""
+    stored = _bars(["2024-03-21", "2024-03-22"], adj_closes=[50.0, 51.0])
+    store("RDDT", stored)
+
+    spy_dispatch = _spy_dispatch(
+        _bars(["2024-03-21", "2024-03-22"]), _bars(["2016-01-04", "2016-01-05"])
+    )
+
+    def fake_download(ticker, start, end):
+        if ticker == "SPY":
+            return spy_dispatch(start, end)
+        assert ticker == "RDDT"
+        return pd.DataFrame()  # nothing that far back — RDDT didn't exist yet
+
+    monkeypatch.setattr("app.market_data._download_history", fake_download)
+    _patch_now(monkeypatch, datetime(2024, 3, 22, 17, tzinfo=ZoneInfo("America/New_York")))
+
+    result = refresh_ticker("RDDT", history_start=HISTORY_START)
+
+    assert result["bars_prepended"] == 0
+    stored_after = get_cached("RDDT")
+    assert len(stored_after) == 2  # unchanged
+
+
+def test_refresh_ticker_history_start_none_skips_prepend_entirely(monkeypatch):
+    """Case 11. The default: history_start=None must not even attempt the narrow
+    earliest-session fetch, let alone a prepend download."""
+    stored = _bars(["2016-09-13", "2016-09-14"], adj_closes=[100.0, 101.0])
+    store("AAPL", stored)
+
+    calls = []
+
+    def fake_download(ticker, start, end):
+        calls.append((ticker, start, end))
+        if ticker == "SPY" and start is None and end is None:
+            return _bars(["2016-09-13", "2016-09-14"])
+        raise AssertionError(f"unexpected download {ticker} {start} {end}")
+
+    monkeypatch.setattr("app.market_data._download_history", fake_download)
+    _patch_now(monkeypatch, datetime(2016, 9, 14, 17, tzinfo=ZoneInfo("America/New_York")))
+
+    result = refresh_ticker("AAPL")  # history_start defaults to None
+
+    assert result["action"] == "none"
+    assert result["bars_prepended"] == 0
+    assert calls == [("SPY", None, None)]  # only the forward session-derivation fetch
+
+
+def test_refresh_ticker_prepend_runs_even_when_forward_action_is_none(monkeypatch):
+    """Case 12. A ticker can be current at the front and short at the back — the exact case
+    this contract exists for. action == 'none' must not skip the prepend."""
+    stored = _bars(["2016-09-13", "2016-09-14"], adj_closes=[100.0, 101.0])
+    store("AAPL", stored)
+
+    spy_dispatch = _spy_dispatch(
+        _bars(["2016-09-13", "2016-09-14"]), _bars(["2016-01-04", "2016-01-05"])
+    )
+    prepend_bars = _bars(["2016-01-04", "2016-01-05"], adj_closes=[10.0, 10.5])
+
+    def fake_download(ticker, start, end):
+        if ticker == "SPY":
+            return spy_dispatch(start, end)
+        assert ticker == "AAPL"
+        return prepend_bars
+
+    monkeypatch.setattr("app.market_data._download_history", fake_download)
+    _patch_now(monkeypatch, datetime(2016, 9, 14, 17, tzinfo=ZoneInfo("America/New_York")))
+
+    result = refresh_ticker("AAPL", history_start=HISTORY_START)
+
+    assert result["action"] == "none"
+    assert result["bars_prepended"] == 2
+
+
+def test_refresh_ticker_earliest_session_fetched_once_across_n_tickers(monkeypatch):
+    """Case 13. Mirrors contract 0012's fix for _cached_last_session: refreshing N tickers
+    against the same HISTORY_START must cost one narrow earliest-session fetch, not N."""
+    store("AAPL", _bars(["2016-09-13", "2016-09-14"], adj_closes=[100.0, 101.0]))
+    # Already spans earliest -> last_session: neither a forward nor a backward fetch needed.
+    store("MSFT", _bars(["2016-01-04", "2016-09-14"], adj_closes=[50.0, 60.0]))
+
+    narrow_calls = []
+    spy_dispatch = _spy_dispatch(
+        _bars(["2016-09-13", "2016-09-14"]), _bars(["2016-01-04", "2016-01-05"]), narrow_calls
+    )
+
+    def fake_download(ticker, start, end):
+        if ticker == "SPY":
+            return spy_dispatch(start, end)
+        assert ticker == "AAPL"
+        return _bars(["2016-01-04", "2016-01-05"], adj_closes=[10.0, 10.5])
+
+    monkeypatch.setattr("app.market_data._download_history", fake_download)
+    _patch_now(monkeypatch, datetime(2016, 9, 14, 17, tzinfo=ZoneInfo("America/New_York")))
+
+    result_aapl = refresh_ticker("AAPL", history_start=HISTORY_START)
+    result_msft = refresh_ticker("MSFT", history_start=HISTORY_START)
+
+    assert result_aapl["bars_prepended"] == 2
+    assert result_msft["bars_prepended"] == 0
+    assert len(narrow_calls) == 1
+    assert narrow_calls[0] == (HISTORY_START, HISTORY_START + timedelta(days=30))

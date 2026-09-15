@@ -9,7 +9,7 @@ from app.db import get_engine, session
 from app.models import Base, UniverseTicker
 from app.universe import (
     AlreadyPresent,
-    HISTORY_YEARS,
+    HISTORY_START,
     NotInUniverse,
     UnknownSymbol,
     add,
@@ -166,19 +166,16 @@ def test_add_new_ticker_creates_row_and_returns_detail(db_mode, monkeypatch):
 # --- 2. add fetches ten years of history, not the ~22-bar default --------------------------
 
 
-def test_add_fetches_ten_years_of_history(db_mode, monkeypatch):
+def test_add_fetches_from_history_start(db_mode, monkeypatch):
+    """add() fetches from the fixed HISTORY_START anchor, not a rolling ten-years-back
+    window."""
     captured: dict = {}
     _patch_add(monkeypatch, history_capture=captured)
 
     add("AAPL")
 
-    assert captured["start"] is not None
+    assert captured["start"] == HISTORY_START
     assert captured["end"] is None
-    today = date.today()
-    expected_start = today.replace(year=today.year - HISTORY_YEARS)
-    assert captured["start"] == expected_start
-    # ~10 years, not a bare-default ~22-bar window
-    assert (today - captured["start"]).days > 3000
 
 
 # --- 3. add on an already-active ticker -------------------------------------------------
@@ -351,7 +348,7 @@ def test_refresh_returns_refresh_ticker_action_verbatim(db_mode, monkeypatch):
         "drift_detected": False,
     }
     monkeypatch.setattr(
-        "app.universe.refresh_ticker", lambda ticker, force=False: fake_summary
+        "app.universe.refresh_ticker", lambda ticker, force=False, history_start=None: fake_summary
     )
 
     result = refresh("AAPL")
@@ -508,7 +505,7 @@ def test_refresh_backfills_fundamentals_when_absent(db_mode, monkeypatch):
 
     monkeypatch.setattr(
         "app.universe.refresh_ticker",
-        lambda ticker, force=False: {
+        lambda ticker, force=False, history_start=None: {
             "ticker": "SPY",
             "action": "none",
             "last_session": None,
@@ -532,7 +529,7 @@ def test_refresh_does_not_refetch_fundamentals_when_present(db_mode, monkeypatch
 
     monkeypatch.setattr(
         "app.universe.refresh_ticker",
-        lambda ticker, force=False: {
+        lambda ticker, force=False, history_start=None: {
             "ticker": "AAPL",
             "action": "none",
             "last_session": None,

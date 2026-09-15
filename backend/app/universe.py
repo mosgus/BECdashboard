@@ -93,7 +93,7 @@ def refresh(ticker: str) -> dict:
         if row is None or not row.active:
             raise NotInUniverse(f"{key} is not in the universe")
 
-    result = refresh_ticker(key)
+    result = refresh_ticker(key, history_start=HISTORY_START)
 
     if get_fundamentals(key) is None:
         fetch_fundamentals(key)

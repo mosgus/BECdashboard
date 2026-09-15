@@ -116,9 +116,11 @@ def test_post_refresh_200_with_action(db_mode, client, monkeypatch):
         "bars_before": 2,
         "bars_after": 2,
         "drift_detected": False,
+        "bars_prepended": 0,
     }
     monkeypatch.setattr(
-        "app.universe.refresh_ticker", lambda ticker, force=False: fake_summary
+        "app.universe.refresh_ticker",
+        lambda ticker, force=False, history_start=None: fake_summary,
     )
 
     response = client.post("/universe/AAPL/refresh")

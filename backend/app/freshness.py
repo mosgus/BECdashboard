@@ -136,3 +136,44 @@ def missing_range(stored: pd.DataFrame, last_session: date) -> tuple[date, date]
         return None
 
     return (newest, last_session)
+
+
+def earliest_session_on_or_after(history_start: date, reference_bars: pd.DataFrame) -> date | None:
+    """The first session in reference_bars on or after history_start, or None when the frame
+    is empty or every bar precedes history_start.
+
+    January 1st (or any calendar HISTORY_START) is essentially never a trading day, so
+    first_bar > HISTORY_START is permanently true for every ticker. Comparing against the
+    real earliest session rather than the calendar date is what lets a backfill actually
+    terminate."""
+    if reference_bars is None or reference_bars.empty:
+        return None
+
+    bar_dates = [_to_date(idx) for idx in reference_bars.index]
+    eligible = [d for d in bar_dates if d >= history_start]
+
+    if not eligible:
+        return None
+    return min(eligible)
+
+
+def prepend_range(stored: pd.DataFrame | None, earliest_session: date) -> tuple[date, date] | None:
+    """The (start, end) to fetch to extend stored backwards, or None when nothing is missing.
+    Both bounds INCLUSIVE.
+
+    None when stored is None/empty — a first fetch is add()'s job, not a repair. None when
+    first_bar <= earliest_session — the termination condition. end is first_bar - 1 day, not
+    first_bar itself: _download_history adds a day back on the way out (contract 0012), so
+    passing first_bar would refetch the bar already held."""
+    if stored is None or stored.empty:
+        return None
+
+    first_bar = _to_date(stored.index.min())
+    if first_bar <= earliest_session:
+        return None
+
+    end = first_bar - timedelta(days=1)
+    if end < earliest_session:
+        return None
+
+    return (earliest_session, end)

@@ -436,6 +436,37 @@ out. Do not add the day at any call site.
 **five** — `currentPrice` never became a column, because `regular_market_price` was chosen precisely
 to avoid it. Contracts have conflated the two counts; the schema number is five.
 
+**Run the full backend suite at the start of every audit, whatever the contract's domain.**
+Established 2026-09-14 after the suite sat broken for two contracts without anyone noticing.
+- Commit `79849af` (a hand edit, not a contract) renamed `HISTORY_YEARS` → `HISTORY_START` in
+  `app/universe.py` and left `tests/test_universe.py` importing the old name — an `ImportError` at
+  collection, so the whole file failed to load, not just one test.
+- The planner missed it because the next audit (0015) was frontend-only: `tsc` and `npm run build`,
+  no pytest. The tree drifts between contracts, and hand edits are exactly the changes no contract
+  covers.
+- Cost was low here only because the 0016 coder hit it and fixed it. Do not rely on that.
+
+**Backfilling history backwards: compare against the earliest *session*, never the calendar date.**
+`app/freshness.py:prepend_range`, contract 0016.
+- `HISTORY_START` is a calendar date and 1 January is never a trading day, so `first_bar >
+  HISTORY_START` is **permanently true for every ticker**. Measured 2026-09-14: requesting
+  `2016-01-01` returns `2016-01-04` for both MSFT and SPY. A rule built on that comparison re-probes
+  every ticker on every refresh forever — contract 0012's non-termination bug in a new place.
+- The termination condition is `first_bar <= earliest_session_on_or_after(HISTORY_START)`, where the
+  earliest session comes from the reference ticker. That value never changes, so it is fetched once
+  and cached; N tickers cost one fetch.
+- **Accepted residue:** a ticker whose history genuinely begins later (RDDT, IPO 2024) stays above
+  the earliest session forever and re-probes once per refresh, returning nothing. One wasted request
+  per young ticker, bounded and visible. Persisting a per-ticker "already asked from" date would fix
+  it but needs a migration and a column whose semantics ("asked from", not "data starts at") are
+  easy to misread. Deferred until there is a measurement showing it matters.
+- **A prepend must `pd.concat` with the stored frame before `store()`.** Storing only the prepended
+  chunk replaces the in-process TTL cache with a frame holding 2016 and nothing since — the database
+  stays correct while `get_cached` lies for up to 24 hours. Verified 2026-09-14 that the
+  implementation concatenates: after a prepend the cached frame spans `2016-01-04 → 2016-09-15`.
+- Prepending runs **even when the forward path reports `action="none"`**. A ticker can be current at
+  the front and short at the back; that is the whole case.
+
 **Tests must never inherit an ambient `DATABASE_URL`.** `backend/tests/conftest.py` strips it via an
 autouse fixture; opt-in fixtures re-set it to a `tmp_path` SQLite file.
 - Why, concretely: on 2026-09-13, minutes after `backend/.env` was created with a live Render URL,
