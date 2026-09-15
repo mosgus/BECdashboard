@@ -4,14 +4,16 @@ This is orchestration, not new market-data logic. Every hard problem — partial
 restatement, dtype normalization, degraded mode — is already solved in freshness.py,
 market_data.py, and cache.py; nothing here reimplements any of it."""
 
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import func as sa_func, select
 
-from app.cache import get_cached, get_fundamentals
+from app.cache import get_cached, get_fundamentals, get_quotes
 from app.db import session
 from app.market_data import fetch_fundamentals, fetch_history, refresh_ticker, symbol_has_history
 from app.models import PriceBar, TickerFundamentals, UniverseTicker
+from app.quotes import QUOTE_TTL_MINUTES, is_market_open, refresh_quotes_if_stale
 
 HISTORY_START = date(2016, 1, 1)
 
@@ -33,6 +35,23 @@ class NotInUniverse(Exception):
 
 def _history_start(today: date) -> date:
     return HISTORY_START
+
+
+def _current_price(quote: dict | None) -> float | None:
+    """None when the market is closed or the stored quote is older than the TTL — the backend
+    decides this, not the frontend, so the client has no market-hours logic to duplicate."""
+    if quote is None:
+        return None
+
+    now_et = datetime.now(ZoneInfo("America/New_York"))
+    if not is_market_open(now_et):
+        return None
+
+    now_utc = datetime.now(timezone.utc)
+    if now_utc - quote["fetched_at"] > timedelta(minutes=QUOTE_TTL_MINUTES):
+        return None
+
+    return quote["price"]
 
 
 def add(ticker: str) -> dict:
@@ -102,9 +121,13 @@ def refresh(ticker: str) -> dict:
 
 
 def list_all() -> list[dict]:
-    """Active rows, ordered by ticker. Exactly one query per table (universe_tickers,
-    ticker_fundamentals, price_bars) regardless of how many tickers are active — bar counts
-    come from a single grouped aggregate query, not a per-ticker lookup."""
+    """Active rows, ordered by ticker. Quotes are refreshed (if stale) for the active set
+    before rows are built, then joined in — refresh_quotes_if_stale is the only entry point
+    that can trigger a live-quote fetch; get_one() only reads.
+
+    Exactly one query per table (universe_tickers, ticker_fundamentals, price_bars), plus one
+    for the most recent non-null close and one for quotes — a bounded handful regardless of
+    how many tickers are active, not one per ticker."""
     with session() as db:
         universe_rows = db.execute(
             select(UniverseTicker)
@@ -115,14 +138,31 @@ def list_all() -> list[dict]:
         tickers = [row.ticker for row in universe_rows]
         added_at_by_ticker = {row.ticker: row.added_at for row in universe_rows}
 
-        fundamentals_by_ticker: dict[str, TickerFundamentals] = {}
+        fundamentals_by_ticker: dict[str, dict] = {}
         bar_stats_by_ticker: dict[str, object] = {}
+        last_close_by_ticker: dict[str, float] = {}
 
         if tickers:
             fundamentals_rows = db.execute(
                 select(TickerFundamentals).where(TickerFundamentals.ticker.in_(tickers))
             ).scalars().all()
-            fundamentals_by_ticker = {row.ticker: row for row in fundamentals_rows}
+            # Extracted to plain dicts while the session is still open — the row-building loop
+            # below runs after this session closes (it needs to, to call refresh_quotes_if_stale
+            # without nesting sessions), and a detached ORM instance re-raises on any attribute
+            # access it didn't already materialize.
+            fundamentals_by_ticker = {
+                row.ticker: {
+                    "short_name": row.short_name,
+                    "sector": row.sector,
+                    "quote_type": row.quote_type,
+                    "regular_market_price": row.regular_market_price,
+                    "market_cap": row.market_cap,
+                    "trailing_pe": row.trailing_pe,
+                    "dividend_yield": row.dividend_yield,
+                    "fetched_at": row.fetched_at,
+                }
+                for row in fundamentals_rows
+            }
 
             bar_stats_rows = db.execute(
                 select(
@@ -136,30 +176,56 @@ def list_all() -> list[dict]:
             ).all()
             bar_stats_by_ticker = {row.ticker: row for row in bar_stats_rows}
 
-        entries = []
-        for ticker in tickers:
-            fundamentals = fundamentals_by_ticker.get(ticker)
-            stats = bar_stats_by_ticker.get(ticker)
-            entries.append(
-                {
-                    "ticker": ticker,
-                    "short_name": fundamentals.short_name if fundamentals else None,
-                    "sector": fundamentals.sector if fundamentals else None,
-                    "quote_type": fundamentals.quote_type if fundamentals else None,
-                    "regular_market_price": (
-                        fundamentals.regular_market_price if fundamentals else None
-                    ),
-                    "market_cap": fundamentals.market_cap if fundamentals else None,
-                    "trailing_pe": fundamentals.trailing_pe if fundamentals else None,
-                    "dividend_yield": fundamentals.dividend_yield if fundamentals else None,
-                    "has_fundamentals": fundamentals is not None,
-                    "bar_count": stats.bar_count if stats else 0,
-                    "first_bar": stats.first_bar if stats else None,
-                    "last_bar": stats.last_bar if stats else None,
-                    "fetched_at": fundamentals.fetched_at if fundamentals else None,
-                    "added_at": added_at_by_ticker[ticker],
-                }
+            # The most recent bar and the most recent bar WITH A CLOSE are not the same row
+            # once a null-close bar exists (the AAPL bug) — rank only over non-null closes so
+            # this is resilient to that row without needing it deleted first.
+            latest_close_subq = (
+                select(
+                    PriceBar.ticker,
+                    PriceBar.close,
+                    sa_func.row_number()
+                    .over(partition_by=PriceBar.ticker, order_by=PriceBar.date.desc())
+                    .label("rn"),
+                )
+                .where(PriceBar.ticker.in_(tickers), PriceBar.close.isnot(None))
+                .subquery()
             )
+            latest_close_rows = db.execute(
+                select(latest_close_subq.c.ticker, latest_close_subq.c.close).where(
+                    latest_close_subq.c.rn == 1
+                )
+            ).all()
+            last_close_by_ticker = {row.ticker: row.close for row in latest_close_rows}
+
+    refresh_quotes_if_stale(tickers)
+    quotes_by_ticker = get_quotes(tickers) if tickers else {}
+
+    entries = []
+    for ticker in tickers:
+        fundamentals = fundamentals_by_ticker.get(ticker)
+        stats = bar_stats_by_ticker.get(ticker)
+        entries.append(
+            {
+                "ticker": ticker,
+                "short_name": fundamentals["short_name"] if fundamentals else None,
+                "sector": fundamentals["sector"] if fundamentals else None,
+                "quote_type": fundamentals["quote_type"] if fundamentals else None,
+                "regular_market_price": (
+                    fundamentals["regular_market_price"] if fundamentals else None
+                ),
+                "market_cap": fundamentals["market_cap"] if fundamentals else None,
+                "trailing_pe": fundamentals["trailing_pe"] if fundamentals else None,
+                "dividend_yield": fundamentals["dividend_yield"] if fundamentals else None,
+                "has_fundamentals": fundamentals is not None,
+                "bar_count": stats.bar_count if stats else 0,
+                "first_bar": stats.first_bar if stats else None,
+                "last_bar": stats.last_bar if stats else None,
+                "fetched_at": fundamentals["fetched_at"] if fundamentals else None,
+                "added_at": added_at_by_ticker[ticker],
+                "current_price": _current_price(quotes_by_ticker.get(ticker)),
+                "last_close": last_close_by_ticker.get(ticker),
+            }
+        )
 
     return entries
 
@@ -167,7 +233,8 @@ def list_all() -> list[dict]:
 def get_one(ticker: str) -> dict:
     """The active row's full detail, or NotInUniverse. Uses get_cached() directly (rather
     than list_all()'s aggregate-query approach) since this is always exactly one ticker —
-    no fan-out concern to design around."""
+    no fan-out concern to design around. Reads the stored quote but never refreshes it —
+    list_all() is the only entry point that can trigger a live-quote fetch."""
     key = ticker.upper()
 
     with session() as db:
@@ -180,6 +247,14 @@ def get_one(ticker: str) -> dict:
     fundamentals = raw_fundamentals or {}
     prices = get_cached(key)
     has_prices = prices is not None and not prices.empty
+
+    last_close = None
+    if has_prices:
+        non_null_closes = prices["close"].dropna()
+        if not non_null_closes.empty:
+            last_close = float(non_null_closes.iloc[-1])
+
+    quote = get_quotes([key]).get(key)
 
     return {
         "ticker": key,
@@ -206,4 +281,6 @@ def get_one(ticker: str) -> dict:
         "first_bar": prices.index.min().date() if has_prices else None,
         "last_bar": prices.index.max().date() if has_prices else None,
         "added_at": added_at,
+        "current_price": _current_price(quote),
+        "last_close": last_close,
     }

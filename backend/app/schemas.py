@@ -23,6 +23,8 @@ class UniverseEntry(BaseModel):
     last_bar: date | None
     fetched_at: datetime | None
     added_at: datetime
+    current_price: float | None
+    last_close: float | None
 
 
 class UniverseDetail(UniverseEntry):

@@ -9,6 +9,8 @@ export interface UniverseEntry {
   sector: string | null
   quote_type: string | null
   regular_market_price: number | null
+  current_price: number | null
+  last_close: number | null
   market_cap: number | null
   trailing_pe: number | null
   dividend_yield: number | null

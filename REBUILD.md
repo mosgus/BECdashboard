@@ -495,6 +495,19 @@ Established 2026-09-14 after the suite sat broken for two contracts without anyo
 - Prepending runs **even when the forward path reports `action="none"`**. A ticker can be current at
   the front and short at the back; that is the whole case.
 
+**Known gap: `UniverseEntry` carries `current_price` but no quote timestamp.** Contract 0024 added
+`current_price` and `last_close`; contract 0025 assumed a `quote_as_of` alongside them and there
+isn't one — a planner error, both contracts written without cross-checking the second against what
+the first shipped.
+- The chart's live point therefore labels its x-axis with **today's UTC date derived on the client**,
+  not the quote's real timestamp. That is correct in the only window it runs: during market hours
+  (13:30–20:00 UTC) the UTC and ET dates always agree, and outside them `current_price` is `null` so
+  the derived date is never used.
+- Correct by argument rather than by construction. If quotes ever gain pre-market or after-hours
+  coverage, **this breaks silently** — the UTC date rolls over at 20:00 ET while the ET date has
+  not. Add `quote_as_of` to `UniverseEntry` before extending quote coverage beyond the regular
+  session.
+
 **Tests must never inherit an ambient `DATABASE_URL`.** `backend/tests/conftest.py` strips it via an
 autouse fixture; opt-in fixtures re-set it to a `tmp_path` SQLite file.
 - Why, concretely: on 2026-09-13, minutes after `backend/.env` was created with a live Render URL,

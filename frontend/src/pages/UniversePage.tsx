@@ -29,7 +29,7 @@ type BulkRefreshState =
 const CARD = 'bg-brand-surface border border-brand-border rounded-[var(--radius-card)]'
 
 export function UniversePage(): JSX.Element {
-  const messages = ['Loading universe…', 'Loading takes up to 90s…', 'Bazinga 😃']
+  const messages = ['Loading universe…', 'Loading takes ~60s…', 'Still loading…']
   const [state, setState] = useState<State>({ status: 'loading' })
   const [messageIndex, setMessageIndex] = useState(0)
   const [bulkRefresh, setBulkRefresh] = useState<BulkRefreshState>({ status: 'idle' })

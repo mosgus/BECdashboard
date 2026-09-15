@@ -76,7 +76,17 @@ export function UniverseTable({ rows, onRowClick }: UniverseTableProps): JSX.Ele
                 {row.sector ?? '—'}
               </td>
               <td className={`${TD} ${NOWRAP} text-right tabular-nums`}>
-                {formatPrice(row.regular_market_price)}
+                <Tooltip
+                  label={
+                    row.current_price !== null
+                      ? 'Live price during market hours'
+                      : 'Most recent closing price'
+                  }
+                >
+                  <span>
+                    {formatPrice(row.current_price ?? row.last_close ?? row.regular_market_price)}
+                  </span>
+                </Tooltip>
               </td>
               <td className={`${TD} ${NOWRAP} text-right tabular-nums hidden lg:table-cell text-[var(--color-muted)]`}>
                 {formatMarketCap(row.market_cap)}

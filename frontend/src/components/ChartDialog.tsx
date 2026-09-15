@@ -4,7 +4,7 @@ import { Area, AreaChart, ResponsiveContainer, Tooltip as RechartsTooltip, XAxis
 import { ApiError, getHistory } from '../api/client'
 import type { PriceBar, UniverseEntry } from '../api/client'
 import { formatPrice } from '../lib/format'
-import { DEFAULT_RANGE, RANGE_KEYS, hasEnoughData, sliceRange } from '../lib/ranges'
+import { DEFAULT_RANGE, RANGE_KEYS, hasEnoughData, sliceRange, withLiveQuote } from '../lib/ranges'
 import type { RangeKey } from '../lib/ranges'
 import { Tooltip } from './Tooltip'
 
@@ -104,7 +104,15 @@ export function ChartDialog({ ticker, entry, onClose }: ChartDialogProps): JSX.E
 
   const bars = fetchState.status === 'loaded' ? fetchState.bars : []
   const lastBarDate = bars.length > 0 ? parseLocalDate(bars[bars.length - 1].date) : null
-  const shown = lastBarDate ? sliceRange(bars, range, lastBarDate) : []
+  // entry.current_price is the only signal the client needs — it is already null outside
+  // market hours or when the stored quote is stale, so no market-hours logic lives here.
+  // UniverseEntry carries no explicit quote timestamp, so "today" (UTC) labels the live
+  // point; market hours never span a UTC day boundary, so this never disagrees with ET.
+  const currentPrice = entry?.current_price ?? null
+  const asOfISODate = new Date().toISOString().slice(0, 10)
+  const shown = lastBarDate
+    ? withLiveQuote(sliceRange(bars, range, lastBarDate), currentPrice, asOfISODate)
+    : []
 
   let changeNode: JSX.Element | null = null
   if (shown.length >= 2) {
@@ -124,7 +132,9 @@ export function ChartDialog({ ticker, entry, onClose }: ChartDialogProps): JSX.E
     }
   }
 
-  const lastClose = bars.length > 0 ? bars[bars.length - 1].close : null
+  // The header price is the last point of the *plotted* series, not the raw tail bar — during
+  // market hours that's the live quote withLiveQuote appended/replaced in, not yesterday's close.
+  const headerPrice = shown.length > 0 ? shown[shown.length - 1].close : null
 
   const closes = shown.map((bar) => bar.close).filter((c): c is number => c !== null)
   const yMin = closes.length > 0 ? Math.min(...closes) : 0
@@ -158,7 +168,7 @@ export function ChartDialog({ ticker, entry, onClose }: ChartDialogProps): JSX.E
           </div>
           <div className="flex items-start gap-4">
             <div className="text-right">
-              <div className="text-2xl font-semibold tabular-nums leading-tight">{formatPrice(lastClose)}</div>
+              <div className="text-2xl font-semibold tabular-nums leading-tight">{formatPrice(headerPrice)}</div>
               {changeNode}
             </div>
             <Tooltip label="Close this chart">

@@ -16,6 +16,14 @@ def reset_ttl_cache():
     clear()
 
 
+@pytest.fixture(autouse=True)
+def quotes_market_closed_by_default(monkeypatch):
+    """GET /universe now calls refresh_quotes_if_stale via list_all(), which would otherwise
+    decide whether to hit the real network based on the real wall-clock's actual market-hours
+    state. Same rationale and fix as test_universe.py's fixture of the same name."""
+    monkeypatch.setattr("app.quotes.is_market_open", lambda now_et: False)
+
+
 @pytest.fixture
 def db_mode(tmp_path, monkeypatch):
     url = f"sqlite:///{tmp_path}/test_api_universe.db"
@@ -354,11 +362,29 @@ def test_get_history_json_null_close_is_json_null_not_nan(db_mode, client, monke
     _patch_fetches(monkeypatch, has_history=True)
     client.post("/universe", json={"ticker": "AAPL"})
 
-    # Inject a bar with null close
-    from app.cache import store
-    df = _history(["2016-01-04", "2016-01-05"])
-    df.loc[df.index[0], "close"] = None
-    store("AAPL", df)
+    # Inject a bar with a null close directly into the database, bypassing cache.store()'s
+    # null-close guard (contract 0024: a bar with no close is never stored going forward).
+    # This simulates a bar already in place before that guard existed — the real production
+    # scenario the guard is named after — which the guard does not retroactively clean up.
+    from datetime import date as date_
+
+    from app.cache import clear
+    from app.models import PriceBar
+
+    with session() as db:
+        db.merge(
+            PriceBar(
+                ticker="AAPL",
+                date=date_(2016, 1, 4),
+                open=100.0,
+                high=101.0,
+                low=99.0,
+                close=None,
+                adj_close=None,
+                volume=1_000_000,
+            )
+        )
+    clear()
 
     response = client.get("/universe/AAPL/history")
     assert response.status_code == 200

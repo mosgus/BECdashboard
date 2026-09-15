@@ -26,6 +26,17 @@ def reset_ttl_cache():
     clear()
 
 
+@pytest.fixture(autouse=True)
+def quotes_market_closed_by_default(monkeypatch):
+    """list_all() now calls refresh_quotes_if_stale, which would otherwise decide whether to
+    hit the real network based on the real wall-clock's actual market-hours state — exactly
+    the kind of hidden real-network call the DATABASE_URL-stripping fixture in conftest.py
+    exists to prevent on the database side. Reporting the market closed by default makes every
+    existing test in this file deterministic and network-free regardless of when it happens to
+    run; tests that specifically exercise quote behavior override this themselves."""
+    monkeypatch.setattr("app.quotes.is_market_open", lambda now_et: False)
+
+
 @pytest.fixture
 def db_mode(tmp_path, monkeypatch):
     url = f"sqlite:///{tmp_path}/test_universe.db"
@@ -290,7 +301,11 @@ def test_list_all_query_count_does_not_scale_with_ticker_count(db_mode, monkeypa
     count_at_10 = query_count_for_list_all()
 
     assert count_at_2 == count_at_10
-    assert count_at_2 <= 3  # universe_tickers + ticker_fundamentals + price_bars aggregate
+    # universe_tickers + ticker_fundamentals + price_bars aggregate + latest-non-null-close +
+    # quotes.refresh_quotes_if_stale's own newest-fetched-at read + get_quotes — contract 0024
+    # raised this bound from 3: "three is acceptable; per-ticker is not." What matters is the
+    # equality assertion above, not this specific number.
+    assert count_at_2 <= 6
 
 
 def test_list_all_membership_without_fundamentals_row(db_mode):
@@ -543,3 +558,45 @@ def test_refresh_does_not_refetch_fundamentals_when_present(db_mode, monkeypatch
     result = refresh("AAPL")  # must not raise — fetch_fundamentals must not be called
 
     assert result["detail"]["has_fundamentals"] is True
+
+
+# --- 11. list_all includes current_price and last_close ------------------------------------
+
+
+def test_list_all_current_price_populated_when_quote_fresh_and_market_open(db_mode, monkeypatch):
+    _patch_add(monkeypatch)
+    add("AAPL")
+
+    def _raising_download_quotes(_tickers):
+        raise AssertionError("a fresh quote must not trigger another fetch")
+
+    monkeypatch.setattr("app.quotes.is_market_open", lambda now_et: True)
+    monkeypatch.setattr("app.quotes._download_quotes", _raising_download_quotes)
+
+    from app.cache import store_quotes
+
+    now = datetime.now(timezone.utc)
+    store_quotes({"AAPL": (123.45, now)}, now)
+
+    entries = {e["ticker"]: e for e in list_all()}
+    assert entries["AAPL"]["current_price"] == 123.45
+    assert entries["AAPL"]["last_close"] == 101.0  # the newer of _history's default two bars
+
+
+def test_list_all_current_price_null_when_quote_older_than_ttl(db_mode, monkeypatch):
+    _patch_add(monkeypatch)
+    add("AAPL")
+
+    monkeypatch.setattr("app.quotes.is_market_open", lambda now_et: True)
+    monkeypatch.setattr("app.quotes._download_quotes", lambda tickers: pd.DataFrame())
+
+    from datetime import timedelta
+
+    from app.cache import store_quotes
+
+    stale_fetch = datetime.now(timezone.utc) - timedelta(minutes=11)
+    store_quotes({"AAPL": (123.45, stale_fetch)}, stale_fetch)
+
+    entries = {e["ticker"]: e for e in list_all()}
+    assert entries["AAPL"]["current_price"] is None
+    assert entries["AAPL"]["last_close"] == 101.0

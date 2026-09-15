@@ -64,3 +64,17 @@ class UniverseTicker(Base):
     ticker: Mapped[str] = mapped_column(String, primary_key=True)
     added_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)
+
+
+class TickerQuote(Base):
+    """The latest live intraday price per ticker — a different lifecycle from price_bars
+    (expires in minutes, not sessions), which is why it is its own table rather than a row
+    shape mixed into price_bars. No foreign key to universe_tickers, same rule as price_bars:
+    cached market data must not depend on a curated list."""
+
+    __tablename__ = "ticker_quotes"
+
+    ticker: Mapped[str] = mapped_column(String, primary_key=True)
+    price: Mapped[float] = mapped_column(Float, nullable=False)
+    as_of: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 import pandas as pd
 from cachetools import TTLCache
 from sqlalchemy import func, select
@@ -5,7 +7,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from app.db import is_enabled, session
-from app.models import PriceBar, TickerFundamentals
+from app.models import PriceBar, TickerFundamentals, TickerQuote
 
 _cache = TTLCache(maxsize=512, ttl=86400)
 
@@ -42,9 +44,18 @@ def store(ticker: str, df: pd.DataFrame) -> None:
 
     Frames with none of the OHLCV columns pass through unchanged: this cache is generic
     (contract 0001's tests store arbitrary DataFrames with no date index at all), and only
-    the OHLCV shape has a database table to normalize against."""
+    the OHLCV shape has a database table to normalize against.
+
+    A row with a null close is dropped here, before either destination — an in-progress
+    intraday bar fetched before the session's close is published, not a completed session.
+    Filtering once, upstream of both the TTL cache and the database write, is what keeps them
+    from ever disagreeing about which rows exist (contract 0004's audit found them diverge
+    once already)."""
     key = ticker.upper()
-    normalized = _normalize_ohlcv(df) if _looks_like_ohlcv(df) else df
+    is_ohlcv = _looks_like_ohlcv(df)
+    normalized = _normalize_ohlcv(df) if is_ohlcv else df
+    if is_ohlcv:
+        normalized = normalized[normalized["close"].notna()]
     _cache[key] = normalized
 
     if is_enabled():
@@ -90,6 +101,78 @@ def get_fundamentals(ticker: str) -> dict | None:
         if row is None:
             return None
         return {col.name: getattr(row, col.name) for col in TickerFundamentals.__table__.columns}
+
+
+def store_quotes(quotes: dict[str, tuple[float, datetime]], fetched_at: datetime) -> None:
+    """Upsert every given quote in one statement. No-op for an empty dict or no database —
+    mirrors store_fundamentals; quotes have no TTL-cache tier of their own, only the table."""
+    if not is_enabled() or not quotes:
+        return
+
+    records = [
+        {"ticker": ticker.upper(), "price": price, "as_of": as_of, "fetched_at": fetched_at}
+        for ticker, (price, as_of) in quotes.items()
+    ]
+
+    with session() as db:
+        dialect = db.get_bind().dialect.name
+        insert_fn = pg_insert if dialect == "postgresql" else sqlite_insert
+        stmt = insert_fn(TickerQuote).values(records)
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["ticker"],
+            set_={
+                "price": stmt.excluded.price,
+                "as_of": stmt.excluded.as_of,
+                "fetched_at": stmt.excluded.fetched_at,
+            },
+        )
+        db.execute(stmt)
+
+
+def _fetched_at_as_utc(dt: datetime | None) -> datetime | None:
+    """Postgres round-trips a DateTime(timezone=True) column as tz-aware; SQLite (used in
+    tests) hands it back naive. fetched_at is always written as datetime.now(timezone.utc)
+    (see store_quotes), so its wall-clock numbers are genuinely UTC even after SQLite drops
+    the tzinfo — re-attaching UTC here is a safe relabel, not a guess. as_of is NOT put
+    through this: it comes from yfinance's own bar timestamp, whose tz this module does not
+    control, so relabeling a naive as_of as UTC could silently be wrong."""
+    if dt is None:
+        return None
+    return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
+
+
+def get_newest_quote_fetched_at(tickers: list[str]) -> datetime | None:
+    """The most recent fetched_at among ticker_quotes rows for the given tickers, or None
+    when none exist or no database is configured. quotes.refresh_quotes_if_stale uses this to
+    decide whether a refresh is due."""
+    if not is_enabled() or not tickers:
+        return None
+
+    keys = [t.upper() for t in tickers]
+    with session() as db:
+        newest = db.execute(
+            select(func.max(TickerQuote.fetched_at)).where(TickerQuote.ticker.in_(keys))
+        ).scalar()
+    return _fetched_at_as_utc(newest)
+
+
+def get_quotes(tickers: list[str]) -> dict[str, dict]:
+    """One query for every requested ticker's current quote. A ticker with no stored quote is
+    simply absent from the returned dict, not an error."""
+    if not is_enabled() or not tickers:
+        return {}
+
+    keys = [t.upper() for t in tickers]
+    with session() as db:
+        rows = db.execute(select(TickerQuote).where(TickerQuote.ticker.in_(keys))).scalars().all()
+        return {
+            row.ticker: {
+                "price": row.price,
+                "as_of": row.as_of,
+                "fetched_at": _fetched_at_as_utc(row.fetched_at),
+            }
+            for row in rows
+        }
 
 
 def _looks_like_ohlcv(df: pd.DataFrame) -> bool:
