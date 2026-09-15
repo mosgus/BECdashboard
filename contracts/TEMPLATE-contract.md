@@ -68,6 +68,19 @@ failures. Do not summarize, do not trim, do not clean up.
 <command 2>
 ```
 
+## Tooltips — required for any contract adding interactive elements
+
+<Delete this section only if the contract adds no clickable or focusable element.>
+
+Every button, link, icon-only control, input, and click-responsive row introduced by this contract
+carries a `Tooltip` describing **what it does**, phrased as the effect rather than the label.
+
+Do **not** use the `title` attribute — it does not render on `disabled` elements, which is precisely
+when the explanation is most wanted. See `REBUILD.md`, "Every interactive element gets a hover
+tooltip."
+
+List the exact tooltip copy for each element here, so the audit can check it against what shipped.
+
 ## Human verification — does Gunnar need to run anything?
 
 <Required section. One of:>

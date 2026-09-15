@@ -127,6 +127,24 @@ Limited hands-on development history with the existing app, so the goal is to re
 - Rejected: live yfinance lookup per ticker. ~200–500ms each and Yahoo rate-limits aggressively; entering a dozen positions would throttle you, and that's the failure you'd hit first in a demo.
 - Open: where the symbol list itself comes from (SEC `company_tickers.json`, an exchange file, or something else).
 
+**Every interactive element gets a hover tooltip explaining what it does.** Standing requirement
+from 2026-09-15, applies to all future frontend contracts — buttons, links, icon-only controls,
+inputs, and rows that respond to clicks. Phrase it as the *effect*, not the label: "Updates ticker
+data up to the last close price", not "Update all".
+- **Do not use the `title` attribute for this.** It fails in the two situations that matter most:
+  - **`title` does not appear on `disabled` elements.** Browsers do not fire mouse events on
+    disabled form controls, so the explanation is silent exactly when a user is asking "why can't I
+    click this?" Measured on `AddTickerForm`'s Add button (disabled while the input is empty) and
+    `Update all` (disabled mid-refresh).
+  - Native tooltips have a ~1 second delay, cannot be styled, and are inconsistent across browsers
+    and absent on touch.
+- **Use a project `Tooltip` component**: short delay, brand-token styling, viewport-clamped
+  positioning, and it **wraps** disabled controls so the wrapper receives the hover the control
+  cannot. Hand-rolled, no dependency — the same reasoning that inlined lucide icons rather than
+  adding `lucide-react`.
+- Keep `title` only where it is genuinely a fallback for truncated text (e.g. the `Name` cell), not
+  as an explanation mechanism.
+
 **Verification standard: pytest on the backend, typecheck + build on the frontend.**
 - Any backend module doing math or data transformation ships with pytest tests. That's where silent wrongness lives — a wrong Sharpe ratio looks entirely plausible, which is exactly what an audit can't catch by reading.
 - Frontend contracts are verified by `npx tsc -p tsconfig.app.json --noEmit` and a clean `npm run build`, plus a human look at the running page. UI unit tests are skipped deliberately: high effort, low value while the layout is still moving.
@@ -136,6 +154,15 @@ Limited hands-on development history with the existing app, so the goal is to re
   specified Mkt Cap, P/E and Yield columns *and* a type with none of those fields — an internal
   contradiction nobody could satisfy. Caught by the 0009 coder, fixed by 0010. When a mockup shows a
   value, name the endpoint it comes from.
+- **Test responsive layout at breakpoint boundaries, not round numbers.** Tailwind's are 640, 768,
+  1024, 1280. **A `min-width` breakpoint's worst case is exactly at its trigger point**, where the
+  newly-revealed columns appear in the narrowest viewport that shows them. Contract 0018 specified
+  375/700/900/1100/1440, passed all five, and overflowed ~73px at **1024** — where `lg:` reveals
+  `Mkt Cap`, `P/E` and `Coverage` simultaneously. Test each boundary and the pixel below it.
+- **The Universe table's horizontal overflow has now been a bug three times** (0009, 0014, 0018),
+  always the same shape: the card's `overflow-hidden` converts overflow into **silent clipping of
+  the last column** rather than a scrollbar, so a screenshot looks correct. The only reliable check
+  is numeric — `table.scrollWidth` against the card's `clientWidth`. Never accept "it looks fine."
 - **Scope grep-based acceptance criteria to files the contract owns, and to code rather than
   comments.** Three contracts in a row (0003, 0005, 0006) produced grep criteria that failed on
   things that were not violations: `globals.css`'s hex tokens, which the same contract forbade
@@ -368,8 +395,9 @@ not account for it.
   than one session of lag is worth"; that was overcautious. It *composes* with the reference-ticker
   trick rather than replacing it: the reference ticker says empirically which sessions exist
   (holidays, half-days, no calendar dependency), and the 4pm check says whether today counts yet.
-- **Prepending, not just appending (`YF.py:496-561`)** — fetching missing data at *both* edges of
-  the stored range. Needed when someone wants more history than was first stored. Currently unscoped.
+- ~~**Prepending, not just appending (`YF.py:496-561`)**~~ — **built 2026-09-14, contract 0016.**
+  `refresh_ticker` now extends both edges. See "Backfilling history backwards" below for the
+  termination rule, which is the non-obvious part.
 - **Not carried:** the CSV layer, `input()`/CLI, `_OLD.csv` backups (upserts replace them),
   `pandas_market_calendars` (the reference-ticker approach needs no native dependency and cannot
   disagree with what yfinance actually serves), and `fetch_data`'s error handling, which redirects
@@ -509,9 +537,13 @@ decision; nothing depends on it yet.
 ## Open questions (not decided)
 
 - **Whether tickers can be removed from the universe.** Only add and update have been specified. If removal exists, decide whether it deletes cached price history or just de-lists the ticker — the no-FK rule above means de-listing is the cheap default.
-- **Bulk update ("update all").** Not specified. The freshness rule makes it far less dangerous than it would otherwise be — already-current tickers are no-ops — but a first run against a large universe still fans out into one Yahoo request per stale ticker.
+- ~~**Bulk update ("update all").**~~ **Built 2026-09-14, contract 0014 — frontend only.** One `Update all N` control loops **sequentially** over the existing per-ticker `POST /universe/{ticker}/refresh`; no new backend surface, no `Promise.all`. Sequential is the load-bearing choice, not a style preference: concurrent fan-out reproduces the request burst that got Render's shared IP crumb-throttled in contract 0013. The freshness rule keeps the cost proportional to *stale* tickers rather than total ones. The per-row refresh button was removed at the same time, making `UniverseTable` a pure display component.
+  - It deliberately **ignores filters** (contract 0015) — hence the count in the label, so "all 9" while three rows show is unambiguous rather than a lie.
+  - Unmount must **break the loop**, not merely suppress `setState`; otherwise navigating away leaves every remaining ticker's request in flight. Caught in the 0014 audit, since a "no console warnings" test passes while the requests keep firing.
+- **Bulk refresh cost at scale.** Still open, one level up: sequential refresh over 50+ tickers is slow by design, with no cancel control and no progress persistence across a reload. Do not parallelise it; if this becomes painful the answer is a server-side job, not concurrency from the browser.
 - **Result caching for analysis/optimization output.** Not yet justified by an actual performance problem — don't build it speculatively.
-- **CSV upload scope.** Manual entry is confirmed for the first feature. Whether CSV import ships alongside it or immediately after is not yet decided.
+- **CSV upload scope.** Written when portfolio initialization was the first feature; that changed. Manual ticker entry is what the Universe ships with. Whether CSV import arrives for the *universe* (bulk-adding tickers), for *portfolios* (positions), or neither, is undecided.
+- **Universe filtering is built (contract 0015) but holds nothing back.** Client-side search plus six filters in a dialog. Still open, and deliberately not built: **sorting** (the list is ticker-ordered), **persisting filter state in the URL** — `/universe?sector=Technology` would be shareable and survive a reload now that the router exists — and **negative P/E**, where a "max 25" filter silently includes an unprofitable company at −40. None are present in the current nine tickers.
 - ~~**Ticker validation source.**~~ **Resolved 2026-09-13 by the curated universe.** Two separate checks now exist and neither needs an SEC symbol file. (1) Adding to the universe: yfinance is the authority — a bad symbol returns `{'trailingPegRatio': None}` without raising, so validity is "does `.info` contain a required key." (2) Portfolio entry, later: validate against **the universe itself**, which is a served list the app already owns. This is strictly simpler than the served-symbol-list plan recorded under "Ticker validation" in Decided, which that entry should be read as superseded by.
 - ~~**Persistent price-cache table.**~~ **Resolved 2026-09-13 — it is being built.** See "First feature: a curated, shared, server-persisted Universe" in Decided. The deferral reasoning ("not before an initial deployment exists") was overtaken by the decision to share a universe across users, which requires persistence by definition.
 - **Whether `Research` and `/ops` survive as real features.** Two of the launch page's four nav destinations still contradict "Explicitly cut from the old app" below: `/research/*` includes decision memos and stress pages; `/ops` was backed by `job_runs`, `audit_log` and `email_config`, and `core/ops/data_status.py` reports on a database this rebuild does not have. The nav labels are settled; **what they eventually point to is not.** Either the cut list gets revised or the labels do. Do not resolve this by building either page. (`Universe` is resolved — see "First feature" above. `Portfolios` was never in doubt.)

@@ -3,9 +3,9 @@ from fastapi.testclient import TestClient
 import pytest
 
 from app.cache import clear, store, store_fundamentals
-from app.db import get_engine
+from app.db import get_engine, session
 from app.main import app
-from app.models import Base
+from app.models import Base, UniverseTicker
 from tests.test_universe import _fundamentals, _history
 
 
@@ -209,6 +209,81 @@ def test_degraded_mode_error_body(client):
     assert response.json() == {"detail": "Database not configured"}
 
 
+# --- 8-9. GET /universe/{ticker}/history.csv: 200, headers, header row, line count --------
+
+
+def test_download_history_csv_200_with_headers_and_body(db_mode, client, monkeypatch):
+    _patch_fetches(monkeypatch)
+    client.post("/universe", json={"ticker": "AAPL"})
+
+    response = client.get("/universe/AAPL/history.csv")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/csv")
+    assert "attachment" in response.headers["content-disposition"]
+    assert 'filename="AAPL.csv"' in response.headers["content-disposition"]
+
+    lines = response.text.splitlines()
+    assert lines[0] == "Date,Open,High,Low,Close,Adj Close,Volume"
+    assert len(lines) == 3  # header + the two bars _patch_fetches stores
+
+
+# --- 10-11. 404s: unknown ticker, and a member with no stored bars -------------------------
+
+
+def test_download_history_csv_404_when_not_in_universe(db_mode, client):
+    response = client.get("/universe/NOPE/history.csv")
+    assert response.status_code == 404
+
+
+def test_download_history_csv_404_when_no_stored_bars(db_mode, client):
+    """A membership row can exist with no price_bars rows at all — same edge case
+    test_universe.py's ORPHAN fixture covers for list_all()."""
+    with session() as db:
+        db.add(UniverseTicker(ticker="ORPHAN", active=True))
+
+    response = client.get("/universe/ORPHAN/history.csv")
+    assert response.status_code == 404
+
+
+# --- 12. lowercase path resolves the same ticker; filename is uppercased -------------------
+
+
+def test_download_history_csv_lowercase_path_resolves_and_filename_is_uppercased(
+    db_mode, client, monkeypatch
+):
+    _patch_fetches(monkeypatch)
+    client.post("/universe", json={"ticker": "AAPL"})
+
+    response = client.get("/universe/aapl/history.csv")
+
+    assert response.status_code == 200
+    assert 'filename="AAPL.csv"' in response.headers["content-disposition"]
+
+
+# --- 13. no call to _download_history — a download never fetches --------------------------
+
+
+def test_download_history_csv_never_calls_download_history(db_mode, client, monkeypatch):
+    _patch_fetches(monkeypatch)
+    client.post("/universe", json={"ticker": "AAPL"})
+
+    def _raise(*_args, **_kwargs):
+        raise AssertionError("_download_history must not be called by a CSV download")
+
+    monkeypatch.setattr("app.market_data._download_history", _raise)
+
+    response = client.get("/universe/AAPL/history.csv")
+    assert response.status_code == 200
+
+
+# --- 14. degraded mode returns 503 ----------------------------------------------------------
+
+
+def test_download_history_csv_degraded_mode_returns_503(client):
+    assert client.get("/universe/AAPL/history.csv").status_code == 503
+
+
 # --- 21. no error body contains a connection string ---------------------------------------
 
 
@@ -229,3 +304,107 @@ def test_error_bodies_never_contain_a_connection_string(db_mode, client, monkeyp
         assert "sqlite://" not in body
         assert "postgresql://" not in body
         assert "postgres://" not in body
+
+
+# --- 22. GET /universe/{ticker}/history: JSON endpoint for charting -------------------------
+
+
+def test_get_history_json_200_with_ticker_and_bars(db_mode, client, monkeypatch):
+    _patch_fetches(monkeypatch)
+    client.post("/universe", json={"ticker": "AAPL"})
+
+    response = client.get("/universe/AAPL/history")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["ticker"] == "AAPL"
+    assert len(data["bars"]) == 2  # _patch_fetches stores 2 bars
+
+
+def test_get_history_json_bars_ordered_oldest_first(db_mode, client, monkeypatch):
+    _patch_fetches(monkeypatch)
+    client.post("/universe", json={"ticker": "AAPL"})
+
+    response = client.get("/universe/AAPL/history")
+    data = response.json()
+    bars = data["bars"]
+    assert bars[0]["date"] < bars[-1]["date"]
+
+
+def test_get_history_json_bar_fields_exact(db_mode, client, monkeypatch):
+    _patch_fetches(monkeypatch)
+    client.post("/universe", json={"ticker": "AAPL"})
+
+    response = client.get("/universe/AAPL/history")
+    data = response.json()
+    bar = data["bars"][0]
+    assert set(bar.keys()) == {"date", "close", "adj_close"}
+
+
+def test_get_history_json_date_format_yyyy_mm_dd(db_mode, client, monkeypatch):
+    _patch_fetches(monkeypatch)
+    client.post("/universe", json={"ticker": "AAPL"})
+
+    response = client.get("/universe/AAPL/history")
+    data = response.json()
+    bar = data["bars"][0]
+    assert bar["date"] == "2016-01-04"
+
+
+def test_get_history_json_null_close_is_json_null_not_nan(db_mode, client, monkeypatch):
+    _patch_fetches(monkeypatch, has_history=True)
+    client.post("/universe", json={"ticker": "AAPL"})
+
+    # Inject a bar with null close
+    from app.cache import store
+    df = _history(["2016-01-04", "2016-01-05"])
+    df.loc[df.index[0], "close"] = None
+    store("AAPL", df)
+
+    response = client.get("/universe/AAPL/history")
+    assert response.status_code == 200
+    assert "NaN" not in response.text
+    assert "null" in response.text
+    data = response.json()
+    assert data["bars"][0]["close"] is None
+
+
+def test_get_history_json_lowercase_path_resolves_uppercased_ticker(db_mode, client, monkeypatch):
+    _patch_fetches(monkeypatch)
+    client.post("/universe", json={"ticker": "AAPL"})
+
+    response = client.get("/universe/aapl/history")
+    assert response.status_code == 200
+    assert response.json()["ticker"] == "AAPL"
+
+
+def test_get_history_json_404_ticker_not_in_universe(db_mode, client):
+    response = client.get("/universe/NOPE/history")
+    assert response.status_code == 404
+    assert "NOPE" in response.json()["detail"]
+
+
+def test_get_history_json_404_no_stored_bars(db_mode, client):
+    with session() as db:
+        db.add(UniverseTicker(ticker="ORPHAN", active=True))
+
+    response = client.get("/universe/ORPHAN/history")
+    assert response.status_code == 404
+
+
+def test_get_history_json_503_degraded_mode(client):
+    response = client.get("/universe/AAPL/history")
+    assert response.status_code == 503
+
+
+def test_get_history_json_never_fetches_from_yfinance(db_mode, client, monkeypatch):
+    _patch_fetches(monkeypatch)
+    client.post("/universe", json={"ticker": "AAPL"})
+
+    def _raise(*_args, **_kwargs):
+        raise AssertionError("Must not fetch from yfinance")
+
+    monkeypatch.setattr("app.market_data._download_history", _raise)
+    monkeypatch.setattr("app.market_data._download_info", _raise)
+
+    response = client.get("/universe/AAPL/history")
+    assert response.status_code == 200

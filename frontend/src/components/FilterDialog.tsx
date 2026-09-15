@@ -3,6 +3,7 @@ import type { JSX } from 'react'
 import type { UniverseEntry } from '../api/client'
 import type { FilterState } from '../lib/filters'
 import { parseNumericInput, sectorOptions } from '../lib/filters'
+import { Tooltip } from './Tooltip'
 
 interface FilterDialogProps {
   open: boolean
@@ -150,23 +151,26 @@ export function FilterDialog({ open, rows, filters, onChange, onClose }: FilterD
       >
         <div className="flex items-center justify-between px-5 py-4 border-b border-brand-border">
           <h2 className="text-[1.0625rem] font-semibold">Filters</h2>
-          <button
-            type="button"
-            onClick={handleClose}
-            title="Close"
-            className="w-[1.15rem] h-[1.15rem] flex items-center justify-center rounded-full text-[var(--color-muted)] hover:bg-brand-border hover:text-foreground"
-          >
-            ×
-          </button>
+          <Tooltip label="Close and apply">
+            <button
+              type="button"
+              onClick={handleClose}
+              className="w-[1.15rem] h-[1.15rem] flex items-center justify-center rounded-full text-[var(--color-muted)] hover:bg-brand-border hover:text-foreground"
+            >
+              ×
+            </button>
+          </Tooltip>
         </div>
 
         <div className="px-5 pt-2 pb-4 overflow-y-auto">
           <div className={GROUP}>
             <div className={GROUP_HEAD}>
               <span className={GROUP_LABEL}>Type</span>
-              <button type="button" className={CLEAR_LINK} onClick={() => clearTypeOrSector('types')}>
-                clear
-              </button>
+              <Tooltip label="Clear only this filter">
+                <button type="button" className={CLEAR_LINK} onClick={() => clearTypeOrSector('types')}>
+                  clear
+                </button>
+              </Tooltip>
             </div>
             <div className="flex flex-wrap gap-1.5">
               {TYPE_OPTIONS.map((option) => {
@@ -193,9 +197,11 @@ export function FilterDialog({ open, rows, filters, onChange, onClose }: FilterD
           <div className={GROUP}>
             <div className={GROUP_HEAD}>
               <span className={GROUP_LABEL}>Sector</span>
-              <button type="button" className={CLEAR_LINK} onClick={() => clearTypeOrSector('sectors')}>
-                clear
-              </button>
+              <Tooltip label="Clear only this filter">
+                <button type="button" className={CLEAR_LINK} onClick={() => clearTypeOrSector('sectors')}>
+                  clear
+                </button>
+              </Tooltip>
             </div>
             <div className="flex flex-wrap gap-1.5">
               {sectors.map((sector) => {
@@ -226,9 +232,11 @@ export function FilterDialog({ open, rows, filters, onChange, onClose }: FilterD
               <div className={GROUP} key={group.key}>
                 <div className={GROUP_HEAD}>
                   <span className={GROUP_LABEL}>{group.label}</span>
-                  <button type="button" className={CLEAR_LINK} onClick={() => clearRange(group.key)}>
-                    clear
-                  </button>
+                  <Tooltip label="Clear only this filter">
+                    <button type="button" className={CLEAR_LINK} onClick={() => clearRange(group.key)}>
+                      clear
+                    </button>
+                  </Tooltip>
                 </div>
                 <div className="flex items-center gap-2">
                   <input
@@ -254,20 +262,24 @@ export function FilterDialog({ open, rows, filters, onChange, onClose }: FilterD
         </div>
 
         <div className="flex items-center justify-between gap-2 px-5 py-3.5 border-t border-brand-border">
-          <button
-            type="button"
-            onClick={clearAllGroups}
-            className="text-sm font-medium px-4 py-2 rounded-[var(--radius-btn)] bg-brand-surface border border-brand-border text-[var(--color-muted)] hover:bg-brand-border hover:text-foreground"
-          >
-            Clear all
-          </button>
-          <button
-            type="button"
-            onClick={handleClose}
-            className="text-sm font-medium px-4 py-2 rounded-[var(--radius-btn)] bg-brand-primary text-white hover:opacity-90"
-          >
-            Done
-          </button>
+          <Tooltip label="Reset every filter to its default">
+            <button
+              type="button"
+              onClick={clearAllGroups}
+              className="text-sm font-medium px-4 py-2 rounded-[var(--radius-btn)] bg-brand-surface border border-brand-border text-[var(--color-muted)] hover:bg-brand-border hover:text-foreground"
+            >
+              Clear all
+            </button>
+          </Tooltip>
+          <Tooltip label="Close and apply">
+            <button
+              type="button"
+              onClick={handleClose}
+              className="text-sm font-medium px-4 py-2 rounded-[var(--radius-btn)] bg-brand-primary text-white hover:opacity-90"
+            >
+              Done
+            </button>
+          </Tooltip>
         </div>
       </div>
     </div>

@@ -42,6 +42,17 @@ export interface RefreshResult {
   detail: UniverseDetail
 }
 
+export interface PriceBar {
+  date: string
+  close: number | null
+  adj_close: number | null
+}
+
+export interface HistoryResponse {
+  ticker: string
+  bars: PriceBar[]
+}
+
 interface RequestOptions {
   method?: 'GET' | 'POST'
   body?: unknown
@@ -109,4 +120,8 @@ export async function addTicker(ticker: string): Promise<UniverseDetail> {
 
 export async function refreshTicker(ticker: string): Promise<RefreshResult> {
   return request<RefreshResult>(`/universe/${ticker}/refresh`, { method: 'POST' })
+}
+
+export async function getHistory(ticker: string): Promise<HistoryResponse> {
+  return request<HistoryResponse>(`/universe/${ticker}/history`)
 }

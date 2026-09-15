@@ -3,6 +3,9 @@ import type { JSX } from 'react'
 import { AddTickerForm } from '../components/AddTickerForm'
 import { UniverseTable } from '../components/UniverseTable'
 import { FilterDialog } from '../components/FilterDialog'
+import { ChartDialog } from '../components/ChartDialog'
+import { DownloadIcon } from '../components/DownloadIcon'
+import { Tooltip } from '../components/Tooltip'
 import { ApiError, getUniverse, refreshTicker } from '../api/client'
 import type { UniverseDetail, UniverseEntry } from '../api/client'
 import { activeFilterCount, applyFilters, EMPTY_FILTERS } from '../lib/filters'
@@ -32,6 +35,7 @@ export function UniversePage(): JSX.Element {
   const [bulkRefresh, setBulkRefresh] = useState<BulkRefreshState>({ status: 'idle' })
   const [filters, setFilters] = useState<FilterState>(EMPTY_FILTERS)
   const [filterDialogOpen, setFilterDialogOpen] = useState(false)
+  const [selectedTicker, setSelectedTicker] = useState<string | null>(null)
   const isMountedRef = useRef(true)
 
   useEffect(() => {
@@ -121,8 +125,8 @@ export function UniversePage(): JSX.Element {
 
   const bulkRefreshLabel =
     bulkRefresh.status === 'running'
-      ? `Refreshing ${bulkRefresh.completed + 1} of ${bulkRefresh.total}…`
-      : `Update all ${totalCount}`
+      ? `Updating ${bulkRefresh.completed + 1} of ${bulkRefresh.total}…`
+      : `Update all data ${totalCount}`
 
   const filterResult = state.status === 'ready' ? applyFilters(state.entries, filters) : null
   const activeCount = activeFilterCount(filters)
@@ -179,7 +183,33 @@ export function UniversePage(): JSX.Element {
         {state.status === 'ready' && state.entries.length > 0 && (
           <>
             <div className="flex items-center gap-2 mb-3">
-              <div className="relative flex-[0_1_20rem] min-w-[9rem]">
+              <Tooltip label="Filter the table by type, sector, price, market cap, P/E or yield">
+                <button
+                  type="button"
+                  onClick={() => setFilterDialogOpen(true)}
+                  className="inline-flex items-center gap-1.5 flex-shrink-0 text-sm font-medium px-4 py-2 rounded-[var(--radius-btn)] bg-brand-surface border border-brand-border text-[var(--color-muted)] hover:bg-brand-border hover:text-foreground"
+                >
+                  <svg
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth={2}
+                    strokeLinecap="round"
+                  >
+                    <path d="M3 5h18M7 12h10M10 19h4" />
+                  </svg>
+                  <span className="hidden sm:inline">Filters</span>
+                  {activeCount > 0 && (
+                    <span className="inline-flex items-center justify-center min-w-[1.15rem] h-[1.15rem] px-1 rounded-full bg-brand-primary text-white text-[0.6875rem] font-semibold">
+                      {activeCount}
+                    </span>
+                  )}
+                </button>
+              </Tooltip>
+
+              <div className="relative flex-1 min-w-[9rem]">
                 <svg
                   width="14"
                   height="14"
@@ -193,61 +223,40 @@ export function UniversePage(): JSX.Element {
                   <circle cx={11} cy={11} r={7} />
                   <path d="m20 20-3.5-3.5" />
                 </svg>
-                <input
-                  type="text"
-                  value={filters.query}
-                  onChange={(event) => setFilters((prev) => ({ ...prev, query: event.target.value }))}
-                  placeholder="Search ticker or name"
-                  autoComplete="off"
-                  className="w-full text-sm pl-8 pr-3 py-2 rounded-[var(--radius-btn)] border border-brand-border bg-brand-surface text-foreground"
-                />
+                <Tooltip label="Show only rows whose ticker or company name matches">
+                  <input
+                    type="text"
+                    value={filters.query}
+                    onChange={(event) => setFilters((prev) => ({ ...prev, query: event.target.value }))}
+                    placeholder="Search ticker or name"
+                    autoComplete="off"
+                    className="w-full text-sm pl-8 pr-3 py-2 rounded-[var(--radius-btn)] border border-brand-border bg-background text-foreground"
+                  />
+                </Tooltip>
               </div>
 
-              <button
-                type="button"
-                onClick={() => setFilterDialogOpen(true)}
-                className="inline-flex items-center gap-1.5 flex-shrink-0 text-sm font-medium px-4 py-2 rounded-[var(--radius-btn)] bg-brand-surface border border-brand-border text-[var(--color-muted)] hover:bg-brand-border hover:text-foreground"
-              >
-                <svg
-                  width="14"
-                  height="14"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth={2}
-                  strokeLinecap="round"
-                >
-                  <path d="M3 5h18M7 12h10M10 19h4" />
-                </svg>
-                <span className="hidden sm:inline">Filters</span>
-                {activeCount > 0 && (
-                  <span className="inline-flex items-center justify-center min-w-[1.15rem] h-[1.15rem] px-1 rounded-full bg-brand-primary text-white text-[0.6875rem] font-semibold">
-                    {activeCount}
-                  </span>
-                )}
-              </button>
-
               {isFiltering && (
-                <button
-                  type="button"
-                  onClick={clearAllFilters}
-                  title="Clear all filters"
-                  className="inline-flex items-center justify-center w-[1.15rem] h-[1.15rem] rounded-full text-[var(--color-muted)] hover:bg-brand-border hover:text-foreground flex-shrink-0"
-                >
-                  ×
-                </button>
+                <Tooltip label="Clear every filter and the search box">
+                  <button
+                    type="button"
+                    onClick={clearAllFilters}
+                    className="flex-shrink-0 text-sm font-medium px-4 py-2 rounded-[var(--radius-btn)] bg-brand-surface border border-brand-border text-[var(--color-muted)] hover:bg-brand-border hover:text-foreground"
+                  >
+                   Ｘ Reset Filters
+                  </button>
+                </Tooltip>
               )}
 
-              <div className="flex-1" />
-
-              <button
-                type="button"
-                onClick={() => void handleRefreshAll()}
-                disabled={bulkRefresh.status === 'running'}
-                className="flex-shrink-0 text-sm font-medium px-4 py-2 rounded-[var(--radius-btn)] bg-brand-surface border border-brand-border text-[var(--color-muted)] hover:bg-brand-border hover:text-foreground disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {bulkRefreshLabel}
-              </button>
+              <Tooltip label="Fetch any missing price history for every ticker, up to the last close">
+                <button
+                  type="button"
+                  onClick={() => void handleRefreshAll()}
+                  disabled={bulkRefresh.status === 'running'}
+                  className={`flex-shrink-0 text-sm font-medium px-4 py-2 rounded-[var(--radius-btn)] bg-brand-primary text-white hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed ${bulkRefresh.status === 'running' ? 'pointer-events-none' : ''}`}
+                >
+                  {bulkRefreshLabel}
+                </button>
+              </Tooltip>
             </div>
 
             {bulkRefresh.status === 'running' && (
@@ -293,8 +302,23 @@ export function UniversePage(): JSX.Element {
                 No securities match these filters.
               </div>
             ) : (
-              <UniverseTable rows={filterResult ? filterResult.shown : state.entries} />
+              <UniverseTable
+                rows={filterResult ? filterResult.shown : state.entries}
+                onRowClick={setSelectedTicker}
+              />
             )}
+
+            <div className="flex justify-end mt-4">
+              <Tooltip label="Download every ticker's price history as a single zip">
+                <a
+                  href={`${import.meta.env.VITE_API_URL}/universe/export.zip`}
+                  className="inline-flex items-center gap-2 text-sm font-medium px-4 py-2 rounded-[var(--radius-btn)] bg-brand-surface border border-brand-border text-[var(--color-muted)] hover:bg-brand-border hover:text-foreground"
+                >
+                  <DownloadIcon />
+                  <span>Download Universe</span>
+                </a>
+              </Tooltip>
+            </div>
 
             <FilterDialog
               open={filterDialogOpen}
@@ -302,6 +326,12 @@ export function UniversePage(): JSX.Element {
               filters={filters}
               onChange={setFilters}
               onClose={() => setFilterDialogOpen(false)}
+            />
+
+            <ChartDialog
+              ticker={selectedTicker}
+              entry={state.entries.find((entry) => entry.ticker === selectedTicker) ?? null}
+              onClose={() => setSelectedTicker(null)}
             />
           </>
         )}

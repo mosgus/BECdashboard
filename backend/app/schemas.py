@@ -49,6 +49,17 @@ class RefreshResult(BaseModel):
     detail: UniverseDetail
 
 
+class PriceBarOut(BaseModel):
+    date: date
+    close: float | None
+    adj_close: float | None
+
+
+class HistoryResponse(BaseModel):
+    ticker: str
+    bars: list[PriceBarOut]
+
+
 class AddTickerRequest(BaseModel):
     ticker: str
 

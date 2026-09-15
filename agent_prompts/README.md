@@ -81,6 +81,20 @@ routine clean passes are recorded in chat and in the commit.
 Not by size. A large mechanical migration is a fine Haiku contract; a ten-line change that sets
 an API shape is not.
 
+### Running contracts in parallel
+
+Two contracts can run at once **only if neither declares a dependency on the other and their file
+lists are disjoint.** Contracts 0019 and 0020 qualified: different files, no dependency.
+
+**A contract that says "Depends on NNNN" must wait for NNNN to be audited and accepted.** Running
+0022 and 0023 together on 2026-09-15 produced three problems at once: the planner audited 0022
+against a tree containing 0023's half-written files (the typecheck failed on a file 0022 never
+touched), 0023 was building against a `Tooltip` component that had not yet been accepted, and a
+rejection of 0022 would have left 0023 built on a rejected foundation.
+
+The audit is the bottleneck by design. Overlapping a dependent contract with it does not save time —
+it just makes the audit signal unreadable.
+
 ### Numbering
 
 Zero-padded, monotonic, never reused. Abandoned contracts get `Status: abandoned` — they are not
