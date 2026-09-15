@@ -508,6 +508,21 @@ the first shipped.
   not. Add `quote_as_of` to `UniverseEntry` before extending quote coverage beyond the regular
   session.
 
+**Tests must never depend on the wall clock, and patching must target where a name is *looked up*.**
+Two occurrences, 2026-09-15, same root:
+- `app/universe.py` does `from app.quotes import is_market_open`, which binds an **independent name
+  at import time**. Patching `app.quotes.is_market_open` does not affect it. Contract 0024's fixture
+  did exactly that and was reviewed and accepted; two tests asserting on `current_price` were
+  therefore passing or failing **according to the time of day they ran** — green at night, red
+  during market hours. Found in contract 0027.
+- The same contract earlier introduced a live network call inside `list_all`, guarded only by a
+  fixture patching the wrong namespace.
+
+Rules: **patch every module that imported the name**, not just the module that defines it. And any
+test touching market state, freshness, or quotes must pin time explicitly — a suite whose result
+depends on when it runs is not a suite. The pure/impure split in `freshness.py` and `quotes.py`
+exists so time can be passed in; use it rather than patching a clock.
+
 **Tests must never inherit an ambient `DATABASE_URL`.** `backend/tests/conftest.py` strips it via an
 autouse fixture; opt-in fixtures re-set it to a `tmp_path` SQLite file.
 - Why, concretely: on 2026-09-13, minutes after `backend/.env` was created with a live Render URL,

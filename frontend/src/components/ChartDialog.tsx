@@ -222,10 +222,11 @@ export function ChartDialog({ ticker, entry, onClose }: ChartDialogProps): JSX.E
                 />
                 <YAxis
                   domain={[yMin - yPad, yMax + yPad]}
+                  tickFormatter={(value: number) => formatPrice(value)}
                   tick={{ fontSize: 10, fill: 'var(--color-muted)' }}
                   axisLine={false}
                   tickLine={false}
-                  width={44}
+                  width={56}
                 />
                 <RechartsTooltip content={<ChartTooltipContent />} />
                 <Area
