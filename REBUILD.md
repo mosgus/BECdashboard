@@ -678,6 +678,124 @@ ticker as a soft label, both survive this; a per-ticker headline card does not.
 Payload per item: `{id, content}` with `content` carrying `title`, `summary`, `description`,
 `pubDate`, `provider.displayName`, `canonicalUrl`, `thumbnail`.
 
+**News is stored, not fetched live — a fifth table, `news_articles`.** Built 2026-09-15, contract
+0031. Deduplicated on Yahoo's article `id`; `source_ticker` records which ticker's feed surfaced it
+first and is **provenance, not a claim about the article's subject** (see the 0030 relevance finding
+above). Refresh is lazy and request-triggered like everything else here — Render's free tier sleeps
+after ~15 minutes, so there is no scheduler anywhere in this codebase.
+
+`needs_refresh` rules, in this order: an empty table refreshes at **any** hour; otherwise nothing
+refreshes before **09:00 ET**; otherwise a **6-hour** TTL. Rule 1 beats rule 2 deliberately — the
+09:00 gate exists to stop overnight re-fetching, not to leave a fresh deployment blank until morning.
+In practice that fires near 09:00 / 15:00 / 21:00 ET with the 03:00 slot blocked.
+
+**The fan-out must stay sequential.** 20 tickers × ~0.2s ≈ 4s. Doing it concurrently is the burst
+that got Render's shared IP crumb-throttled in contract 0013.
+
+**`GET /news` never awaits the fetch.** It reads storage, returns, and schedules the refresh via
+FastAPI's `BackgroundTasks`. The request that trips the TTL serves slightly stale articles; the next
+one gets fresh. Measured: first call on an empty table returned `{"articles": [], "as_of": null}` in
+0.83s while the ~8s refresh ran behind it.
+
+**Never delete-then-insert.** The only `DELETE` in `app/news.py` is a 14-day `pub_date` prune. A
+refresh in which every ticker fails must leave the table exactly as it was — the reference app's
+rule (`_NEWS_SUMMARY_TTL_HOURS`, never delete the last summary) restated for articles. A wiped table
+means a blank feed with no error anywhere, the same class of silent-wrong-output as the mock-`fetch`
+incident.
+
+**Known gap: concurrent refreshes are not deduplicated.** Two `/news` requests inside the same ~8s
+window each schedule a task, both read the same stale `newest_fetched_at`, and both walk all 20
+tickers. Two interleaved sequential streams, not a 20-wide burst, so it doubles the rate rather than
+multiplying it, and the upserts are idempotent. Fix is a module-level non-blocking lock in
+`refresh_news_if_stale`. Unfixed as of 2026-09-15.
+
+**Migrations may not run automatically on Render.** There is no `render.yaml`, no `Procfile` and no
+start script in the repo — the build and start commands live only in the Render dashboard, so nothing
+in version control proves `alembic upgrade head` runs on deploy. Verify before shipping any contract
+that adds a table; a missing one surfaces as a 500 from the new endpoint, not as a deploy failure.
+
+**Grepping for a keyword is not verifying a construct — third recorded instance.** Contract 0031's
+criterion 5 grepped `\\.delete\\(\\)|DELETE FROM`, a pattern for the legacy `Query.delete()` API, in a
+codebase that uses SQLAlchemy 2.0's `delete()` construct throughout. It could never match. The
+implementer correctly refused to rewrite working code to satisfy it and reported the deviation
+instead. Earlier instances: the `prefers-reduced-motion` fallback (shipped broken behind a keyword
+grep, twice). **An acceptance criterion must name the construct the code actually uses.**
+
+**The launch page renders news as thumbnail cards over a text list.** Built 2026-09-15, contract
+0032, porting the split from `reference files/news_section_reference/news_section.py:257`. Order on
+`/` is hero → news → the four `Coming soon` cards. Six cards maximum in a
+`grid-cols-1 sm:grid-cols-2 lg:grid-cols-3`; everything else becomes a text row, first five visible
+with the remainder behind a native `<details>`.
+
+**Card overflow joins the list rather than disappearing, and keeps global recency order.** The
+obvious implementation — `withThumb.slice(6)` concatenated with `withoutThumb` — puts every
+card-overflow article ahead of every thumbnail-less one and silently breaks date ordering. Filter the
+original list by "not chosen as a card" instead.
+
+**Recency-only ordering concentrates the feed on whoever published last.** Measured 2026-09-15:
+storage was evenly spread at 8–10 articles across 18 tickers, but the top 30 by `pub_date` gave
+`^GSPC` 8 slots, `NVDA` 6 and `^IXIC` 5 — 19 of 30 from three tickers, with only 10 of 18 tickers
+visible. `max_per_ticker` fixes it: at 2, the same query returns **12 distinct tickers** instead of 9.
+It defaults to **0 (disabled)** on the endpoint so existing callers are unaffected; the frontend opts
+in with `?limit=20&max_per_ticker=2`.
+
+**26% of stored articles have no thumbnail** (41 of 159). The text list is a first-class region, not a
+fallback. Note that a *recent* slice can still be 100% thumbnailed — on 2026-09-15 all 20 rendered
+articles had one — so the thumbnail-less branch can be live and invisible at the same time.
+
+**`source_ticker` is never displayed.** It is provenance — which feed surfaced the article first — not
+subject matter. See the 0030 relevance finding: a chip reading "AAPL" beside a story about Rogers
+Communications asserts something measurably false.
+
+**`list-style: none` does not hide WebKit's `<summary>` marker.** Safari needs
+`summary::-webkit-details-marker { display: none }`. The reference handled this explicitly
+(`news_section.py:352`) and the first port dropped it. In Tailwind:
+`[&::-webkit-details-marker]:hidden`.
+
+**Tooltips belong on the news cards but not on the ticker strip**, and the reason is mechanical, not
+stylistic. `Tooltip` captures its anchor's `getBoundingClientRect()` **once** at show time and renders
+`position: fixed` — it does not follow a moving element. A scrolling strip cell drifts away from its
+bubble; a static card does not. Anything animated gets no `Tooltip` until that component tracks its
+target.
+
+**News cards are paged six at a time, not capped at six.** Contract 0033, 2026-09-15, correcting
+0032. Cards are **every** thumbnailed article, chunked into pages of six and moved by a
+`translateX(-page * 100%)` on a `flex` track whose pages are `w-full shrink-0`. `shrink-0` is
+load-bearing: without it the pages compress to share one width and the transform lands between them.
+The text list reverts to the reference's role — thumbnail-less articles only — and empties out
+entirely when every article has a thumbnail, which is correct rather than a regression.
+
+No wrap-around: with a `translateX` track, looping from the last page to the first animates the whole
+track backwards and reads as a glitch. Buttons disable at the ends. No auto-advance either — a grid
+that moves while you are reading it is hostile.
+
+**Off-screen carousel pages must be `inert`.** Every page stays mounted so the track can slide, which
+leaves hidden cards focusable — a keyboard user tabbed through 14 invisible links before reaching
+anything visible. `inert={i !== page}` removes them from the tab order *and* the accessibility tree.
+React 19.2 accepts it as a real boolean prop. This applies to any future translate-based carousel.
+
+**How to actually verify `prefers-reduced-motion`.** Emulate the media feature — Chrome DevTools
+Protocol `Emulation.setEmulatedMedia` — and read back **`transition-property`**, not
+`transition-duration`. Tailwind's `motion-reduce:transition-none` compiles to
+`transition-property: none`, which leaves no property enrolled so the change applies instantly, but
+**`transition-duration` still reports its original value** under the override. Checking duration
+makes a working rule look broken. Verified this way for the first time on 2026-09-15, after two
+contracts shipped a genuinely broken fallback behind a passing keyword grep.
+
+**`Tooltip` wraps its child in an `inline-flex` span, which makes that child content-sized.** The
+child becomes a flex item in a row-direction container and does not stretch along the main axis, so
+a tooltipped card in a grid cell is sized by its contents rather than the cell — a card with a small
+source thumbnail renders narrower than its neighbours, and `truncate` on a tooltipped row can never
+fire. Anything wrapped in `Tooltip` that needs to fill its container must say so explicitly with
+`w-full` (and `h-full` for equal heights). Found 2026-09-15 from a screenshot Gunnar flagged.
+
+**Acceptance criteria must not assume files are tracked.** Contract 0033's criterion 12 required
+`git diff --name-only` to list the one edited file; that file had been untracked since 0032 because
+nothing had been committed in between, and `git diff` only compares tracked files against HEAD. The
+criterion was unsatisfiable no matter how correct the work was. With several contracts' worth of
+files routinely uncommitted, any criterion phrased in terms of `git diff` changes meaning depending
+on commit state — prefer `git status --porcelain`, an explicit file list, or mtimes.
+
 **An exported `DATABASE_URL` silently beats `backend/.env`.** Cost a debugging session on
 2026-09-15. `config.py` calls `load_dotenv(path)`, and `load_dotenv` **does not override a variable
 already present in the environment** — so a stale `export DATABASE_URL=...` left in one terminal from

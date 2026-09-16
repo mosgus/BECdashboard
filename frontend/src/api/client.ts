@@ -83,6 +83,22 @@ export interface StripResponse {
   as_of: string | null
 }
 
+export interface NewsArticle {
+  id: string
+  title: string
+  summary: string | null
+  publisher: string | null
+  url: string | null
+  thumbnail_url: string | null
+  pub_date: string | null
+  source_ticker: string | null
+}
+
+export interface NewsResponse {
+  articles: NewsArticle[]
+  as_of: string | null
+}
+
 interface RequestOptions {
   method?: 'GET' | 'POST'
   body?: unknown
@@ -158,4 +174,8 @@ export async function getHistory(ticker: string): Promise<HistoryResponse> {
 
 export async function getStrip(): Promise<StripResponse> {
   return request<StripResponse>('/universe/strip')
+}
+
+export async function getNews(limit: number, maxPerTicker: number): Promise<NewsResponse> {
+  return request<NewsResponse>(`/news?limit=${limit}&max_per_ticker=${maxPerTicker}`)
 }

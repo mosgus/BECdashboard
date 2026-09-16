@@ -1,6 +1,6 @@
 from datetime import date as date_, datetime
 
-from sqlalchemy import BigInteger, Boolean, Date, DateTime, Float, Index, String, func
+from sqlalchemy import BigInteger, Boolean, Date, DateTime, Float, Index, String, Text, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -77,4 +77,32 @@ class TickerQuote(Base):
     ticker: Mapped[str] = mapped_column(String, primary_key=True)
     price: Mapped[float] = mapped_column(Float, nullable=False)
     as_of: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class NewsArticle(Base):
+    """Deduplicated news articles for the whole universe. Yahoo's own article id is the dedup
+    key rather than (ticker, ...) because `.news` is associated with a ticker, not about it
+    (contract 0030) — the same story regularly surfaces under more than one ticker's feed. No
+    foreign key to universe_tickers, same rule as price_bars and ticker_quotes: cached market
+    data must not depend on a curated list."""
+
+    __tablename__ = "news_articles"
+    __table_args__ = (Index("ix_news_articles_pub_date", "pub_date"),)
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    title: Mapped[str] = mapped_column(String, nullable=False)
+    summary: Mapped[str | None] = mapped_column(Text)
+    publisher: Mapped[str | None] = mapped_column(String)
+    url: Mapped[str | None] = mapped_column(String)
+    thumbnail_url: Mapped[str | None] = mapped_column(String)
+    pub_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    source_ticker: Mapped[str | None] = mapped_column(
+        String,
+        comment=(
+            "Provenance only, not a relevance claim — the ticker whose feed surfaced this "
+            "article first. Kept stable across refreshes: on conflict the existing value wins "
+            "rather than the newest one."
+        ),
+    )
     fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

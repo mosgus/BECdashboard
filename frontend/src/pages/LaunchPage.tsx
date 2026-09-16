@@ -1,5 +1,6 @@
 import type { JSX } from 'react'
 import { EntryCard } from '../components/EntryCard'
+import { NewsSection } from '../components/NewsSection'
 
 const ENTRY_CARDS = [
   {
@@ -32,6 +33,7 @@ export function LaunchPage(): JSX.Element {
             Portfolio construction, optimization, and risk analytics.
           </p>
         </section>
+        <NewsSection />
         <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5 mt-14">
           {ENTRY_CARDS.map((card) => (
             <EntryCard key={card.title} title={card.title} description={card.description} />

@@ -90,6 +90,22 @@ class StripResponse(BaseModel):
     as_of: datetime | None
 
 
+class NewsArticleOut(BaseModel):
+    id: str
+    title: str
+    summary: str | None
+    publisher: str | None
+    url: str | None
+    thumbnail_url: str | None
+    pub_date: datetime | None
+    source_ticker: str | None
+
+
+class NewsResponse(BaseModel):
+    articles: list[NewsArticleOut]
+    as_of: datetime | None
+
+
 class AddTickerRequest(BaseModel):
     ticker: str
 
