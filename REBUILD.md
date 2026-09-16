@@ -599,12 +599,31 @@ proportionally faster. `max(60, items.length * 5)` seconds, passed as an inline 
 while `animation-name`/`-timing-function`/`-iteration-count` stay in the class — the `animation`
 shorthand with no duration resolves to `0s` and the row never moves.
 
-**Known defect: `prefers-reduced-motion` has no working fallback.** From contract 0028, still
-present. The media query sets `overflow-x: auto` on `.ticker-strip-marquee`, which is `w-max`
-(`width: max-content`) and therefore never overflows itself — no scrollbar, nothing to scroll —
-while its `overflow-hidden` parent clips the rest. The animation *is* correctly disabled; only the
-fallback is broken, so a reduced-motion user sees the first screenful of tickers frozen and cannot
-reach the others. The `overflow-x: auto` belongs on `.ticker-strip-track`. Unfixed as of 2026-09-15.
+**The strip does not pause on hover.** Gunnar's call, 2026-09-15, reversing a contract 0028
+requirement. Two consequences followed from it and were applied at the same time:
+
+- **The per-cell `Tooltip` was removed.** `Tooltip` captures the target's `getBoundingClientRect()`
+  once at show time and renders `position: fixed` — it does not track a moving element. With the row
+  paused that anchor held; without the pause the bubble sits where the cell used to be and drifts
+  apart for the several seconds the cursor stays over it. It was also redundant after 0029: it read
+  `<name> (<ticker>) — price and day change` and the name is now in the cell. The project rule that
+  every interactive element gets a `Tooltip` does not reach here — a strip cell is display text, not
+  clickable, not focusable, and click-through is explicitly out of scope.
+- **The reduced-motion fallback had to be fixed**, because it is now the *only* way to read a ticker
+  that has scrolled past. See below.
+
+**Fixed 2026-09-15: `prefers-reduced-motion` had no working fallback.** From contract 0028, shipped
+through 0029. The media query put `overflow-x: auto` on `.ticker-strip-marquee`, which is `w-max`
+(`width: max-content`) and therefore sizes to its children and never overflows *itself* — no
+scrollbar, nothing to scroll — while its `overflow-hidden` parent clipped the rest. The animation was
+correctly disabled; only the fallback was broken, so a reduced-motion user saw the first screenful of
+tickers frozen and could not reach the others.
+
+The fix moves `overflow-x: auto` to `.ticker-strip-track`, and moves the track's base
+`overflow: hidden` out of its Tailwind class into the same `<style>` block. That second half matters:
+overriding a Tailwind utility from a component `<style>` tag is a specificity tie decided by document
+order, which happens to work but is fragile. Declaring both rules in one block makes the override
+deterministic.
 
 **Grepping for a word is not verifying a construct.** Contracts 0028 and 0029 both accepted
 `grep -n "prefers-reduced-motion"` as proof the reduced-motion path worked. It proved the string was
