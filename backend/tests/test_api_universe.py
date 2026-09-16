@@ -198,6 +198,40 @@ def test_post_universe_succeeds_when_fundamentals_unavailable(db_mode, client, m
     assert body["short_name"] is None
 
 
+# --- GET /universe/strip: route ordering, shape, 503 ---------------------------------------
+
+
+def test_get_strip_resolves_to_strip_handler_not_the_ticker_catchall(db_mode, client):
+    """The route-ordering trap: /{ticker} is declared later in the router but must not swallow
+    /strip. If it did, this would come back as a UniverseDetail-shaped 404 for ticker "STRIP",
+    not the StripResponse shape asserted below."""
+    response = client.get("/universe/strip")
+    assert response.status_code == 200
+    body = response.json()
+    assert set(body.keys()) == {"groups", "as_of"}
+
+
+def test_get_strip_returns_expected_shape_for_a_universe_member(db_mode, client, monkeypatch):
+    monkeypatch.setattr("app.strip.is_market_open", lambda now_et: False)
+    _patch_fetches(monkeypatch)
+    client.post("/universe", json={"ticker": "AAPL"})
+
+    response = client.get("/universe/strip")
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body["groups"]) == 1
+    group = body["groups"][0]
+    assert group["label"] == "Equities"
+    today = group["today"][0]
+    assert today["ticker"] == "AAPL"
+    assert today["name"] == "AAPL Inc."
+    assert today["quote_type"] == "EQUITY"
+
+
+def test_get_strip_degraded_mode_returns_503(client):
+    assert client.get("/universe/strip").status_code == 503
+
+
 # --- 20. degraded mode: every universe endpoint 503, /health still 200 --------------------
 
 

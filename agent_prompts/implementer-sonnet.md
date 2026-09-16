@@ -87,6 +87,33 @@ Do not: invent a workaround outside the contract, stub the hard part and report 
 a test until it passes, or `try/except` around the thing that's failing. Every one of those turns
 a visible problem into an invisible one.
 
+## Verification scaffolding: new files only, never edits to app files
+
+To drive a browser or measure a component you may need a harness. Build it as **new files you delete
+afterwards** — never by editing a tracked application file.
+
+**Never modify `frontend/src/main.tsx`.** On 2026-09-15 a contract stalled mid-run with 48 lines of
+mock-`fetch` left in it, intercepting `/universe/strip` and returning fabricated prices. It
+typechecked, it built, it rendered — a deployed app would have shown invented ticker data with no
+error anywhere.
+
+The asymmetry is the point: a leftover **new** file appears as untracked in `git status` and gets
+noticed. A leftover **edit to an entry point** is invisible until it ships.
+
+If a harness genuinely requires a different entry point, create a separate one and a separate HTML
+file, then delete both. If you cannot verify something without editing app code, report it under
+"Not done" instead — that is an acceptable outcome; a contaminated entry point is not.
+
+**Restart the backend before you verify against it.** A long-running `uvicorn` without `--reload`
+serves the code it was launched with. On 2026-09-15 a verification ran against a process that
+predated the route under test and got `{"detail":"STRIP is not in the universe"}` — the same 404
+string a misordered route produces, from a correctly-ordered file. `lsof -nP -iTCP:8000 -sTCP:LISTEN`
+names whatever owns the port; do not assume a live process reflects the working tree.
+
+Both of these are the same failure: **what you verified was not what ships.** One direction leaves
+contaminated code behind, the other reads a stale process. The report is only worth what the thing
+you measured was.
+
 ## Writing the report
 
 Your report is audited by the Planner, which re-runs your verification commands itself. Nothing

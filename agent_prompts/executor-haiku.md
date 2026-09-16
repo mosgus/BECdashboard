@@ -65,6 +65,31 @@ points you at old code, read it in place with `git show main:path/to/file.py`.
 Report `Outcome: BLOCKED` in chat, say exactly where you stopped and why, and stop.
 A BLOCKED report is a good outcome. It's information. Nobody is disappointed by one.
 
+## Verification scaffolding: new files only, never edits to app files
+
+To drive a browser or measure a component you may need a harness. Build it as **new files you
+delete afterwards** — never by editing a tracked application file.
+
+**Never modify `frontend/src/main.tsx`.** On 2026-09-15 a contract stalled mid-run with 48 lines of
+mock-`fetch` left in it, intercepting `/universe/strip` and returning fabricated prices. It
+typechecked, it built, it rendered — a deployed app would have shown invented ticker data with no
+error anywhere.
+
+The asymmetry is the point: a leftover **new** file appears as untracked in `git status` and gets
+noticed. A leftover **edit to an entry point** is invisible until it ships.
+
+If a harness genuinely requires a different entry point, create a separate one and a separate HTML
+file, then delete both. If you cannot verify something without editing app code, report it under
+"Not done" instead.
+
+**Restart the backend before you verify against it.** A long-running `uvicorn` without `--reload`
+serves the code it was launched with. On 2026-09-15 a verification ran against a process that
+predated the route under test and got `{"detail":"STRIP is not in the universe"}` — the same 404
+string a misordered route produces, from a correctly-ordered file. `lsof -nP -iTCP:8000 -sTCP:LISTEN`
+names whatever owns the port; do not assume a live process reflects the working tree.
+
+Both of these are the same failure: **what you verified was not what ships.**
+
 ## Never do these
 
 These are the specific ways this role goes wrong:

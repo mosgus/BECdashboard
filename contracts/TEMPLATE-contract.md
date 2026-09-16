@@ -95,6 +95,13 @@ List the exact tooltip copy for each element here, so the audit can check it aga
 
 Be specific. "Check it works" is not an instruction. Include the commands and the ports.
 
+**Restart the backend before verifying anything visual.** A `uvicorn` started without `--reload`
+serves the code it was launched with, forever. On 2026-09-15 a strip verification ran against a
+process predating the route it was testing; `/universe/strip` returned
+`{"detail":"STRIP is not in the universe"}` — the same 404 string the route-ordering trap produces,
+from correctly-ordered code. If a port is already bound, `lsof -nP -iTCP:8000 -sTCP:LISTEN` names
+the owner; kill it rather than assuming the running process is current.
+
 <Anything genuinely undecided. If the coder hits one, it reports BLOCKED and stops. Guessing here
 is worse than stopping, because a plausible guess gets silently accepted.>
 

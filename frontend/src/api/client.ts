@@ -56,6 +56,33 @@ export interface HistoryResponse {
   bars: PriceBar[]
 }
 
+export interface StripQuote {
+  ticker: string
+  name: string
+  quote_type: string | null
+  price: number | null
+  change: number | null
+  pct: number | null
+}
+
+export interface StripReturn {
+  ticker: string
+  pct: number
+}
+
+export interface StripGroup {
+  label: string
+  today: StripQuote[]
+  five_day: StripReturn[]
+  thirty_day: StripReturn[]
+  ytd: StripReturn[]
+}
+
+export interface StripResponse {
+  groups: StripGroup[]
+  as_of: string | null
+}
+
 interface RequestOptions {
   method?: 'GET' | 'POST'
   body?: unknown
@@ -127,4 +154,8 @@ export async function refreshTicker(ticker: string): Promise<RefreshResult> {
 
 export async function getHistory(ticker: string): Promise<HistoryResponse> {
   return request<HistoryResponse>(`/universe/${ticker}/history`)
+}
+
+export async function getStrip(): Promise<StripResponse> {
+  return request<StripResponse>('/universe/strip')
 }

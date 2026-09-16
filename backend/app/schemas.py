@@ -63,6 +63,33 @@ class HistoryResponse(BaseModel):
     bars: list[PriceBarOut]
 
 
+class StripQuote(BaseModel):
+    ticker: str
+    name: str
+    quote_type: str | None
+    price: float | None
+    change: float | None
+    pct: float | None
+
+
+class StripReturn(BaseModel):
+    ticker: str
+    pct: float
+
+
+class StripGroup(BaseModel):
+    label: str
+    today: list[StripQuote]
+    five_day: list[StripReturn]
+    thirty_day: list[StripReturn]
+    ytd: list[StripReturn]
+
+
+class StripResponse(BaseModel):
+    groups: list[StripGroup]
+    as_of: datetime | None
+
+
 class AddTickerRequest(BaseModel):
     ticker: str
 

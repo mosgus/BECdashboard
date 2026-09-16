@@ -562,6 +562,73 @@ decision; nothing depends on it yet.
 
 **Superseded: first feature was portfolio initialization.** Nothing else in the app has anything to operate on until a portfolio exists. Scope: a frontend form for entering tickers and positions, backed by ticker validation, price fetching, and the share/weight/value math above. Optimization, risk, forecasting and the rest come after.
 
+**The launch-page ticker strip shows the last completed session's move, not `0.00%`.** Built
+2026-09-15, contract 0028. It reads `price_bars` and `ticker_quotes` only — no yfinance call, no
+migration, no new dependency — and groups by `quote_type` (`INDEX` → Indices, `ETF` → ETFs, rest →
+Equities), omitting empty groups. Returns use `adj_close`, prices use raw `close`.
+
+This **deliberately disagrees with the Universe table**, which shows `0.00%` when the market is
+closed (contract 0026, Gunnar's instruction). The two answer different questions: the table asks
+"has this moved since the close I am showing you" — no, by construction — and the strip asks "how
+did the session go." A strip of twenty zeros every evening is not a ticker strip. Anyone
+cross-checking the two after hours will find them different; that is correct, and it is the one
+thing about this feature worth understanding rather than just checking. The 5D/30D/YTD windows are
+computed and typed but not yet rendered.
+
+**The ticker strip is one unlabelled row in the app chrome, not three labelled rows on `/`.**
+Rebuilt 2026-09-15, contract 0029. Rendered in `App.tsx` between `<Header/>` and `<Routes>` — so it
+mounts once, appears on every page, and does not refetch on navigation. Deliberately **not** sticky:
+the header stays pinned and the strip scrolls away, chosen over a two-tier sticky header so the
+Universe table keeps its vertical space.
+
+**Ticker names need both `short_name` and `long_name`.** Measured 2026-09-15: Yahoo hard-caps
+`short_name` at **31 characters** and truncates mid-word — 6 of 20 tickers were cut
+(`Constellation Energy Corporatio`, `State Street Technology Select `). But `long_name` is not
+simply better: `^RUT` is `' Russell 2000 Index'` with a **leading space** against a clean
+`'Russell 2000'`, and `BYDDF` is `'BYD Company Limited'` against `'BYD Co., Ltd.'`. The rule in
+`resolve_display_name` is *prefer `short_name` unless provably truncated*, and the length test runs
+on the **raw** string — `XLK`'s `short_name` is 31 raw but 30 stripped, so stripping first hides the
+truncation on exactly that one ticker.
+
+**Index levels are not dollars.** `^GSPC` renders `7,585.73`, not `$7,585.73`. Keyed off
+`quote_type === 'INDEX'`, never off the display label — `'Indices'` is a label and must not drive
+formatting.
+
+**Marquee duration must scale with content.** A fixed duration means a longer track scrolls
+proportionally faster. `max(60, items.length * 5)` seconds, passed as an inline `animationDuration`
+while `animation-name`/`-timing-function`/`-iteration-count` stay in the class — the `animation`
+shorthand with no duration resolves to `0s` and the row never moves.
+
+**Known defect: `prefers-reduced-motion` has no working fallback.** From contract 0028, still
+present. The media query sets `overflow-x: auto` on `.ticker-strip-marquee`, which is `w-max`
+(`width: max-content`) and therefore never overflows itself — no scrollbar, nothing to scroll —
+while its `overflow-hidden` parent clips the rest. The animation *is* correctly disabled; only the
+fallback is broken, so a reduced-motion user sees the first screenful of tickers frozen and cannot
+reach the others. The `overflow-x: auto` belongs on `.ticker-strip-track`. Unfixed as of 2026-09-15.
+
+**Grepping for a word is not verifying a construct.** Contracts 0028 and 0029 both accepted
+`grep -n "prefers-reduced-motion"` as proof the reduced-motion path worked. It proved the string was
+in the file. The defect above shipped twice behind that check. This is the planner's most repeated
+mistake — five earlier instances flagged correct work as broken; this one flagged broken work as
+correct, which is the more expensive direction. An acceptance criterion must name the construct and
+its effect, not a keyword.
+
+**Verification only counts against the code that ships.** Two distinct failures, both found on
+2026-09-15 during 0028, both producing a confident and wrong result:
+
+1. A browser harness was built by **editing `frontend/src/main.tsx`**, mocking `fetch` to return
+   fabricated `/universe/strip` prices. It typechecked, built, and rendered. A deploy would have
+   shown invented ticker data with no error anywhere. The asymmetry that makes this dangerous: a
+   leftover *new* file shows up untracked in `git status` and gets noticed; a leftover *edit to an
+   entry point* is invisible until it ships. Harnesses are now new files only, deleted afterwards.
+2. Verification ran against a **`uvicorn` started without `--reload`**, predating the route under
+   test. `/universe/strip` returned `{"detail":"STRIP is not in the universe"}` — byte-identical to
+   what the route-ordering trap produces, from a correctly-ordered file. Do not conflate them: one
+   is fixed by an edit, the other by a restart, and a reader who confuses the two will go reorder
+   code that is already right. `lsof -nP -iTCP:8000 -sTCP:LISTEN` names the owner of a bound port.
+
+Recorded in both coder role files and in the contract template's Human-verification section.
+
 ## Open questions (not decided)
 
 - **Whether tickers can be removed from the universe.** Only add and update have been specified. If removal exists, decide whether it deletes cached price history or just de-lists the ticker — the no-FK rule above means de-listing is the cheap default.

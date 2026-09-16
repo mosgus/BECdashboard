@@ -1,13 +1,24 @@
 """The four universe HTTP endpoints. Only this module knows about HTTP — the service layer
 in app/universe.py raises domain exceptions and is fully usable without FastAPI."""
 
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
+
 import pandas as pd
 from fastapi import APIRouter, HTTPException, Response
 
 from app.cache import get_cached
 from app.db import is_enabled
 from app.export import build_universe_zip, history_to_csv
-from app.schemas import AddTickerRequest, HistoryResponse, RefreshResult, UniverseDetail, UniverseEntry
+from app.schemas import (
+    AddTickerRequest,
+    HistoryResponse,
+    RefreshResult,
+    StripResponse,
+    UniverseDetail,
+    UniverseEntry,
+)
+from app.strip import build_strip_response
 from app.universe import (
     AlreadyPresent,
     NotInUniverse,
@@ -67,6 +78,18 @@ def download_universe_zip() -> Response:
         media_type="application/zip",
         headers={"Content-Disposition": 'attachment; filename="universe.zip"'},
     )
+
+
+@router.get("/strip", response_model=StripResponse)
+def get_strip() -> dict:
+    """Price, day change, and 5D/30D/YTD returns for the launch page, computed entirely from
+    stored data. Never fetches from yfinance; quote refresh stays owned by list_all(). Declared
+    above /{ticker}: a single-segment path here would otherwise be swallowed by that route and
+    resolve as an unknown ticker instead."""
+    _require_database()
+    now_utc = datetime.now(timezone.utc)
+    now_et = datetime.now(ZoneInfo("America/New_York"))
+    return build_strip_response(now_utc, now_et)
 
 
 @router.get("/{ticker}", response_model=UniverseDetail)
