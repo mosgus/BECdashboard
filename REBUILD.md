@@ -632,6 +632,52 @@ mistake — five earlier instances flagged correct work as broken; this one flag
 correct, which is the more expensive direction. An acceptance criterion must name the construct and
 its effect, not a keyword.
 
+**`yfinance`'s `.news` works from Render even when the crumb flow fails.** Measured 2026-09-15 from
+`https://blue-eagle-backend.onrender.com` via the contract 0030 probe, then deleted. This is the
+finding the whole news feature hangs on: **no API key, no Currents, no RSS fallback, no new
+dependency.**
+
+First call, cold:
+
+```
+news_count: 10     crumb_obtained: False     info_works: False     news_elapsed_seconds: 0.28
+DEBUG Didn't receive crumb Too Many Requests
+DEBUG response code=401
+ERROR HTTP Error 401: {"code":"Unauthorized","description":"Invalid Crumb"}
+```
+
+So Yahoo rate-limits `getcrumb` from Render's shared IP and `.info` dies on it — reproducing contract
+0013 exactly, three months on — while `.news` returns a full payload regardless. The reason is in the
+source: `.info` hits `quoteSummary`, which requires a crumb; `.news` POSTs to
+`/xhr/ncp?queryRef=latestNews&serviceKey=ncp_fin`, which does not. `_make_request`
+(`yfinance/data.py:421`) degrades deliberately — *"the target endpoint may not need a crumb"*.
+
+Three later calls in the same process returned `crumb_obtained: True`, so crumb acquisition is
+**intermittent**, not permanently blocked. The load-bearing fact is that news worked in both states.
+
+Latency from Render: **0.11–0.28s** for `.news` alone, *faster* than local (0.34s).
+
+**`.info` fails silently, not loudly.** `info_works: False` with `info_error: None` — it did not
+raise, it returned a dict with no `quoteType`. Anything reading `.info` on Render gets a partial dict,
+never an exception. That is why fundamentals are best-effort (contract 0013) and must stay that way.
+
+**`.news` is ticker-relevant but not ticker-*specific*.** Measured across three:
+
+| ticker | top story |
+|---|---|
+| NVDA | "Tech stocks today: CEOs call for pacing AI, as Nvidia CEO says extinction fears are made up" |
+| XLV | "Sector Update: Healthcare Stocks Ease Late Afternoon" |
+| AAPL | "Rogers Communications (TSX:RCI.B) Moved, So What Is Drawing Attention Now?" |
+
+NVDA and XLV are on point; AAPL drew an algorithmic Simply Wall St piece about a Canadian telecom,
+and locally the same call returned a TSMC/MediaTek story. Yahoo's `latestNews` tab is *associated
+with* a ticker, not *about* it. **Do not present these as "news about <TICKER>"** — attribution that
+strong is not supported by the data. A blended feed across the universe, or per-ticker with the
+ticker as a soft label, both survive this; a per-ticker headline card does not.
+
+Payload per item: `{id, content}` with `content` carrying `title`, `summary`, `description`,
+`pubDate`, `provider.displayName`, `canonicalUrl`, `thumbnail`.
+
 **An exported `DATABASE_URL` silently beats `backend/.env`.** Cost a debugging session on
 2026-09-15. `config.py` calls `load_dotenv(path)`, and `load_dotenv` **does not override a variable
 already present in the environment** — so a stale `export DATABASE_URL=...` left in one terminal from

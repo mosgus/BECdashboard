@@ -1,7 +1,6 @@
 # Contract 0030 — Throwaway probe: does yfinance `.news` work from Render?
 
-**Status:** implementation accepted with fixes (2026-09-15) — **awaiting the Render measurement**,
-which is the actual deliverable. Do not archive until that JSON is in hand.
+**Status:** accepted and answered (2026-09-15). Probe deleted; result recorded in `REBUILD.md`.
 **Assigned to:** haiku
 **Author:** planner (opus)
 
@@ -286,3 +285,45 @@ log records: 60             any leaked crumb: False
 
 **This is the baseline, not evidence about Render.** `.info` succeeding here is exactly what it did
 before contract 0013 discovered it returns 401 from Render.
+
+---
+
+## The answer (2026-09-15, from `blue-eagle-backend.onrender.com`)
+
+**`.news` works from Render. No API key, no Currents, no RSS fallback, no new dependency.**
+
+First call, cold:
+
+```
+news_count: 10     crumb_obtained: False     info_works: False     news_elapsed_seconds: 0.28
+DEBUG Didn't receive crumb Too Many Requests
+DEBUG response code=401
+ERROR HTTP Error 401: {"code":"Unauthorized","description":"Invalid Crumb"}
+```
+
+The control did its job. `.info` failed on Render exactly as contract 0013 documented, in the same
+request in which `.news` succeeded — so this is not "Yahoo was having a good afternoon", it is the
+crumb-requiring endpoint failing and the crumb-free one working, side by side.
+
+Three later calls returned `crumb_obtained: True`. Crumb acquisition is **intermittent**, not blocked.
+News worked in both states, which is what makes the result safe to build on.
+
+`.info` returned `info_works: False` with `info_error: None` — it did not raise, it returned a dict
+with no `quoteType`. Silent partial degradation, not an exception.
+
+### Relevance is weaker than the endpoint name suggests
+
+| ticker | top story |
+|---|---|
+| NVDA | "Tech stocks today: CEOs call for pacing AI, as Nvidia CEO says extinction fears are made up" |
+| XLV | "Sector Update: Healthcare Stocks Ease Late Afternoon" |
+| AAPL | "Rogers Communications (TSX:RCI.B) Moved, So What Is Drawing Attention Now?" |
+
+Yahoo's `latestNews` tab is *associated with* a ticker, not *about* it. This constrains the next
+contract: a per-ticker headline card asserting "news about AAPL" is not supported by the data.
+
+### Cleanup done
+
+`backend/app/routers/debug.py` and `backend/tests/test_debug_probe.py` deleted, the registration block
+and `import os` removed from `backend/app/main.py`, suite back to **211 passed** — the exact count
+before this contract. Gunnar removes `DEBUG_PROBE` from the Render dashboard and commits the deletion.
