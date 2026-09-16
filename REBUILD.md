@@ -632,6 +632,29 @@ mistake — five earlier instances flagged correct work as broken; this one flag
 correct, which is the more expensive direction. An acceptance criterion must name the construct and
 its effect, not a keyword.
 
+**An exported `DATABASE_URL` silently beats `backend/.env`.** Cost a debugging session on
+2026-09-15. `config.py` calls `load_dotenv(path)`, and `load_dotenv` **does not override a variable
+already present in the environment** — so a stale `export DATABASE_URL=...` left in one terminal from
+earlier debugging wins, permanently, for every process launched from that shell.
+
+The symptom does not point at the cause. Render reports
+`FATAL: password authentication failed for user "<old-user>"` — a username that is not in `.env` at
+all — which reads as a rotated-password problem and is not one. **The tell is the username**: if the
+user in the error is not the user in `.env`, the process is not reading `.env`. Fix is
+`unset DATABASE_URL` in that shell, or a new terminal; it was not in any rc file.
+
+Also in that error: `FATAL: SSL/TLS required` appears alongside, and is **noise**. psycopg defaults
+to `sslmode=prefer`, tries SSL first (that attempt is the one that gets the real auth error), then
+retries without SSL, which Render rejects. SSL is not the problem — do not chase it.
+
+**Do not "fix" this with `load_dotenv(override=True)`.** Every ad-hoc command in every contract is
+prefixed `DATABASE_URL=""` precisely to keep throwaway scripts off production. With `override=True`
+that empty string gets replaced by the real URL from `.env`, and the guard silently inverts into a
+live production connection — a worse failure than the one it fixes. The correct shape is to detect
+the conflict and raise at import when an ambient `DATABASE_URL` and a `.env` `DATABASE_URL` are both
+non-empty and differ, while still honouring an explicitly-empty `DATABASE_URL=""` as a deliberate
+opt-out. Not yet built.
+
 **Verification only counts against the code that ships.** Two distinct failures, both found on
 2026-09-15 during 0028, both producing a confident and wrong result:
 

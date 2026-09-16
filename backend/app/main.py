@@ -1,3 +1,4 @@
+import os
 import sys
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -16,6 +17,10 @@ app.add_middleware(
 )
 
 app.include_router(universe.router)
+
+if os.getenv("DEBUG_PROBE") == "1":
+    from app.routers import debug
+    app.include_router(debug.router)
 
 
 @app.get("/health")
