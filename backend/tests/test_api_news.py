@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 
 from app.db import get_engine, session
 from app.main import app
-from app.models import Base, NewsArticle
+from app.models import Base, NewsArticle, NewsSummary
 from app.news import recent_articles as _real_recent_articles
 
 
@@ -48,7 +48,7 @@ def _add_article(article_id: str, pub_date: datetime | None, source_ticker: str 
 def test_get_news_returns_empty_shape_on_empty_table(db_mode, client):
     response = client.get("/news")
     assert response.status_code == 200
-    assert response.json() == {"articles": [], "as_of": None}
+    assert response.json() == {"articles": [], "as_of": None, "summary": None}
 
 
 def test_get_news_returns_stored_articles_newest_first(db_mode, client):
@@ -126,6 +126,38 @@ def test_get_news_max_per_ticker_negative_value_clamps_to_0(db_mode, client, mon
     response = client.get("/news?max_per_ticker=-1")
     assert response.status_code == 200
     assert captured["max_per_ticker"] == 0
+
+
+def test_get_news_summary_null_when_gemini_key_unset(db_mode, client, monkeypatch):
+    """The state Render is in until Gunnar sets GEMINI_KEY: articles work, no summary was ever
+    generated, and the endpoint still returns 200 rather than erroring."""
+    monkeypatch.delenv("GEMINI_KEY", raising=False)
+    _add_article("a1", pub_date=datetime(2026, 9, 15, tzinfo=timezone.utc))
+
+    response = client.get("/news")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["summary"] is None
+    assert len(body["articles"]) == 1
+
+
+def test_get_news_returns_the_stored_summary_when_present(db_mode, client):
+    with session() as db:
+        db.add(
+            NewsSummary(
+                summary="Markets were mixed today.",
+                model="gemini-3.1-flash-lite",
+                article_count=12,
+                created_at=datetime(2026, 9, 15, tzinfo=timezone.utc),
+            )
+        )
+
+    response = client.get("/news")
+    assert response.status_code == 200
+    summary = response.json()["summary"]
+    assert summary["text"] == "Markets were mixed today."
+    assert summary["model"] == "gemini-3.1-flash-lite"
+    assert summary["article_count"] == 12
 
 
 def test_get_news_degraded_mode_returns_503(client):

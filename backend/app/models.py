@@ -1,6 +1,6 @@
 from datetime import date as date_, datetime
 
-from sqlalchemy import BigInteger, Boolean, Date, DateTime, Float, Index, String, Text, func
+from sqlalchemy import BigInteger, Boolean, Date, DateTime, Float, Index, Integer, String, Text, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -52,6 +52,22 @@ class TickerFundamentals(Base):
     beta: Mapped[float | None] = mapped_column(Float)
     average_volume: Mapped[int | None] = mapped_column(BigInteger)
     fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class NewsSummary(Base):
+    """An LLM-generated market briefing over the currently stored headlines. No foreign key to
+    news_articles, same rule as everywhere else in this codebase: cached/derived data never
+    cascades. Kept as a short history (not a single row) so a failed regeneration still has a
+    prior row to fall back to instead of the page going blank — see app/briefing.py."""
+
+    __tablename__ = "news_summaries"
+    __table_args__ = (Index("ix_news_summaries_created_at", "created_at"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    summary: Mapped[str] = mapped_column(Text, nullable=False)
+    model: Mapped[str | None] = mapped_column(String)
+    article_count: Mapped[int | None] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
 class UniverseTicker(Base):

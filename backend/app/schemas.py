@@ -101,9 +101,17 @@ class NewsArticleOut(BaseModel):
     source_ticker: str | None
 
 
+class NewsSummaryOut(BaseModel):
+    text: str
+    created_at: datetime
+    model: str | None
+    article_count: int | None
+
+
 class NewsResponse(BaseModel):
     articles: list[NewsArticleOut]
     as_of: datetime | None
+    summary: NewsSummaryOut | None
 
 
 class AddTickerRequest(BaseModel):

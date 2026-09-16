@@ -796,6 +796,45 @@ criterion was unsatisfiable no matter how correct the work was. With several con
 files routinely uncommitted, any criterion phrased in terms of `git diff` changes meaning depending
 on commit state — prefer `git status --porcelain`, an explicit file list, or mtimes.
 
+**The AI briefing is Gemini, stored in a sixth table, generated off the news refresh.** Contract
+0034, 2026-09-16. `gemini-3.1-flash-lite` via `google-genai==2.23.0`, key in `GEMINI_KEY`, model
+overridable with `GEMINI_MODEL`. **With no key the feature is simply off** — `/news` returns
+`summary: null` and nothing errors, which is also the state a Render deploy is in until the key is
+set.
+
+**Generation piggybacks the news refresh rather than running its own TTL.** The reference used a
+2-hour freshness window against a feed that refreshed hourly; ours refreshes every 6 hours, so an
+independent 2-hour summary TTL would rewrite the same headlines three times for nothing. One trigger,
+one cadence — roughly 09:00 / 15:00 / 21:00 ET. The consequence is that **a newly-set key produces no
+briefing until the next refresh**, up to six hours later.
+
+**Port the reference's three-way continuity prompt.** No prior briefing → write from scratch; prior
+briefing from *today* → rewrite in place so it grows through the day; prior briefing from an *earlier
+day* → open with what has shifted, then cover today. The same-day test must be done in **ET, not
+UTC** — the reference used `datetime.utcnow().date()`, which misreads any briefing written after
+20:00 ET as belonging to the previous day.
+
+**Do not port the reference's persona.** It says "financial news analyst for a real estate private
+equity firm" and focuses on SOFR, credit conditions and commercial investment. Against a universe of
+equities, sector ETFs and three indices that produces briefings about the wrong asset class entirely.
+Rewritten for this app; confirmed correct against live output 2026-09-16.
+
+**Never wipe on a failed generation.** `if not text: return` sits above the insert, and the prune —
+`created_at <= cutoff AND id != keep_id` — runs *only* after a successful insert. A superseded
+briefing is deleted for being superseded **and** past retention, never for being superseded alone.
+That is what guarantees a stale-but-present briefing stays on the page when Gemini is down, instead
+of it going blank.
+
+**The briefing inherits the news feed's relevance problem.** First live output discussed "cyclical
+trucking stocks" — there is no trucking exposure in the universe. Loosely-related Yahoo headlines
+(see the 0030 finding) enter the prompt and get faithfully summarized. Anchoring the prompt on the
+universe's actual sectors is the fix; not yet done.
+
+**`briefing.py` and `news.py` are circularly dependent by design.** `briefing` reads
+`news.recent_articles` to reuse the bounded query; `news` calls `briefing.refresh_briefing` at the end
+of a refresh. The import inside `refresh_news_if_stale` is deferred deliberately — moving it to module
+level deadlocks at import time.
+
 **An exported `DATABASE_URL` silently beats `backend/.env`.** Cost a debugging session on
 2026-09-15. `config.py` calls `load_dotenv(path)`, and `load_dotenv` **does not override a variable
 already present in the environment** — so a stale `export DATABASE_URL=...` left in one terminal from

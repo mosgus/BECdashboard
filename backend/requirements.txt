@@ -6,3 +6,4 @@ python-dotenv==1.2.3
 sqlalchemy==2.0.52
 psycopg[binary]==3.3.5
 yfinance==1.7.0
+google-genai==2.23.0

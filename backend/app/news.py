@@ -196,6 +196,19 @@ def refresh_news_if_stale(tickers: list[str], now_utc: datetime, now_et: datetim
 
     _prune_old_articles(now_utc)
 
+    # Deferred, not a module-level import: app.briefing imports recent_articles from this
+    # module (contract 0034 — reuse the bounded query rather than writing a second one), so a
+    # top-level import here would be circular. Only reachable once this function is actually
+    # called, by which point both modules have finished loading.
+    from app.briefing import refresh_briefing
+
+    try:
+        refresh_briefing(now_utc, now_et)
+    except Exception:
+        # Broad on purpose: a briefing failure must never affect the article refresh above,
+        # which has already committed by this point.
+        logger.exception("app.news: refresh_briefing failed after a successful article refresh")
+
 
 def cap_per_ticker(articles: list[dict], max_per_ticker: int, limit: int) -> list[dict]:
     """Keep input order; skip an article once its source_ticker has max_per_ticker already.

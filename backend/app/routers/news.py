@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 
+from app.briefing import latest_briefing
 from app.db import is_enabled
 from app.news import active_universe_tickers, get_newest_fetched_at, recent_articles, refresh_news_if_stale
 from app.schemas import NewsResponse
@@ -49,9 +50,19 @@ def get_news(
     articles = recent_articles(clamped_limit, clamped_max_per_ticker)
     as_of = get_newest_fetched_at()
 
+    summary = None
+    latest = latest_briefing()
+    if latest is not None:
+        summary = {
+            "text": latest["summary"],
+            "created_at": latest["created_at"],
+            "model": latest["model"],
+            "article_count": latest["article_count"],
+        }
+
     now_utc = datetime.now(timezone.utc)
     now_et = datetime.now(ZoneInfo("America/New_York"))
     tickers = active_universe_tickers()
     background_tasks.add_task(refresh_news_if_stale, tickers, now_utc, now_et)
 
-    return {"articles": articles, "as_of": as_of}
+    return {"articles": articles, "as_of": as_of, "summary": summary}
