@@ -153,6 +153,33 @@ def test_post_refresh_404_when_not_in_universe(db_mode, client):
     assert response.status_code == 404
 
 
+# --- DELETE /universe/{ticker}: 200 with counts, 404 for unknown, 503 degraded -------------
+
+
+def test_delete_ticker_returns_200_with_counts(db_mode, client, monkeypatch):
+    _patch_fetches(monkeypatch)
+    client.post("/universe", json={"ticker": "AAPL"})
+
+    response = client.delete("/universe/AAPL")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ticker"] == "AAPL"
+    assert body["bars_deleted"] == 2
+    assert body["fundamentals_deleted"] == 1
+    assert body["quotes_deleted"] == 0
+
+    assert client.get("/universe/AAPL").status_code == 404
+
+
+def test_delete_ticker_404_for_unknown(db_mode, client):
+    response = client.delete("/universe/NOPE")
+    assert response.status_code == 404
+
+
+def test_delete_ticker_degraded_mode_returns_503(client):
+    assert client.delete("/universe/AAPL").status_code == 503
+
+
 # --- 18. GET /universe includes market_cap, trailing_pe, dividend_yield in response -------
 
 

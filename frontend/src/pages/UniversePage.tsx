@@ -230,6 +230,10 @@ export function UniversePage(): JSX.Element {
               ticker={selectedTicker}
               entry={state.entries.find((entry) => entry.ticker === selectedTicker) ?? null}
               onClose={() => setSelectedTicker(null)}
+              onDeleted={() => {
+                setSelectedTicker(null)
+                load()
+              }}
             />
           </>
         )}

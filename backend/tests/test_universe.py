@@ -4,9 +4,9 @@ import pandas as pd
 import pytest
 from sqlalchemy import event, func as sa_func, select as sa_select
 
-from app.cache import clear, get_fundamentals, store, store_fundamentals
+from app.cache import clear, get_cached, get_fundamentals, store, store_fundamentals
 from app.db import get_engine, session
-from app.models import Base, UniverseTicker
+from app.models import Base, NewsArticle, PriceBar, TickerFundamentals, TickerQuote, UniverseTicker
 from app.universe import (
     AlreadyPresent,
     HISTORY_START,
@@ -16,6 +16,7 @@ from app.universe import (
     get_one,
     list_all,
     refresh,
+    remove,
 )
 
 
@@ -633,3 +634,114 @@ def test_list_all_quote_fetched_at_null_when_market_closed_even_with_fresh_quote
     entries = {e["ticker"]: e for e in list_all()}
     assert entries["AAPL"]["current_price"] is None
     assert entries["AAPL"]["quote_fetched_at"] is None
+
+
+# --- contract 0038: remove --------------------------------------------------------------------
+
+
+def test_remove_deletes_rows_from_all_four_tables_and_get_one_then_raises(db_mode, monkeypatch):
+    _patch_add(monkeypatch)
+    add("AAPL")
+
+    with session() as db:
+        db.add(
+            TickerQuote(
+                ticker="AAPL",
+                price=150.0,
+                as_of=datetime(2026, 9, 17, tzinfo=timezone.utc),
+                fetched_at=datetime(2026, 9, 17, tzinfo=timezone.utc),
+            )
+        )
+
+    result = remove("AAPL")
+
+    assert result == {
+        "ticker": "AAPL",
+        "bars_deleted": 2,
+        "fundamentals_deleted": 1,
+        "quotes_deleted": 1,
+    }
+
+    with session() as db:
+        assert db.get(UniverseTicker, "AAPL") is None
+        bar_count = db.execute(
+            sa_select(sa_func.count()).select_from(PriceBar).where(PriceBar.ticker == "AAPL")
+        ).scalar()
+        fundamentals = db.get(TickerFundamentals, "AAPL")
+        quote = db.get(TickerQuote, "AAPL")
+    assert bar_count == 0
+    assert fundamentals is None
+    assert quote is None
+
+    with pytest.raises(NotInUniverse):
+        get_one("AAPL")
+
+
+def test_remove_evicts_the_ttl_cache_so_a_same_day_readd_would_refetch(db_mode, monkeypatch):
+    """The bug this contract exists to prevent: without cache eviction, get_cached would keep
+    serving the old in-memory frame after a same-day delete, is_stale would say False against
+    it, and re-adding the ticker would silently resurrect its pre-deletion history with no
+    fetch and no error anywhere. This is the criterion that matters most in this contract."""
+    _patch_add(monkeypatch)
+    add("AAPL")
+    assert get_cached("AAPL") is not None
+
+    remove("AAPL")
+
+    assert get_cached("AAPL") is None
+
+
+def test_remove_unknown_ticker_raises_and_deletes_nothing(db_mode, monkeypatch):
+    _patch_add(monkeypatch)
+    add("AAPL")
+
+    with pytest.raises(NotInUniverse):
+        remove("NOPE")
+
+    with session() as db:
+        row = db.get(UniverseTicker, "AAPL")
+        assert row is not None
+        assert row.active is True
+        bar_count = db.execute(
+            sa_select(sa_func.count()).select_from(PriceBar).where(PriceBar.ticker == "AAPL")
+        ).scalar()
+    assert bar_count == 2
+
+
+def test_remove_already_inactive_ticker_raises_and_deletes_nothing(db_mode, monkeypatch):
+    _patch_add(monkeypatch)
+    add("AAPL")
+    with session() as db:
+        row = db.get(UniverseTicker, "AAPL")
+        row.active = False
+
+    with pytest.raises(NotInUniverse):
+        remove("AAPL")
+
+    with session() as db:
+        bar_count = db.execute(
+            sa_select(sa_func.count()).select_from(PriceBar).where(PriceBar.ticker == "AAPL")
+        ).scalar()
+    assert bar_count == 2  # untouched — remove() raised before deleting anything
+
+
+def test_remove_does_not_touch_news_articles(db_mode, monkeypatch):
+    _patch_add(monkeypatch)
+    add("AAPL")
+
+    with session() as db:
+        db.add(
+            NewsArticle(
+                id="a1",
+                title="Some story",
+                source_ticker="AAPL",
+                fetched_at=datetime(2026, 9, 17, tzinfo=timezone.utc),
+            )
+        )
+
+    remove("AAPL")
+
+    with session() as db:
+        article = db.get(NewsArticle, "a1")
+        assert article is not None
+        assert article.source_ticker == "AAPL"

@@ -6,10 +6,13 @@ from sqlalchemy import select
 
 from app.briefing import (
     BRIEFING_SENTENCES,
+    PREFERRED_PUBLISHERS,
+    SUMMARY_MIN_AGE_MINUTES,
     build_prompt,
     generate_briefing,
     latest_briefing,
     needs_summary,
+    preferred_headlines,
     refresh_briefing,
 )
 from app.db import get_engine, session
@@ -86,7 +89,7 @@ def test_needs_summary_false_when_written_recently_even_if_refreshed():
 
 def test_needs_summary_true_at_exactly_the_floor_when_refreshed():
     now = datetime(2026, 9, 15, 12, 0, tzinfo=timezone.utc)
-    latest = now - timedelta(minutes=30)
+    latest = now - timedelta(minutes=SUMMARY_MIN_AGE_MINUTES)
     assert needs_summary(latest, now, True) is True
 
 
@@ -119,6 +122,137 @@ def test_build_prompt_respects_sentence_count_constant():
 def test_build_prompt_forbids_markdown():
     prompt = build_prompt(["- A headline (Reuters)"], None, None, _et(12))
     assert "no bullet points, no headers, no markdown" in prompt
+
+
+# --- build_prompt: voice and no-advice constraints, present in every branch --------------------
+
+
+def test_build_prompt_cold_start_has_voice_and_no_advice_constraints():
+    prompt = build_prompt(["- A headline (Reuters)"], None, None, _et(12))
+    assert 'Never use "we"' in prompt
+    assert "Describe, do not advise" in prompt
+
+
+def test_build_prompt_same_day_has_voice_and_no_advice_constraints():
+    previous_created_at = _et(9).astimezone(timezone.utc)
+    prompt = build_prompt(["- A headline (Reuters)"], "Yesterday's text", previous_created_at, _et(15))
+    assert 'Never use "we"' in prompt
+    assert "Describe, do not advise" in prompt
+
+
+def test_build_prompt_prior_day_has_voice_and_no_advice_constraints():
+    previous_created_at = _et(9, day=14).astimezone(timezone.utc)
+    prompt = build_prompt(["- A headline (Reuters)"], "Prior text", previous_created_at, _et(15, day=15))
+    assert 'Never use "we"' in prompt
+    assert "Describe, do not advise" in prompt
+
+
+# --- build_prompt: both rewrite branches override the earlier briefing's style ------------------
+
+
+def test_build_prompt_same_day_overrides_the_earlier_briefings_style():
+    previous_created_at = _et(9).astimezone(timezone.utc)
+    prompt = build_prompt(["- A headline (Reuters)"], "Yesterday's text", previous_created_at, _et(15))
+    assert "even where the earlier briefing does not" in prompt
+
+
+def test_build_prompt_prior_day_overrides_the_earlier_briefings_style():
+    previous_created_at = _et(9, day=14).astimezone(timezone.utc)
+    prompt = build_prompt(["- A headline (Reuters)"], "Prior text", previous_created_at, _et(15, day=15))
+    assert "even where the earlier briefing does not" in prompt
+
+
+def test_build_prompt_cold_start_has_no_override_phrase():
+    """There is no earlier briefing to override the style of on a cold start — the phrase
+    would be nonsensical there and must not appear."""
+    prompt = build_prompt(["- A headline (Reuters)"], None, None, _et(12))
+    assert "even where the earlier briefing does not" not in prompt
+
+
+# --- preferred_headlines -----------------------------------------------------------------------
+
+
+def _article(article_id: str, publisher: str | None) -> dict:
+    return {"id": article_id, "title": f"Title {article_id}", "publisher": publisher}
+
+
+def test_preferred_headlines_puts_preferred_publishers_first():
+    articles = [
+        _article("z1", "Zacks"),
+        _article("r1", "Reuters"),
+        _article("z2", "Zacks"),
+        _article("m1", "MT Newswires"),
+    ]
+
+    result = preferred_headlines(articles, limit=10)
+
+    assert [a["id"] for a in result[:2]] == ["r1", "m1"]
+    assert {a["id"] for a in result} == {"z1", "r1", "z2", "m1"}
+
+
+def test_preferred_headlines_preserves_recency_order_within_each_group():
+    articles = [
+        _article("r1", "Reuters"),
+        _article("z1", "Zacks"),
+        _article("r2", "Reuters"),
+        _article("z2", "Zacks"),
+    ]
+
+    result = preferred_headlines(articles, limit=10)
+
+    assert [a["id"] for a in result] == ["r1", "r2", "z1", "z2"]
+
+
+def test_preferred_headlines_tops_up_when_fewer_than_limit_preferred_exist():
+    """A quiet wire day must still produce a full-length briefing — preference, not a
+    filter."""
+    articles = [_article("r1", "Reuters"), _article("r2", "Reuters")] + [
+        _article(f"z{i}", "Zacks") for i in range(10)
+    ]
+
+    result = preferred_headlines(articles, limit=5)
+
+    assert len(result) == 5
+    assert [a["id"] for a in result[:2]] == ["r1", "r2"]
+    assert all(a["id"].startswith("z") for a in result[2:])
+
+
+def test_preferred_headlines_null_publisher_is_never_preferred():
+    articles = [_article("n1", None), _article("r1", "Reuters")]
+
+    result = preferred_headlines(articles, limit=10)
+
+    assert [a["id"] for a in result] == ["r1", "n1"]
+
+
+def test_preferred_headlines_does_not_substring_match(monkeypatch):
+    """"Benzinga Prediction Markets" must not match a preferred "Benzinga" — those are
+    different sources that happen to share a prefix."""
+    monkeypatch.setattr("app.briefing.PREFERRED_PUBLISHERS", frozenset({"Benzinga"}))
+    articles = [
+        _article("bpm", "Benzinga Prediction Markets"),
+        _article("b", "Benzinga"),
+    ]
+
+    result = preferred_headlines(articles, limit=10)
+
+    assert [a["id"] for a in result] == ["b", "bpm"]
+
+
+def test_preferred_publishers_excludes_the_demoted_high_volume_outlets():
+    demoted = {
+        "24/7 Wall St.",
+        "Motley Fool",
+        "Zacks",
+        "GuruFocus.com",
+        "Trefis",
+        "Insider Monkey",
+        "Simply Wall St.",
+        "StockStory",
+        "Stocktwits",
+        "MarketBeat",
+    }
+    assert demoted.isdisjoint(PREFERRED_PUBLISHERS)
 
 
 # --- build_prompt: ET, not UTC, decides "same day" --------------------------------------------
@@ -241,7 +375,9 @@ def test_refresh_briefing_skips_when_summary_is_recent(db_mode, monkeypatch):
 def test_refresh_briefing_failed_generation_leaves_existing_row_untouched(db_mode, monkeypatch):
     monkeypatch.setenv("GEMINI_KEY", "fake-key")
     now = datetime(2026, 9, 15, 12, 0, tzinfo=timezone.utc)
-    _add_summary("Existing briefing", created_at=now - timedelta(hours=1))
+    # Comfortably past SUMMARY_MIN_AGE_MINUTES (so needs_summary actually says yes and this
+    # test exercises the generation-failure path) but well under the 24h retention window.
+    _add_summary("Existing briefing", created_at=now - timedelta(minutes=SUMMARY_MIN_AGE_MINUTES + 30))
     _add_article("a1")
 
     class _RaisingModels:
@@ -278,6 +414,36 @@ def test_refresh_briefing_inserts_a_new_row_on_success(db_mode, monkeypatch):
     assert latest["article_count"] == 1
 
 
+def test_refresh_briefing_over_selects_then_prefers(db_mode, monkeypatch):
+    """40 stored articles, 5 from a preferred publisher inserted *after* the other 35 (so
+    recency order alone would put them last, not first). The prompt's headline block must
+    still lead with the 5 preferred ones — proof that refresh_briefing over-selects past
+    MAX_HEADLINES before preferred_headlines reorders, rather than preferring inside an
+    already-truncated 20-headline window where most of the 5 might not even survive."""
+    monkeypatch.setenv("GEMINI_KEY", "fake-key")
+    now = datetime(2026, 9, 15, 12, 0, tzinfo=timezone.utc)
+
+    for i in range(35):
+        _add_article(f"z{i}", title=f"Zacks story {i}", publisher="Zacks")
+    for i in range(5):
+        _add_article(f"m{i}", title=f"MT Newswires story {i}", publisher="MT Newswires")
+
+    captured = {}
+
+    def fake_generate(prompt):
+        captured["prompt"] = prompt
+        return "A generated briefing."
+
+    monkeypatch.setattr("app.briefing.generate_briefing", fake_generate)
+
+    refresh_briefing(now, now.astimezone(ET), True)
+
+    prompt = captured["prompt"]
+    first_zacks_index = prompt.index("Zacks story")
+    for i in range(5):
+        assert prompt.index(f"MT Newswires story {i}") < first_zacks_index
+
+
 def test_refresh_briefing_prune_excludes_the_just_inserted_row(db_mode, monkeypatch):
     """Both an old superseded row and the brand-new row exist after a successful refresh; the
     prune must delete the old one (past SUMMARY_RETENTION_HOURS) but never the new one, even
@@ -299,7 +465,12 @@ def test_refresh_briefing_prune_excludes_the_just_inserted_row(db_mode, monkeypa
 def test_refresh_briefing_prune_keeps_a_superseded_row_under_the_retention_window(db_mode, monkeypatch):
     monkeypatch.setenv("GEMINI_KEY", "fake-key")
     now = datetime(2026, 9, 15, 12, 0, tzinfo=timezone.utc)
-    _add_summary("Recent superseded briefing", created_at=now - timedelta(hours=1))
+    # Same margin as above: past the min-age floor so a refresh is actually due, but nowhere
+    # near the 24h retention cutoff so this row must survive the prune.
+    _add_summary(
+        "Recent superseded briefing",
+        created_at=now - timedelta(minutes=SUMMARY_MIN_AGE_MINUTES + 30),
+    )
     _add_article("a1")
 
     monkeypatch.setattr("app.briefing.genai.Client", _fake_client_returning("A fresh briefing."))

@@ -928,6 +928,43 @@ from the tree.** The others were a criterion requiring `git diff` to see an untr
 grep pattern matching an API the codebase does not use (0031), and a restated layout that reverted
 Gunnar's own hand-edit (0035).
 
+**A prompt constraint placed above the text it constrains gets ignored.** Contract 0039, 2026-09-17.
+`_FOCUS` had said *"Use third-person voice … rather than 'we' or first-person"* for two contracts
+while every briefing opened with "We are maintaining our exposure." The instruction was real; its
+**position** was wrong. `build_prompt` interpolated it mid-paragraph, above the stored earlier
+briefing, so the last thing the model read was contaminated prose. Moving the constraint block to sit
+immediately before the final `Briefing:` cue — with nothing after it — is what fixed it.
+
+**A rewrite inherits the voice of what it rewrites.** The same-day branch hands the model the previous
+briefing and says "rewrite this". Once one briefing acquired first person, every later one copied it,
+indefinitely, regardless of instructions. Two things break the chain: an explicit
+*"Follow the constraints above even where the earlier briefing does not"* in **both** rewrite
+branches, and deleting the contaminated rows once. **Changing the prompt alone would have appeared to
+do nothing** — the stored summaries must be cleared for a style change to become visible.
+
+**Do not switch the briefing to Yahoo's `topstories` RSS.** Measured 2026-09-17: HTTP 200, 50 items,
+no key required — and roughly **two of fifty** are broad-market. The rest is single-name SEO copy.
+The reference app's quality came from **Currents plus a ~45-outlet domain whitelist**, which its own
+README calls out as "doing real work, not just tidiness"; the RSS was only its fallback. Swapping
+source would trade one pile of single-stock copy for another.
+
+**Publisher preference is the lever, and it is a preference, not a filter.** Measured across 488
+stored articles and 46 publishers: `24/7 Wall St.`, `Motley Fool`, `Zacks`, `GuruFocus.com`,
+`Trefis` and `Insider Monkey` supplied **213** of them — the source of "investors should pivot from
+nuclear utility plays." `MT Newswires` supplied 47 of exactly the wanted broad-market wire copy.
+`preferred_headlines` puts the wire and mainstream press first and tops up from everything else, so a
+quiet wire day still yields a full-length briefing. **The news cards still show every publisher** —
+only what the LLM reads is filtered. After the change: 20 of 20 selected headlines came from
+preferred outlets, zero demoted ones.
+
+**Deleting a ticker must evict `cache.py`'s in-process entry, not just the rows.** Contract 0038.
+`_cache = TTLCache(maxsize=512, ttl=86400)` is checked before the database, so deleting a ticker's
+rows and re-adding it the same day would have `get_cached` serve the pre-deletion DataFrame from
+memory, `is_stale` report "current", and no fetch happen — the hard delete silently undoing itself.
+`remove()` evicts **after** the transaction commits; evicting first and then rolling back would leave
+memory and storage disagreeing in the other direction. The only manual check that distinguishes a
+real delete from a cache-reversed one is that re-adding takes seconds and refetches ten years.
+
 **An exported `DATABASE_URL` silently beats `backend/.env`.** Cost a debugging session on
 2026-09-15. `config.py` calls `load_dotenv(path)`, and `load_dotenv` **does not override a variable
 already present in the environment** — so a stale `export DATABASE_URL=...` left in one terminal from

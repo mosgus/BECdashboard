@@ -119,6 +119,13 @@ class QuoteRefreshResult(BaseModel):
     fetched_at: datetime | None
 
 
+class DeleteResult(BaseModel):
+    ticker: str
+    bars_deleted: int
+    fundamentals_deleted: int
+    quotes_deleted: int
+
+
 class AddTickerRequest(BaseModel):
     ticker: str
 

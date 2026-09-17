@@ -1,6 +1,6 @@
 import pandas as pd
 import pandas.testing as pd_testing
-from app.cache import get_cached, store, clear
+from app.cache import evict, get_cached, store, clear
 
 
 def test_get_cached_returns_none_for_missing_ticker():
@@ -111,3 +111,43 @@ def test_store_entirely_null_close_frame_is_noop_not_error():
     result = get_cached("AAPL")
     assert result is not None
     assert len(result) == 0
+
+
+# --- contract 0038: evict --------------------------------------------------------------------
+
+
+def test_evict_drops_the_ticker_from_the_in_process_cache():
+    clear()
+    df = pd.DataFrame({"date": ["2024-01-01"], "price": [100.0]})
+    store("AAPL", df)
+    assert get_cached("AAPL") is not None
+
+    evict("AAPL")
+
+    assert get_cached("AAPL") is None
+
+
+def test_evict_is_case_insensitive():
+    clear()
+    df = pd.DataFrame({"date": ["2024-01-01"], "price": [100.0]})
+    store("aapl", df)
+
+    evict("AAPL")
+
+    assert get_cached("aapl") is None
+
+
+def test_evict_is_a_noop_for_a_ticker_never_cached():
+    clear()
+    evict("NEVERCACHED")  # must not raise
+
+
+def test_evict_does_not_affect_other_tickers():
+    clear()
+    store("AAPL", pd.DataFrame({"date": ["2024-01-01"], "price": [100.0]}))
+    store("MSFT", pd.DataFrame({"date": ["2024-01-01"], "price": [200.0]}))
+
+    evict("AAPL")
+
+    assert get_cached("AAPL") is None
+    assert get_cached("MSFT") is not None

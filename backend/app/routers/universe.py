@@ -15,6 +15,7 @@ from app.news import run_news_refresh_if_due
 from app.quotes import fetch_quotes
 from app.schemas import (
     AddTickerRequest,
+    DeleteResult,
     HistoryResponse,
     QuoteRefreshResult,
     RefreshResult,
@@ -31,6 +32,7 @@ from app.universe import (
     get_one,
     list_all,
     refresh,
+    remove,
 )
 
 router = APIRouter(prefix="/universe", tags=["universe"])
@@ -127,6 +129,18 @@ def get_ticker(ticker: str) -> dict:
     _require_database()
     try:
         return get_one(ticker)
+    except NotInUniverse as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.delete("/{ticker}", response_model=DeleteResult)
+def delete_ticker(ticker: str) -> dict:
+    """Permanently deletes the ticker's membership, price history, fundamentals and quote.
+    A different HTTP method on the same path as GET /{ticker}, so this introduces no new
+    route-ordering hazard — nothing above it needs moving."""
+    _require_database()
+    try:
+        return remove(ticker)
     except NotInUniverse as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 

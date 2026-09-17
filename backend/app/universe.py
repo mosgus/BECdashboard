@@ -7,12 +7,12 @@ market_data.py, and cache.py; nothing here reimplements any of it."""
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import func as sa_func, select
+from sqlalchemy import delete, func as sa_func, select
 
-from app.cache import get_cached, get_fundamentals, get_quotes
+from app.cache import evict, get_cached, get_fundamentals, get_quotes
 from app.db import session
 from app.market_data import fetch_fundamentals, fetch_history, refresh_ticker, symbol_has_history
-from app.models import PriceBar, TickerFundamentals, UniverseTicker
+from app.models import PriceBar, TickerFundamentals, TickerQuote, UniverseTicker
 from app.quotes import QUOTE_TTL_MINUTES, is_market_open, refresh_quotes_if_stale
 
 HISTORY_START = date(2016, 1, 1)
@@ -121,6 +121,52 @@ def refresh(ticker: str) -> dict:
         fetch_fundamentals(key)
 
     return {**result, "detail": get_one(key)}
+
+
+def remove(ticker: str) -> dict:
+    """Permanently delete a ticker's membership and every row of its stored market data —
+    deliberately overriding this file's own no-cascade design note. Gunnar chose full
+    deletion on 2026-09-17, knowing the cost: the old app's failure was that deletion was
+    silent and implicit, whereas this is explicit, confirmed, and reachable only through a
+    two-step frontend dialog. No foreign key, no ON DELETE CASCADE — every delete below is an
+    explicit statement here, inside one transaction, so a failure partway rolls back all of
+    it rather than leaving the four tables disagreeing.
+
+    news_articles is deliberately untouched. source_ticker there is provenance — which
+    ticker's feed surfaced an article first — not subject matter (contract 0030 measured a
+    ticker's own feed regularly returning stories that aren't about it), so deleting by
+    source_ticker would remove legitimate feed content that has nothing to do with the
+    ticker being deleted. The 14-day pub_date prune already ages articles out on its own
+    schedule, unrelated to universe membership.
+
+    Raises NotInUniverse when there is no active membership row — the same check refresh()
+    does."""
+    key = ticker.upper()
+
+    with session() as db:
+        row = db.get(UniverseTicker, key)
+        if row is None or not row.active:
+            raise NotInUniverse(f"{key} is not in the universe")
+
+        bars_deleted = db.execute(delete(PriceBar).where(PriceBar.ticker == key)).rowcount
+        fundamentals_deleted = db.execute(
+            delete(TickerFundamentals).where(TickerFundamentals.ticker == key)
+        ).rowcount
+        quotes_deleted = db.execute(delete(TickerQuote).where(TickerQuote.ticker == key)).rowcount
+        db.execute(delete(UniverseTicker).where(UniverseTicker.ticker == key))
+
+    # Only after the transaction above has committed (session()'s context manager commits on
+    # clean exit) — evicting first and then having the delete roll back on some later error
+    # would leave memory and storage disagreeing in the opposite direction from the bug this
+    # ordering exists to prevent.
+    evict(key)
+
+    return {
+        "ticker": key,
+        "bars_deleted": bars_deleted,
+        "fundamentals_deleted": fundamentals_deleted,
+        "quotes_deleted": quotes_deleted,
+    }
 
 
 def list_all() -> list[dict]:

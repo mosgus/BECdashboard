@@ -68,6 +68,15 @@ def clear() -> None:
     _cache.clear()
 
 
+def evict(ticker: str) -> None:
+    """Drop one ticker's in-process entry. Case-insensitive, no-op when absent. Never touches
+    the database — app.universe.remove owns the storage side of deletion; this only owns the
+    memory side. Without this, deleting a ticker's rows and re-adding it the same day would
+    silently resurrect the pre-deletion history: get_cached would still serve the old
+    DataFrame from memory, is_stale would say False, and no fetch would ever happen."""
+    _cache.pop(ticker.upper(), None)
+
+
 def store_fundamentals(ticker: str, data: dict) -> None:
     """Upsert one row into ticker_fundamentals. No-op when no database is configured —
     fundamentals have no TTL-cache tier, so with no database there is nowhere to put them."""

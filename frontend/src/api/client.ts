@@ -108,7 +108,7 @@ export interface NewsResponse {
 }
 
 interface RequestOptions {
-  method?: 'GET' | 'POST'
+  method?: 'GET' | 'POST' | 'DELETE'
   body?: unknown
 }
 
@@ -174,6 +174,17 @@ export async function addTicker(ticker: string): Promise<UniverseDetail> {
 
 export async function refreshTicker(ticker: string): Promise<RefreshResult> {
   return request<RefreshResult>(`/universe/${ticker}/refresh`, { method: 'POST' })
+}
+
+export interface DeleteResult {
+  ticker: string
+  bars_deleted: number
+  fundamentals_deleted: number
+  quotes_deleted: number
+}
+
+export async function deleteTicker(ticker: string): Promise<DeleteResult> {
+  return request<DeleteResult>(`/universe/${ticker}`, { method: 'DELETE' })
 }
 
 export interface QuoteRefreshResult {

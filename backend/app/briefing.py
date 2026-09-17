@@ -33,13 +33,16 @@ MAX_HEADLINES = 20
 _ET = ZoneInfo("America/New_York")
 
 _FOCUS = (
-    "You are a market analyst briefing a portfolio manager. The portfolio's universe is "
-    "equities, sector ETFs, and three indices (the S&P 500, the Nasdaq Composite, and the "
-    "Russell 2000). Focus on market-wide moves, sector rotation, and rates or macro data "
-    "relevant to a diversified equity and ETF book. Mention an individual company only where "
-    "its story has broader read-through. "
-    f"{BRIEFING_SENTENCES} sentences maximum. "
-    "Plain sentences only — no bullet points, no headers, no markdown."
+    "Write an impartial summary of the day's financial news for a market dashboard — not "
+    "advice for any particular investor or portfolio. Cover index moves, sector rotation, "
+    "interest rates, macro data, and the themes driving them. Mention an individual company "
+    "only when its news moves a sector or the wider market.\n\n"
+    "Constraints:\n"
+    "- Third person only. Never use \"we\", \"our\", \"us\", \"I\", \"my\", \"you\", or \"your\".\n"
+    "- Describe, do not advise: no recommendations, no \"investors should\", and no language "
+    "about positioning, exposure, or risk management.\n"
+    f"- {BRIEFING_SENTENCES} sentences maximum.\n"
+    "- Plain sentences only — no bullet points, no headers, no markdown."
 )
 
 
@@ -63,6 +66,9 @@ def needs_summary(
     )
 
 
+_STYLE_OVERRIDE = "Follow the constraints above even where the earlier briefing does not."
+
+
 def build_prompt(
     headlines: list[str],
     previous_summary: str | None,
@@ -73,14 +79,23 @@ def build_prompt(
     UTC — the reference read the wall clock in UTC and took its date, which flips "today" at
     8pm ET and is wrong for a US market briefing. `previous_created_at` is converted to ET
     before `.date()` so a timestamp like 2026-09-16T01:00Z (21:00 ET on the 15th) still counts
-    as the same ET day as a `now_et` of, say, 22:00 on the 15th."""
+    as the same ET day as a `now_et` of, say, 22:00 on the 15th.
+
+    `_FOCUS` is placed last in every branch, immediately before the "Briefing:" cue — not
+    interpolated mid-paragraph — so the constraints are the last thing the model reads before
+    generating, not a buried aside (contract 0039: a mid-paragraph instruction was already
+    present and was still being ignored). The two rewrite branches additionally restate
+    `_STYLE_OVERRIDE` right after `_FOCUS`: handing the model an earlier briefing that already
+    violates the constraints (e.g. first-person voice) otherwise lets a "rewrite this" task
+    inherit that style regardless of the instruction, since the reference text it is revising
+    is itself the counter-example."""
     headline_block = "\n".join(headlines[:MAX_HEADLINES])
 
     if previous_summary is None or previous_created_at is None:
         return (
-            "You are writing a market briefing from scratch. Below are the latest headlines.\n"
-            f"{_FOCUS}\n\n"
-            f"Headlines:\n{headline_block}\n\nBriefing:"
+            "Write a market briefing from scratch using the headlines below.\n\n"
+            f"Headlines:\n{headline_block}\n\n"
+            f"{_FOCUS}\n\nBriefing:"
         )
 
     if previous_created_at.astimezone(_ET).date() == now_et.date():
@@ -88,23 +103,85 @@ def build_prompt(
             "Below is an earlier briefing from today, followed by the latest headlines. "
             "Rewrite the briefing to reflect what has shifted or newly emerged since it was "
             "written — drop anything no longer relevant, and add only what meaningfully "
-            f"changes the picture. {_FOCUS}\n\n"
+            "changes the picture.\n\n"
             f"Earlier briefing from today:\n{previous_summary}\n\n"
-            f"Latest headlines:\n{headline_block}\n\nUpdated briefing:"
+            f"Latest headlines:\n{headline_block}\n\n"
+            f"{_FOCUS}\n{_STYLE_OVERRIDE}\n\nUpdated briefing:"
         )
 
     return (
         "Below is the market briefing from a previous day, followed by today's headlines. "
         "Open by noting how sentiment or the key themes have moved since that earlier "
-        f"briefing, then cover today's developments. {_FOCUS}\n\n"
+        "briefing, then cover today's developments.\n\n"
         f"Briefing from a previous day:\n{previous_summary}\n\n"
-        f"Today's headlines:\n{headline_block}\n\nToday's briefing:"
+        f"Today's headlines:\n{headline_block}\n\n"
+        f"{_FOCUS}\n{_STYLE_OVERRIDE}\n\nToday's briefing:"
     )
 
 
 def _format_headline(article: dict) -> str:
     publisher = article.get("publisher")
     return f"- {article['title']} ({publisher})" if publisher else f"- {article['title']}"
+
+
+# Wire services and mainstream financial press, seeded from the measured publisher split
+# (contract 0039: 488 stored articles, 46 publishers — MT Newswires produces exactly the
+# broad-market wire copy the briefing wants, outnumbered roughly 4-to-1 by single-name SEO
+# content from a handful of high-volume outlets). CNBC, MarketWatch and Associated Press are
+# not in the store yet as of this contract; they are plausible future Yahoo providers and
+# cost nothing to include ahead of time. Deliberately excluded: 24/7 Wall St., Motley Fool,
+# Zacks, GuruFocus.com, Trefis, Insider Monkey, Simply Wall St., StockStory, Stocktwits,
+# MarketBeat — the 213 articles this preference exists to demote, not remove (they still
+# appear in the news cards; only the briefing's reading order changes).
+PREFERRED_PUBLISHERS: frozenset[str] = frozenset(
+    {
+        "MT Newswires",
+        "Reuters",
+        "Bloomberg",
+        "The Wall Street Journal",
+        "Financial Times",
+        "Barrons.com",
+        "Investor's Business Daily",
+        "TheStreet",
+        "Yahoo Finance",
+        "Yahoo Finance Video",
+        "AFP",
+        "Fortune",
+        "Quartz",
+        "CBS News",
+        "Sky News",
+        "Investopedia",
+        "Kiplinger",
+        "Associated Press",
+        "CNBC",
+        "MarketWatch",
+    }
+)
+
+
+def preferred_headlines(articles: list[dict], limit: int) -> list[dict]:
+    """Articles from preferred publishers first, each group keeping input order, truncated to
+    `limit`. A preference, not a filter: everything not from a preferred publisher is still
+    appended afterward as top-up, before truncating — a quiet wire day must still produce a
+    full-length briefing rather than a two-headline one.
+
+    Matching is exact on article["publisher"], case-insensitively, and reads PREFERRED_PUBLISHERS
+    fresh on every call (not a module-level derived constant) so it stays overridable by
+    monkeypatching just that name. A publisher of None is never preferred. Deliberately not a
+    substring match: "Benzinga Prediction Markets" must not match a preferred "Benzinga" —
+    those are different sources that happen to share a prefix."""
+    preferred_lower = {publisher.lower() for publisher in PREFERRED_PUBLISHERS}
+
+    preferred: list[dict] = []
+    rest: list[dict] = []
+    for article in articles:
+        publisher = article.get("publisher")
+        if publisher is not None and publisher.lower() in preferred_lower:
+            preferred.append(article)
+        else:
+            rest.append(article)
+
+    return (preferred + rest)[:limit]
 
 
 def generate_briefing(prompt: str) -> str | None:
@@ -203,7 +280,12 @@ def refresh_briefing(now_utc: datetime, now_et: datetime, articles_refreshed: bo
     if not needs_summary(latest_created_at, now_utc, articles_refreshed):
         return
 
-    articles = recent_articles(MAX_HEADLINES)
+    # Over-select then prefer (contract 0039), the same shape as app/news.py's
+    # cap_per_ticker: preferring inside an already-truncated MAX_HEADLINES list would do
+    # almost nothing, since a quiet-wire day's preferred articles might not even survive the
+    # first cut. recent_articles itself is untouched — GET /news depends on its behavior.
+    candidates = recent_articles(min(MAX_HEADLINES * 4, 200))
+    articles = preferred_headlines(candidates, MAX_HEADLINES)
     if not articles:
         return
 

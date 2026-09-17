@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { JSX } from 'react'
 import { Area, AreaChart, ResponsiveContainer, Tooltip as RechartsTooltip, XAxis, YAxis } from 'recharts'
-import { ApiError, getHistory } from '../api/client'
+import { ApiError, deleteTicker, getHistory } from '../api/client'
 import type { PriceBar, UniverseEntry } from '../api/client'
 import { formatPrice } from '../lib/format'
 import { DEFAULT_RANGE, RANGE_KEYS, hasEnoughData, sliceRange, withLiveQuote } from '../lib/ranges'
@@ -12,12 +12,18 @@ interface ChartDialogProps {
   ticker: string | null
   entry: UniverseEntry | null
   onClose: () => void
+  onDeleted: () => void
 }
 
 type FetchState =
   | { status: 'loading' }
   | { status: 'error'; message: string }
   | { status: 'loaded'; bars: PriceBar[] }
+
+type DeleteState =
+  | { status: 'idle' }
+  | { status: 'deleting' }
+  | { status: 'error'; message: string }
 
 const RANGE_TOOLTIPS: Record<RangeKey, string> = {
   '10Y': 'Show the last 10 years',
@@ -54,11 +60,22 @@ function ChartTooltipContent({ active, label, payload }: ChartTooltipProps): JSX
   )
 }
 
-export function ChartDialog({ ticker, entry, onClose }: ChartDialogProps): JSX.Element | null {
+export function ChartDialog({ ticker, entry, onClose, onDeleted }: ChartDialogProps): JSX.Element | null {
   const [fetchState, setFetchState] = useState<FetchState>({ status: 'loading' })
   const [range, setRange] = useState<RangeKey>(DEFAULT_RANGE)
+  const [confirmOpen, setConfirmOpen] = useState(false)
+  const [deleteState, setDeleteState] = useState<DeleteState>({ status: 'idle' })
   const dialogRef = useRef<HTMLDivElement>(null)
   const previousFocusRef = useRef<HTMLElement | null>(null)
+  // The keydown listener below is attached once per `ticker` change (see that effect's own
+  // comment for why) but must always act on the *current* confirmOpen — a ref sidesteps the
+  // stale-closure problem without adding confirmOpen to that effect's deps, which would also
+  // re-run the focus-capture logic in there every time the confirmation opens or closes.
+  const confirmOpenRef = useRef(false)
+
+  useEffect(() => {
+    confirmOpenRef.current = confirmOpen
+  }, [confirmOpen])
 
   function load(currentTicker: string): void {
     setFetchState({ status: 'loading' })
@@ -73,6 +90,8 @@ export function ChartDialog({ ticker, entry, onClose }: ChartDialogProps): JSX.E
   useEffect(() => {
     if (ticker === null) return
     setRange(DEFAULT_RANGE)
+    setConfirmOpen(false)
+    setDeleteState({ status: 'idle' })
     load(ticker)
     // load() is intentionally excluded — it's a stable function of `ticker`, which is already
     // the effect's own dependency; re-including it would just be re-listing the same trigger.
@@ -86,7 +105,15 @@ export function ChartDialog({ ticker, entry, onClose }: ChartDialogProps): JSX.E
     dialogRef.current?.focus()
 
     function handleKeyDown(event: KeyboardEvent): void {
-      if (event.key === 'Escape') handleClose()
+      if (event.key !== 'Escape') return
+      // Escape closes whichever layer is on top. With the confirmation open, it must close
+      // only that — not the chart underneath, which would leave nothing to return focus to
+      // and orphan the confirmation's own cleanup.
+      if (confirmOpenRef.current) {
+        setConfirmOpen(false)
+        return
+      }
+      handleClose()
     }
     document.addEventListener('keydown', handleKeyDown)
     return () => {
@@ -98,6 +125,20 @@ export function ChartDialog({ ticker, entry, onClose }: ChartDialogProps): JSX.E
 
   function handleClose(): void {
     onClose()
+  }
+
+  async function handleDelete(currentTicker: string): Promise<void> {
+    setDeleteState({ status: 'deleting' })
+    try {
+      await deleteTicker(currentTicker)
+      setConfirmOpen(false)
+      setDeleteState({ status: 'idle' })
+      onDeleted()
+      onClose()
+    } catch (err) {
+      const message = err instanceof ApiError || err instanceof Error ? err.message : 'Failed to delete ticker.'
+      setDeleteState({ status: 'error', message })
+    }
   }
 
   if (ticker === null) return null
@@ -221,7 +262,7 @@ export function ChartDialog({ ticker, entry, onClose }: ChartDialogProps): JSX.E
                   tickLine={false}
                 />
                 <YAxis
-                  domain={[yMin - yPad, yMax + yPad]}
+                  domain={[yMin, yMax + yPad]}
                   tickFormatter={(value: number) => formatPrice(value)}
                   tick={{ fontSize: 10, fill: 'var(--color-muted)' }}
                   axisLine={false}
@@ -244,29 +285,96 @@ export function ChartDialog({ ticker, entry, onClose }: ChartDialogProps): JSX.E
           )}
         </div>
 
-        <div className="flex flex-wrap gap-1 px-5 py-4">
-          {RANGE_KEYS.map((key) => {
-            const disabled = lastBarDate === null || !hasEnoughData(bars, key, lastBarDate)
-            const active = key === range
-            return (
-              <Tooltip key={key} label={RANGE_TOOLTIPS[key]}>
-                <button
-                  type="button"
-                  disabled={disabled}
-                  onClick={() => setRange(key)}
-                  className={`text-xs font-medium px-2.5 py-1.5 rounded-[var(--radius-btn)] border border-transparent ${
-                    active
-                      ? 'bg-brand-primary text-white'
-                      : 'text-[var(--color-muted)] hover:bg-brand-border hover:text-foreground'
-                  } disabled:opacity-35 disabled:cursor-not-allowed disabled:hover:bg-transparent ${disabled ? 'pointer-events-none' : ''}`}
-                >
-                  {key}
-                </button>
-              </Tooltip>
-            )
-          })}
+        <div className="flex flex-wrap items-center justify-between gap-2 px-5 py-4">
+          <div className="flex flex-wrap gap-1">
+            {RANGE_KEYS.map((key) => {
+              const disabled = lastBarDate === null || !hasEnoughData(bars, key, lastBarDate)
+              const active = key === range
+              return (
+                <Tooltip key={key} label={RANGE_TOOLTIPS[key]}>
+                  <button
+                    type="button"
+                    disabled={disabled}
+                    onClick={() => setRange(key)}
+                    className={`text-xs font-medium px-2.5 py-1.5 rounded-[var(--radius-btn)] border border-transparent ${
+                      active
+                        ? 'bg-brand-primary text-white'
+                        : 'text-[var(--color-muted)] hover:bg-brand-border hover:text-foreground'
+                    } disabled:opacity-35 disabled:cursor-not-allowed disabled:hover:bg-transparent ${disabled ? 'pointer-events-none' : ''}`}
+                  >
+                    {key}
+                  </button>
+                </Tooltip>
+              )
+            })}
+          </div>
+
+          <Tooltip label={`Permanently delete ${ticker} and all of its stored data`}>
+            <button
+              type="button"
+              onClick={() => setConfirmOpen(true)}
+              className="text-xs font-medium px-2.5 py-1.5 rounded-[var(--radius-btn)] border border-brand-border text-[var(--color-muted)] hover:bg-brand-negative hover:text-white"
+            >
+              Delete ticker
+            </button>
+          </Tooltip>
         </div>
       </div>
+
+      {confirmOpen && (
+        <div
+          className="fixed inset-0 bg-foreground/35 flex items-center justify-center px-4 z-[110]"
+          onClick={(event) => {
+            if (event.target === event.currentTarget && deleteState.status !== 'deleting') {
+              setConfirmOpen(false)
+            }
+          }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="delete-ticker-heading"
+            className={`${CARD} w-full max-w-sm p-5 shadow-xl`}
+          >
+            <h2 id="delete-ticker-heading" className="font-heading font-bold text-lg text-foreground mb-2">
+              Delete {ticker}?
+            </h2>
+            <p className="text-sm text-[var(--color-muted)] leading-relaxed mb-4">
+              Permanently delete <strong className="text-foreground">{ticker}</strong>?{' '}
+              {entry ? (
+                <>This removes its {entry.bar_count.toLocaleString()} stored price bars, fundamentals and latest quote.</>
+              ) : (
+                <>This removes its stored price bars, fundamentals and latest quote.</>
+              )}{' '}
+              Re-adding it later refetches ten years of history.
+            </p>
+
+            {deleteState.status === 'error' && (
+              <p className="text-sm text-brand-negative mb-4">{deleteState.message}</p>
+            )}
+
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                autoFocus
+                disabled={deleteState.status === 'deleting'}
+                onClick={() => setConfirmOpen(false)}
+                className="text-sm font-medium px-4 py-2 rounded-[var(--radius-btn)] bg-brand-surface border border-brand-border text-[var(--color-muted)] hover:bg-brand-border hover:text-foreground disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={deleteState.status === 'deleting'}
+                onClick={() => void handleDelete(ticker)}
+                className="text-sm font-medium px-4 py-2 rounded-[var(--radius-btn)] bg-brand-negative text-white hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {deleteState.status === 'deleting' ? 'Deleting…' : 'Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
