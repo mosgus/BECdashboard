@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { JSX } from 'react'
 import { AddTickerForm } from '../components/AddTickerForm'
 import { UniverseTable } from '../components/UniverseTable'
@@ -6,7 +6,7 @@ import { FilterDialog } from '../components/FilterDialog'
 import { ChartDialog } from '../components/ChartDialog'
 import { DownloadIcon } from '../components/DownloadIcon'
 import { Tooltip } from '../components/Tooltip'
-import { ApiError, getUniverse, refreshQuotes } from '../api/client'
+import { ApiError, getUniverse } from '../api/client'
 import type { UniverseEntry } from '../api/client'
 import { activeFilterCount, applyFilters, EMPTY_FILTERS } from '../lib/filters'
 import type { FilterState } from '../lib/filters'
@@ -16,31 +16,15 @@ type State =
   | { status: 'error'; message: string }
   | { status: 'ready'; entries: UniverseEntry[] }
 
-type QuoteRefreshState =
-  | { status: 'idle' }
-  | { status: 'running' }
-  | { status: 'done'; refreshed: number }
-  | { status: 'error'; message: string }
-
 const CARD = 'bg-brand-surface border border-brand-border rounded-[var(--radius-card)]'
 
 export function UniversePage(): JSX.Element {
   const messages = ['Loading universe…', 'Loading takes <60s…', 'Still loading…']
   const [state, setState] = useState<State>({ status: 'loading' })
   const [messageIndex, setMessageIndex] = useState(0)
-  const [quoteRefresh, setQuoteRefresh] = useState<QuoteRefreshState>({ status: 'idle' })
   const [filters, setFilters] = useState<FilterState>(EMPTY_FILTERS)
   const [filterDialogOpen, setFilterDialogOpen] = useState(false)
   const [selectedTicker, setSelectedTicker] = useState<string | null>(null)
-  const isMountedRef = useRef(true)
-
-  useEffect(() => {
-    isMountedRef.current = true
-    return () => {
-      isMountedRef.current = false
-    }
-  }, [])
-
   useEffect(() => {
     const interval = setInterval(() => setMessageIndex((prev) => (prev + 1) % 3), 3000)
     return () => clearInterval(interval)
@@ -48,10 +32,6 @@ export function UniversePage(): JSX.Element {
 
   function load(): void {
     setState({ status: 'loading' })
-    // Clear a lingering "done"/"error" summary from a previous run — but never stomp on an
-    // active one: AddTickerForm can call load() while a quote refresh is still running
-    // (they're deliberately not coupled), and that run's in-flight state must survive.
-    setQuoteRefresh((prev) => (prev.status === 'running' ? prev : { status: 'idle' }))
     getUniverse()
       .then((entries) => setState({ status: 'ready', entries }))
       .catch((err: unknown) => {
@@ -73,28 +53,6 @@ export function UniversePage(): JSX.Element {
     load()
   }, [])
 
-  async function handleRefreshPrices(): Promise<void> {
-    if (quoteRefresh.status === 'running') return
-
-    setQuoteRefresh({ status: 'running' })
-    try {
-      const result = await refreshQuotes()
-      // Refetch directly rather than via load(): load() also resets quoteRefresh to 'idle'
-      // whenever it isn't 'running', so calling it right after setting 'done' would wipe the
-      // success message in the same render pass before it ever painted.
-      const entries = await getUniverse()
-      if (!isMountedRef.current) return
-      setState({ status: 'ready', entries })
-      setQuoteRefresh({ status: 'done', refreshed: result.refreshed })
-    } catch (err) {
-      if (!isMountedRef.current) return
-      setQuoteRefresh({
-        status: 'error',
-        message: err instanceof Error ? err.message : 'Price refresh failed.',
-      })
-    }
-  }
-
   const filterResult = state.status === 'ready' ? applyFilters(state.entries, filters) : null
   const activeCount = activeFilterCount(filters)
   const isFiltering = filters.query.trim() !== '' || activeCount > 0
@@ -115,7 +73,12 @@ export function UniversePage(): JSX.Element {
               Securities tracked for analysis. Data is shared and persists across sessions.
             </p>
           </div>
-          <AddTickerForm onAdded={load} />
+          {/* The form normally lives in the controls row below, but that row only renders once
+              the universe has entries — without this fallback an empty universe would have no
+              way to add the first ticker. */}
+          {!(state.status === 'ready' && state.entries.length > 0) && (
+            <AddTickerForm onAdded={load} />
+          )}
         </div>
 
         {state.status === 'loading' && (
@@ -214,29 +177,10 @@ export function UniversePage(): JSX.Element {
                 </Tooltip>
               )}
 
-              <Tooltip label="Fetch the latest intraday prices now">
-                <button
-                  type="button"
-                  onClick={() => void handleRefreshPrices()}
-                  disabled={quoteRefresh.status === 'running'}
-                  className={`flex-shrink-0 text-sm font-medium px-4 py-2 rounded-[var(--radius-btn)] bg-brand-primary text-white hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed ${quoteRefresh.status === 'running' ? 'pointer-events-none' : ''}`}
-                >
-                  {quoteRefresh.status === 'running' ? 'Refreshing…' : 'Refresh prices'}
-                </button>
-              </Tooltip>
+              <div className="flex-shrink-0">
+                <AddTickerForm onAdded={load} />
+              </div>
             </div>
-
-            {quoteRefresh.status === 'done' && (
-              <p className="text-xs mb-3 text-[var(--color-muted)]">
-                {quoteRefresh.refreshed === 0
-                  ? 'No prices needed refreshing.'
-                  : `Refreshed ${quoteRefresh.refreshed} price${quoteRefresh.refreshed === 1 ? '' : 's'}.`}
-              </p>
-            )}
-
-            {quoteRefresh.status === 'error' && (
-              <p className="text-xs mb-3 text-brand-negative">{quoteRefresh.message}</p>
-            )}
 
             <p className="text-xs mb-3 min-h-[1rem]">
               {isFiltering && filterResult && (
