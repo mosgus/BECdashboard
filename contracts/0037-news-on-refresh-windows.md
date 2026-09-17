@@ -1,6 +1,6 @@
 # Contract 0037 — Put the news feed and briefing on the universe's refresh windows
 
-**Status:** in-progress
+**Status:** reported
 **Assigned to:** sonnet
 **Author:** planner (opus)
 

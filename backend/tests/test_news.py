@@ -5,15 +5,17 @@ import pytest
 from sqlalchemy import event, select
 
 from app.db import get_engine, session
-from app.models import Base, NewsArticle, UniverseTicker
+from app.models import AppState, Base, NewsArticle, UniverseTicker
 from app.news import (
+    NEWS_REFRESH_KEY,
     active_universe_tickers,
     cap_per_ticker,
     get_newest_fetched_at,
-    needs_refresh,
+    needs_news_refresh,
     parse_article,
     recent_articles,
     refresh_news_if_stale,
+    run_news_refresh_if_due,
 )
 
 ET = ZoneInfo("America/New_York")
@@ -66,37 +68,36 @@ def _raw_item(article_id: str, title: str = "Some headline", **content_overrides
     return {"id": article_id, "content": content}
 
 
-# --- needs_refresh ------------------------------------------------------------------------
+# --- needs_news_refresh --------------------------------------------------------------------
 
 
-def test_needs_refresh_true_when_table_empty_even_before_earliest_hour():
-    """Rule 1 beats rule 2: an empty table refreshes at any hour."""
-    now_et = _et(3, 0)
-    assert needs_refresh(None, _utc(now_et), now_et) is True
+def test_needs_news_refresh_true_when_feed_empty_before_930():
+    """Rule 1 (empty feed) beats the window gate — an empty feed must not stay blank until
+    09:30 on a fresh deploy, the same reasoning needs_summary already follows for the
+    briefing."""
+    now_et = _et(8, 0)
+    assert needs_news_refresh(None, None, now_et) is True
 
 
-def test_needs_refresh_false_before_earliest_hour_when_stale():
-    now_et = _et(8, 59)
-    newest = _utc(now_et) - timedelta(hours=7)
-    assert needs_refresh(newest, _utc(now_et), now_et) is False
+def test_needs_news_refresh_true_when_feed_empty_on_a_sunday():
+    """The reason this isn't a bare reuse of needs_auto_refresh: an empty feed refreshes
+    even on a day the universe sweep would never touch."""
+    now_et = datetime(2026, 9, 20, 13, 0, tzinfo=ET)  # 2026-09-20 is a Sunday
+    assert needs_news_refresh(None, None, now_et) is True
 
 
-def test_needs_refresh_true_just_after_earliest_hour_when_stale():
-    now_et = _et(9, 1)
-    newest = _utc(now_et) - timedelta(hours=7)
-    assert needs_refresh(newest, _utc(now_et), now_et) is True
-
-
-def test_needs_refresh_false_when_fresh_after_earliest_hour():
-    now_et = _et(15, 0)
-    newest = _utc(now_et) - timedelta(hours=1)
-    assert needs_refresh(newest, _utc(now_et), now_et) is False
-
-
-def test_needs_refresh_true_at_exactly_ttl_hours_old():
+def test_needs_news_refresh_false_when_claimed_one_second_after_window_opened():
     now_et = _et(10, 0)
-    newest = _utc(now_et) - timedelta(hours=6)
-    assert needs_refresh(newest, _utc(now_et), now_et) is True
+    last_claim_at = _utc(_et(9, 30) + timedelta(seconds=1))
+    newest_fetched_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    assert needs_news_refresh(newest_fetched_at, last_claim_at, now_et) is False
+
+
+def test_needs_news_refresh_true_when_claimed_one_second_before_window_opened():
+    now_et = _et(10, 0)
+    last_claim_at = _utc(_et(9, 30) - timedelta(seconds=1))
+    newest_fetched_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    assert needs_news_refresh(newest_fetched_at, last_claim_at, now_et) is True
 
 
 # --- parse_article --------------------------------------------------------------------------
@@ -198,16 +199,65 @@ def test_refresh_where_one_ticker_raises_stores_the_successful_ones(db_mode, mon
     assert rows == [("msft-1", "MSFT")]
 
 
-def test_refresh_skips_entirely_when_not_stale(db_mode, monkeypatch):
+# --- run_news_refresh_if_due: gating, claim-first, and wiring to active tickers ----------------
+
+
+def test_run_news_refresh_if_due_noop_when_window_already_claimed(db_mode, monkeypatch):
     _add_article("existing-1", fetched_at=datetime(2026, 1, 1, tzinfo=timezone.utc))
+    now_et = _et(10, 0)
+    now_utc = _utc(now_et)
+    with session() as db:
+        db.add(AppState(key=NEWS_REFRESH_KEY, value_at=now_utc))
 
     def _fail_if_called(ticker):
-        raise AssertionError("fetch_news_for must not be called when not stale")
+        raise AssertionError("fetch_news_for must not be called when the window is claimed")
 
     monkeypatch.setattr("app.news.fetch_news_for", _fail_if_called)
 
-    now_et = _et(8, 0)  # before the 09:00 gate, and the table is non-empty
-    refresh_news_if_stale(["AAPL"], _utc(now_et), now_et)  # must not raise
+    run_news_refresh_if_due(now_utc, now_et + timedelta(minutes=5))
+
+
+def test_run_news_refresh_if_due_fetches_for_active_tickers_on_an_empty_feed(db_mode, monkeypatch):
+    with session() as db:
+        db.add(UniverseTicker(ticker="AAPL", active=True))
+        db.add(UniverseTicker(ticker="RETIRED", active=False))
+
+    called = []
+
+    def fake_fetch(ticker):
+        called.append(ticker)
+        return []
+
+    monkeypatch.setattr("app.news.fetch_news_for", fake_fetch)
+
+    now_et = _et(10, 0)
+    run_news_refresh_if_due(_utc(now_et), now_et)
+
+    assert called == ["AAPL"]
+
+
+def test_run_news_refresh_if_due_writes_the_claim_before_the_fetch_even_if_it_raises(db_mode, monkeypatch):
+    """Assert on stored state, not source order: a fetch stub that raises on the only ticker
+    must still leave app_state["news_refresh"] holding the new timestamp — proving the claim
+    was written before the fetch ran, not after it finished."""
+    _add_article("existing-1", fetched_at=datetime(2026, 1, 1, tzinfo=timezone.utc))
+    with session() as db:
+        db.add(UniverseTicker(ticker="AAPL", active=True))
+
+    def _raise(ticker):
+        raise RuntimeError(f"boom: {ticker}")
+
+    monkeypatch.setattr("app.news.fetch_news_for", _raise)
+
+    now_et = _et(10, 0)
+    now_utc = _utc(now_et)
+    run_news_refresh_if_due(now_utc, now_et)
+
+    with session() as db:
+        row = db.get(AppState, NEWS_REFRESH_KEY)
+        assert row is not None
+        value_at = row.value_at if row.value_at.tzinfo is not None else row.value_at.replace(tzinfo=timezone.utc)
+    assert value_at == now_utc
 
 
 # --- dedup across tickers --------------------------------------------------------------------

@@ -1,42 +1,58 @@
 """Universe-wide news: stored, not live. Contract 0030 measured `yf.Ticker(t).news` at
 0.11-0.28s per ticker from Render — fine as a background task, unacceptable inside a launch
-page render that Render already cold-starts at ~43s. needs_refresh/parse_article are pure —
-no database, no clock, no network. The two impure functions, refresh_news_if_stale and
-recent_articles, are where the database reads/writes and the yfinance calls live.
+page render that Render already cold-starts at ~43s. needs_news_refresh/parse_article are
+pure — no database, no clock, no network. The impure functions — run_news_refresh_if_due,
+refresh_news_if_stale and recent_articles — are where the database reads/writes and the
+yfinance calls live.
 
 One blended feed, not one per ticker: `.news` is associated with a ticker, not about it
 (contract 0030 — AAPL's top story was about a Canadian telecom), so a per-ticker feed would
-claim more relevance than the data supports."""
+claim more relevance than the data supports.
+
+Contract 0037: news and the briefing no longer run on their own rolling TTL. They refresh on
+the same fixed 09:30/12:00/16:00 ET windows the universe sweep uses (app/schedule.py), with
+weekends included — see needs_news_refresh — triggered from the same GET /universe/strip
+request that triggers app/autorefresh.py's sweep."""
 
 import logging
-from datetime import datetime, time, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 
 import yfinance as yf
 from sqlalchemy import delete, func, nullslast, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
+from app.autorefresh import active_universe_tickers as _shared_active_universe_tickers
 from app.db import is_enabled, session
-from app.models import NewsArticle, UniverseTicker
+from app.models import AppState, NewsArticle, UniverseTicker
+from app.schedule import needs_auto_refresh
 
 logger = logging.getLogger(__name__)
 
-NEWS_TTL_HOURS = 6
-NEWS_EARLIEST_ET = time(9, 0)
+NEWS_REFRESH_KEY = "news_refresh"
 NEWS_RETENTION_DAYS = 14
 
 
-def needs_refresh(newest_fetched_at: datetime | None, now_utc: datetime, now_et: datetime) -> bool:
-    """True when the feed is stale and we are allowed to refresh.
+def needs_news_refresh(
+    newest_fetched_at: datetime | None,
+    last_claim_at: datetime | None,
+    now_et: datetime,
+) -> bool:
+    """True when the feed has never been populated, or the current window is unclaimed.
 
-    Rule order matters: an empty table (newest_fetched_at is None) refreshes at any hour —
-    the 09:00 gate exists to stop overnight re-fetching, not to leave a fresh deployment blank
-    until morning. Only once that is ruled out does the 09:00 ET gate apply."""
+    Two different timestamps, not one: `newest_fetched_at` is the newest stored article row;
+    `last_claim_at` is app_state["news_refresh"] — the last time a refresh was *attempted*,
+    successful or not. An attempt that fetched nothing new still claims the window, and must
+    not be retried on the very next page load.
+
+    `newest_fetched_at is None` is checked first and wins regardless of the window or the day
+    — an empty feed on a fresh deploy must not stay blank until the next window opens, the
+    same rule needs_summary already follows for the briefing. Once that's ruled out, this
+    defers entirely to needs_auto_refresh with weekends included: a weekday-only gate would
+    freeze the feed and briefing from Friday 16:00 to Monday 09:30, about 65 hours."""
     if newest_fetched_at is None:
         return True
-    if now_et.time() < NEWS_EARLIEST_ET:
-        return False
-    return now_utc - newest_fetched_at >= timedelta(hours=NEWS_TTL_HOURS)
+    return needs_auto_refresh(last_claim_at, now_et, include_weekends=True)
 
 
 def _parse_pub_date(raw: object) -> datetime | None:
@@ -119,7 +135,11 @@ def get_newest_fetched_at() -> datetime | None:
 def active_universe_tickers() -> list[str]:
     """One bounded query — the active universe's ticker list. Deliberately does not go
     through app.universe.list_all(): that pulls fundamentals, bars and quotes and can trigger
-    a live-quote fetch, none of which a news refresh needs."""
+    a live-quote fetch, none of which a news refresh needs.
+
+    Kept even though run_news_refresh_if_due calls app.autorefresh's copy of this same query
+    instead (contract 0037 — reusing one existing implementation rather than writing a third)
+    — this one predates that module and remains in use by GET /news's own tests."""
     if not is_enabled():
         return []
     with session() as db:
@@ -128,6 +148,25 @@ def active_universe_tickers() -> list[str]:
                 select(UniverseTicker.ticker).where(UniverseTicker.active.is_(True))
             ).scalars().all()
         )
+
+
+def _get_news_claim() -> datetime | None:
+    if not is_enabled():
+        return None
+    with session() as db:
+        row = db.get(AppState, NEWS_REFRESH_KEY)
+        return _as_utc(row.value_at) if row is not None else None
+
+
+def _set_news_claim(value_at: datetime) -> None:
+    with session() as db:
+        dialect = db.get_bind().dialect.name
+        insert_fn = pg_insert if dialect == "postgresql" else sqlite_insert
+        stmt = insert_fn(AppState).values(key=NEWS_REFRESH_KEY, value_at=value_at)
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["key"], set_={"value_at": stmt.excluded.value_at}
+        )
+        db.execute(stmt)
 
 
 def fetch_news_for(ticker: str) -> list[dict]:
@@ -159,9 +198,15 @@ def _prune_old_articles(now_utc: datetime) -> None:
 
 
 def refresh_news_if_stale(tickers: list[str], now_utc: datetime, now_et: datetime) -> None:
-    """The impure composition: read the newest fetched_at, consult needs_refresh, and only
-    then fetch. No-op with no database configured or an empty ticker list — that check happens
-    before any fetch is attempted, same discipline as quotes.refresh_quotes_if_stale.
+    """The impure work itself: fetch/parse/upsert/prune articles for the given tickers, then
+    refresh the briefing. Unconditional — no staleness check lives here any more. Contract
+    0037 moved gating to run_news_refresh_if_due/needs_news_refresh, since news now refreshes
+    on the same fixed windows the universe sweep uses rather than its own rolling TTL; by the
+    time anything calls this function, that decision has already been made. Kept as its own
+    function (rather than inlined into run_news_refresh_if_due) because tests/test_news.py and
+    tests/test_briefing.py call it directly.
+
+    No-op with no database configured or an empty ticker list.
 
     Tickers are walked sequentially, never concurrently (contract 0013: a burst of
     simultaneous requests from one IP is what got Render's shared IP crumb-throttled). A
@@ -169,37 +214,32 @@ def refresh_news_if_stale(tickers: list[str], now_utc: datetime, now_et: datetim
     rest, and a wipe is never issued: articles are only ever upserted or pruned by age, so a
     refresh where every ticker fails leaves every existing row exactly as it was.
 
-    The briefing refresh below runs unconditionally, past the article-staleness check rather
-    than after an early return for it (contract 0035) — otherwise a newly-set GEMINI_KEY would
-    produce no briefing for up to NEWS_TTL_HOURS, since refresh_briefing was unreachable
-    whenever articles were already fresh. It is told whether articles actually moved so it
-    does not turn into its own 30-minute schedule."""
+    articles_refreshed is always True when calling refresh_briefing here — reaching this
+    function at all means the caller already decided a refresh was due, which is exactly what
+    that flag communicates (contract 0035)."""
     if not is_enabled() or not tickers:
         return
 
-    articles_refreshed = False
-    if needs_refresh(get_newest_fetched_at(), now_utc, now_et):
-        parsed_by_id: dict[str, dict] = {}
-        for ticker in tickers:
-            try:
-                raw_items = fetch_news_for(ticker)
-            except Exception:
-                # Broad on purpose: one ticker's feed being unreachable must not abort the
-                # refresh for the other nineteen. See report.
-                logger.exception("app.news: fetch_news_for(%s) failed; skipping", ticker)
+    parsed_by_id: dict[str, dict] = {}
+    for ticker in tickers:
+        try:
+            raw_items = fetch_news_for(ticker)
+        except Exception:
+            # Broad on purpose: one ticker's feed being unreachable must not abort the
+            # refresh for the other nineteen. See report.
+            logger.exception("app.news: fetch_news_for(%s) failed; skipping", ticker)
+            continue
+
+        for raw in raw_items:
+            parsed = parse_article(raw, ticker, now_utc)
+            if parsed is None:
                 continue
+            parsed_by_id.setdefault(parsed["id"], parsed)
 
-            for raw in raw_items:
-                parsed = parse_article(raw, ticker, now_utc)
-                if parsed is None:
-                    continue
-                parsed_by_id.setdefault(parsed["id"], parsed)
+    if parsed_by_id:
+        _upsert_articles(list(parsed_by_id.values()))
 
-        if parsed_by_id:
-            _upsert_articles(list(parsed_by_id.values()))
-
-        _prune_old_articles(now_utc)
-        articles_refreshed = True
+    _prune_old_articles(now_utc)
 
     # Deferred, not a module-level import: app.briefing imports recent_articles from this
     # module (contract 0034 — reuse the bounded query rather than writing a second one), so a
@@ -208,11 +248,35 @@ def refresh_news_if_stale(tickers: list[str], now_utc: datetime, now_et: datetim
     from app.briefing import refresh_briefing
 
     try:
-        refresh_briefing(now_utc, now_et, articles_refreshed)
+        refresh_briefing(now_utc, now_et, True)
     except Exception:
         # Broad on purpose: a briefing failure must never affect the article refresh above,
         # which has already committed by this point.
         logger.exception("app.news: refresh_briefing failed after a successful article refresh")
+
+
+def run_news_refresh_if_due(now_utc: datetime, now_et: datetime) -> None:
+    """The scheduled entry point (contract 0037). Triggered from GET /universe/strip alongside
+    app.autorefresh.run_auto_refresh_if_due, on the same fixed 09:30/12:00/16:00 ET windows —
+    weekends included, since a weekday-only gate would freeze news over the weekend the way it
+    doesn't matter for prices.
+
+    Claims app_state["news_refresh"] before doing any fetch — same reasoning as
+    autorefresh.run_auto_refresh_if_due: this narrows, but does not eliminate, the race between
+    two visitors landing in the same window, and a window that errors is never retried by the
+    next visitor thirty seconds later. It waits for the next window instead."""
+    if not is_enabled():
+        return
+
+    newest_fetched_at = get_newest_fetched_at()
+    last_claim_at = _get_news_claim()
+    if not needs_news_refresh(newest_fetched_at, last_claim_at, now_et):
+        return
+
+    _set_news_claim(now_utc)
+
+    tickers = _shared_active_universe_tickers()
+    refresh_news_if_stale(tickers, now_utc, now_et)
 
 
 def cap_per_ticker(articles: list[dict], max_per_ticker: int, limit: int) -> list[dict]:

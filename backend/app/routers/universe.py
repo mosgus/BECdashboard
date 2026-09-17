@@ -11,6 +11,7 @@ from app.autorefresh import active_universe_tickers, run_auto_refresh_if_due
 from app.cache import get_cached, store_quotes
 from app.db import is_enabled
 from app.export import build_universe_zip, history_to_csv
+from app.news import run_news_refresh_if_due
 from app.quotes import fetch_quotes
 from app.schemas import (
     AddTickerRequest,
@@ -90,14 +91,18 @@ def get_strip(background_tasks: BackgroundTasks) -> dict:
     response stays owned by list_all(). Declared above /{ticker}: a single-segment path here
     would otherwise be swallowed by that route and resolve as an unknown ticker instead.
 
-    Also schedules run_auto_refresh_if_due (contract 0036) as a background task — TickerStrip
-    lives in App.tsx outside <Routes>, so this fires on every page load, making it the one
-    endpoint that reliably means "a user visited the site". The strip response must not wait
-    on it, so it is scheduled, never awaited."""
+    Also schedules run_auto_refresh_if_due (contract 0036) and run_news_refresh_if_due
+    (contract 0037) as two separate background tasks — TickerStrip lives in App.tsx outside
+    <Routes>, so this fires on every page load, making it the one endpoint that reliably means
+    "a user visited the site" (including for someone who only opens /universe, which GET
+    /news could never see). Two tasks rather than one wrapper so a failing universe sweep
+    cannot stop the news refresh, and neither claims the other's app_state key. The strip
+    response must not wait on either, so both are scheduled, never awaited."""
     _require_database()
     now_utc = datetime.now(timezone.utc)
     now_et = datetime.now(ZoneInfo("America/New_York"))
     background_tasks.add_task(run_auto_refresh_if_due, now_utc, now_et)
+    background_tasks.add_task(run_news_refresh_if_due, now_utc, now_et)
     return build_strip_response(now_utc, now_et)
 
 

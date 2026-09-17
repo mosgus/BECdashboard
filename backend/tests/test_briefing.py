@@ -314,14 +314,15 @@ def test_refresh_briefing_prune_keeps_a_superseded_row_under_the_retention_windo
 # --- refresh_news_if_stale: the early-return bug this contract fixes ---------------------------
 
 
-def test_refresh_news_if_stale_reaches_refresh_briefing_when_articles_are_not_stale(
+def test_refresh_news_if_stale_always_reaches_refresh_briefing_with_articles_refreshed_true(
     db_mode, monkeypatch
 ):
-    """Before this contract, refresh_briefing sat after refresh_news_if_stale's early return
-    for "articles are already fresh", so it was unreachable whenever needs_refresh was False —
-    exactly the state a newly-set GEMINI_KEY finds itself in for up to NEWS_TTL_HOURS. Assert
-    on the call itself (a spy on app.briefing.refresh_briefing), not on reading the source."""
-    monkeypatch.setattr("app.news.needs_refresh", lambda *a, **k: False)
+    """refresh_news_if_stale is unconditional as of contract 0037 — its own staleness gate
+    (needs_refresh) was deleted; that decision now belongs entirely to
+    run_news_refresh_if_due/needs_news_refresh, upstream of this function. Reaching this
+    function at all means a refresh was already decided, so articles_refreshed is always True
+    when it calls refresh_briefing. Assert on the call itself, not on reading the source."""
+    monkeypatch.setattr("app.news.fetch_news_for", lambda ticker: [])
 
     calls = []
     monkeypatch.setattr("app.briefing.refresh_briefing", lambda *a: calls.append(a))
@@ -330,7 +331,7 @@ def test_refresh_news_if_stale_reaches_refresh_briefing_when_articles_are_not_st
     now_utc = now_et.astimezone(timezone.utc)
     refresh_news_if_stale(["AAPL"], now_utc, now_et)
 
-    assert calls == [(now_utc, now_et, False)]
+    assert calls == [(now_utc, now_et, True)]
 
 
 # --- latest_briefing ---------------------------------------------------------------------------

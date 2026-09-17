@@ -1,14 +1,15 @@
 """The one news endpoint. No `/{something}` catch-all here, so the route-ordering trap
-contract 0028/0029 hit in app/routers/universe.py does not apply — nothing to declare above."""
+contract 0028/0029 hit in app/routers/universe.py does not apply — nothing to declare above.
 
-from datetime import datetime, timezone
-from zoneinfo import ZoneInfo
+Contract 0037: this is now a pure read. News and the briefing refresh on a schedule triggered
+from GET /universe/strip (app.news.run_news_refresh_if_due, alongside the universe sweep),
+not from this endpoint — GET /news no longer schedules anything itself."""
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi import APIRouter, HTTPException
 
 from app.briefing import latest_briefing
 from app.db import is_enabled
-from app.news import active_universe_tickers, get_newest_fetched_at, recent_articles, refresh_news_if_stale
+from app.news import get_newest_fetched_at, recent_articles
 from app.schemas import NewsResponse
 
 router = APIRouter(prefix="/news", tags=["news"])
@@ -33,15 +34,11 @@ def _clamp_max_per_ticker(max_per_ticker: int) -> int:
 
 
 @router.get("", response_model=NewsResponse)
-def get_news(
-    background_tasks: BackgroundTasks,
-    limit: int = _DEFAULT_LIMIT,
-    max_per_ticker: int = _DEFAULT_MAX_PER_TICKER,
-) -> dict:
-    """Never blocks on a fetch: reads whatever is stored and returns immediately, scheduling
-    refresh_news_if_stale as a background task. The request that trips the TTL serves slightly
-    stale articles; the next one gets fresh — a multi-second stall on a launch page that
-    Render already cold-starts at ~43s is not acceptable."""
+def get_news(limit: int = _DEFAULT_LIMIT, max_per_ticker: int = _DEFAULT_MAX_PER_TICKER) -> dict:
+    """A pure read: storage in, JSON out. Refreshing news and the briefing is no longer this
+    endpoint's job (contract 0037) — GET /universe/strip schedules that on a fixed window
+    schedule shared with the universe sweep, so this never blocks on a fetch and never
+    schedules one either."""
     if not is_enabled():
         raise HTTPException(status_code=503, detail=_DATABASE_NOT_CONFIGURED)
 
@@ -59,10 +56,5 @@ def get_news(
             "model": latest["model"],
             "article_count": latest["article_count"],
         }
-
-    now_utc = datetime.now(timezone.utc)
-    now_et = datetime.now(ZoneInfo("America/New_York"))
-    tickers = active_universe_tickers()
-    background_tasks.add_task(refresh_news_if_stale, tickers, now_utc, now_et)
 
     return {"articles": articles, "as_of": as_of, "summary": summary}

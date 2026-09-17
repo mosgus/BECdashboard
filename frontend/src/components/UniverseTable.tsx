@@ -1,6 +1,6 @@
 import type { JSX } from 'react'
 import type { UniverseEntry } from '../api/client'
-import { formatCount, formatDateRange, formatMarketCap, formatPercent, formatPrice, formatRatio } from '../lib/format'
+import { formatDateRange, formatMarketCap, formatPercent, formatPrice, formatRatio } from '../lib/format'
 import { priceChange } from '../lib/change'
 import type { ChangeDirection } from '../lib/change'
 import { DownloadIcon } from './DownloadIcon'
@@ -68,7 +68,6 @@ export function UniverseTable({ rows, onRowClick }: UniverseTableProps): JSX.Ele
             <th className={`${TH} text-right hidden lg:table-cell`}>Mkt Cap</th>
             <th className={`${TH} text-right hidden lg:table-cell`}>P/E</th>
             <th className={`${TH} text-right hidden md:table-cell`}>Yield</th>
-            <th className={`${TH} text-right hidden xl:table-cell`}>Bars</th>
             <th className={`${TH} hidden xl:table-cell`}>Coverage</th>
             <th className={`${TH} text-right`}>.csv</th>
           </tr>
@@ -93,7 +92,7 @@ export function UniverseTable({ rows, onRowClick }: UniverseTableProps): JSX.Ele
                 </Tooltip>
               </td>
               <td
-                className={`${TD} ${CLIP} max-w-[5rem] sm:max-w-[12rem] md:max-w-[7rem] lg:max-w-[10rem] xl:max-w-[10rem]`}
+                className={`${TD} ${CLIP} max-w-[6rem] sm:max-w-[16rem] md:max-w-[10rem] lg:max-w-[14rem] xl:max-w-[16rem]`}
                 title={row.short_name ?? undefined}
               >
                 {row.short_name ?? '—'}
@@ -139,9 +138,6 @@ export function UniverseTable({ rows, onRowClick }: UniverseTableProps): JSX.Ele
               </td>
               <td className={`${TD} ${NOWRAP} text-right tabular-nums hidden md:table-cell text-[var(--color-muted)]`}>
                 {formatPercent(row.dividend_yield)}
-              </td>
-              <td className={`${TD} ${NOWRAP} text-right tabular-nums hidden xl:table-cell`}>
-                {formatCount(row.bar_count)}
               </td>
               <td className={`${TD} ${NOWRAP} hidden xl:table-cell text-xs text-[var(--color-muted)]`}>
                 {formatDateRange(row.first_bar, row.last_bar)}

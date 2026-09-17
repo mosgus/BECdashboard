@@ -23,15 +23,6 @@ def client():
     return TestClient(app)
 
 
-@pytest.fixture(autouse=True)
-def no_background_refresh(monkeypatch):
-    """The route schedules refresh_news_if_stale via BackgroundTasks — TestClient runs
-    background tasks synchronously after the response body is built, which would otherwise
-    make every test in this file hit the (unpatched) real yfinance. Neutered here; the refresh
-    behavior itself is tests/test_news.py's job."""
-    monkeypatch.setattr("app.routers.news.refresh_news_if_stale", lambda *a, **k: None)
-
-
 def _add_article(article_id: str, pub_date: datetime | None, source_ticker: str = "AAPL") -> None:
     with session() as db:
         db.add(
@@ -164,13 +155,17 @@ def test_get_news_degraded_mode_returns_503(client):
     assert client.get("/news").status_code == 503
 
 
-def test_get_news_schedules_background_refresh(db_mode, client, monkeypatch):
+def test_get_news_never_schedules_a_background_task(db_mode, client, monkeypatch):
+    """GET /news is a pure read as of contract 0037 — refreshing news and the briefing moved
+    to run_news_refresh_if_due, scheduled from GET /universe/strip instead. Prove the old
+    scheduling path is actually gone rather than just unused: app.news.run_news_refresh_if_due
+    must not be called as a side effect of hitting this endpoint."""
     calls = []
     monkeypatch.setattr(
-        "app.routers.news.refresh_news_if_stale",
-        lambda tickers, now_utc, now_et: calls.append((tickers, now_utc, now_et)),
+        "app.news.run_news_refresh_if_due",
+        lambda now_utc, now_et: calls.append((now_utc, now_et)),
     )
 
     response = client.get("/news")
     assert response.status_code == 200
-    assert len(calls) == 1
+    assert calls == []
