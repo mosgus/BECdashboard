@@ -25,8 +25,8 @@ from app.news import recent_articles
 
 logger = logging.getLogger(__name__)
 
-BRIEFING_SENTENCES = 6
-SUMMARY_MIN_AGE_MINUTES = 30
+BRIEFING_SENTENCES = 8
+SUMMARY_MIN_AGE_MINUTES = 90
 SUMMARY_RETENTION_HOURS = 24
 MAX_HEADLINES = 20
 

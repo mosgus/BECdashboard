@@ -30,7 +30,7 @@ from app.schedule import needs_auto_refresh
 logger = logging.getLogger(__name__)
 
 NEWS_REFRESH_KEY = "news_refresh"
-NEWS_RETENTION_DAYS = 14
+NEWS_RETENTION_DAYS = 2
 
 
 def needs_news_refresh(

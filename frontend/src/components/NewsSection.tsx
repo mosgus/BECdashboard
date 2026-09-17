@@ -257,21 +257,32 @@ export function NewsSection(): JSX.Element | null {
           {visibleRows.map((article) => (
             <ArticleRow key={article.id} article={article} now={now} />
           ))}
+          {/* Expands on hover rather than on click, so the "… N more" label never lingers above
+              the rows it just revealed. The hover zone is this wrapper — label plus overflow —
+              not the whole list, so drifting across the first five rows does not trigger it.
+              Once expanded the label is hidden and the cursor sits inside the revealed rows,
+              which keeps :hover alive on the same wrapper. focus-within is what makes it
+              reachable by keyboard; a touch device has neither and cannot open it. */}
           {overflowRows.length > 0 && (
-            <details>
-              {/* list-none alone leaves WebKit's triangle visible; the reference hid it with the
-                  same pseudo-element (news_section.py:352). */}
-              <summary className="py-1.5 text-sm text-[var(--color-muted)] cursor-pointer list-none [&::-webkit-details-marker]:hidden">
-                <Tooltip label={`Show ${overflowRows.length} more headlines`}>
-                  <span>… {overflowRows.length} more</span>
-                </Tooltip>
-              </summary>
-              <div className="flex flex-col divide-y divide-brand-border">
-                {overflowRows.map((article) => (
-                  <ArticleRow key={article.id} article={article} now={now} />
-                ))}
+            // min-h matches the label's own height (py-1.5 = 0.75rem + text-sm line-height
+            // 1.25rem). Without it this oscillates: on hover the label is removed instantly
+            // while the rows only reach full height after 200ms, so the wrapper briefly
+            // collapses to zero, the cursor falls outside it, :hover drops, the label returns —
+            // and it loops. The floor keeps the hover target alive through the transition.
+            <div className="group min-h-[2rem]">
+              <div className="grid grid-rows-[0fr] group-hover:grid-rows-[1fr] group-focus-within:grid-rows-[1fr] transition-[grid-template-rows] duration-200 ease-in-out motion-reduce:transition-none">
+                <div className="min-h-0 overflow-hidden">
+                  <div className="flex flex-col divide-y divide-brand-border">
+                    {overflowRows.map((article) => (
+                      <ArticleRow key={article.id} article={article} now={now} />
+                    ))}
+                  </div>
+                </div>
               </div>
-            </details>
+              <span className="block py-1.5 text-sm text-[var(--color-muted)] cursor-default group-hover:hidden group-focus-within:hidden">
+                … {overflowRows.length} more
+              </span>
+            </div>
           )}
         </div>
       )}
