@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 from fastapi.testclient import TestClient
 
 import pytest
@@ -22,6 +24,16 @@ def quotes_market_closed_by_default(monkeypatch):
     decide whether to hit the real network based on the real wall-clock's actual market-hours
     state. Same rationale and fix as test_universe.py's fixture of the same name."""
     monkeypatch.setattr("app.quotes.is_market_open", lambda now_et: False)
+
+
+@pytest.fixture(autouse=True)
+def no_auto_refresh_background_task(monkeypatch):
+    """GET /universe/strip now schedules run_auto_refresh_if_due via BackgroundTasks —
+    TestClient runs background tasks synchronously after the response body is built, which
+    would otherwise make every /strip test in this file exercise a real ticker sweep against
+    (unpatched) app.universe.refresh. Neutered here; the sweep's own behavior is
+    tests/test_autorefresh.py's job."""
+    monkeypatch.setattr("app.routers.universe.run_auto_refresh_if_due", lambda *a, **k: None)
 
 
 @pytest.fixture
@@ -230,6 +242,63 @@ def test_get_strip_returns_expected_shape_for_a_universe_member(db_mode, client,
 
 def test_get_strip_degraded_mode_returns_503(client):
     assert client.get("/universe/strip").status_code == 503
+
+
+def test_get_strip_schedules_auto_refresh_background_task(db_mode, client, monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        "app.routers.universe.run_auto_refresh_if_due",
+        lambda now_utc, now_et: calls.append((now_utc, now_et)),
+    )
+
+    response = client.get("/universe/strip")
+    assert response.status_code == 200
+    assert len(calls) == 1
+
+
+# --- POST /universe/quotes/refresh: route ordering, shape, 503 -----------------------------
+
+
+def test_post_quotes_refresh_resolves_to_quotes_handler_not_the_ticker_catchall(db_mode, client, monkeypatch):
+    """The route-ordering trap: /{ticker}/refresh is declared later in the router but must not
+    swallow /quotes/refresh. If it did, this would come back as a 404 for ticker "quotes", not
+    the QuoteRefreshResult shape asserted below."""
+    monkeypatch.setattr("app.routers.universe.fetch_quotes", lambda tickers: {})
+
+    response = client.post("/universe/quotes/refresh")
+    assert response.status_code == 200
+    assert set(response.json().keys()) == {"refreshed", "fetched_at"}
+
+
+def test_post_quotes_refresh_reports_the_refreshed_count(db_mode, client, monkeypatch):
+    _patch_fetches(monkeypatch)
+    client.post("/universe", json={"ticker": "AAPL"})
+
+    fixed_as_of = datetime(2026, 9, 16, 12, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(
+        "app.routers.universe.fetch_quotes",
+        lambda tickers: {"AAPL": (150.0, fixed_as_of)},
+    )
+
+    response = client.post("/universe/quotes/refresh")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["refreshed"] == 1
+    assert body["fetched_at"] is not None
+
+
+def test_post_quotes_refresh_no_quotes_returned_yields_null_fetched_at(db_mode, client, monkeypatch):
+    monkeypatch.setattr("app.routers.universe.fetch_quotes", lambda tickers: {})
+
+    response = client.post("/universe/quotes/refresh")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["refreshed"] == 0
+    assert body["fetched_at"] is None
+
+
+def test_post_quotes_refresh_degraded_mode_returns_503(client):
+    assert client.post("/universe/quotes/refresh").status_code == 503
 
 
 # --- 20. degraded mode: every universe endpoint 503, /health still 200 --------------------

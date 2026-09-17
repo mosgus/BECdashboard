@@ -176,6 +176,15 @@ export async function refreshTicker(ticker: string): Promise<RefreshResult> {
   return request<RefreshResult>(`/universe/${ticker}/refresh`, { method: 'POST' })
 }
 
+export interface QuoteRefreshResult {
+  refreshed: number
+  fetched_at: string | null
+}
+
+export async function refreshQuotes(): Promise<QuoteRefreshResult> {
+  return request<QuoteRefreshResult>('/universe/quotes/refresh', { method: 'POST' })
+}
+
 export async function getHistory(ticker: string): Promise<HistoryResponse> {
   return request<HistoryResponse>(`/universe/${ticker}/history`)
 }

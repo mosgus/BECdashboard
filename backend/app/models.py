@@ -70,6 +70,17 @@ class NewsSummary(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class AppState(Base):
+    """A deliberately generic key -> timestamp store for "when did X last happen" questions.
+    Contract 0036 writes the "auto_refresh" key; the next such question should reuse this
+    table rather than adding an eighth one."""
+
+    __tablename__ = "app_state"
+
+    key: Mapped[str] = mapped_column(String, primary_key=True)
+    value_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class UniverseTicker(Base):
     """Curated universe membership — a flag, not a cascade. Neither price_bars nor
     ticker_fundamentals reference this table in either direction: the old app's cascade

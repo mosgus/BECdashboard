@@ -6,8 +6,8 @@ import { FilterDialog } from '../components/FilterDialog'
 import { ChartDialog } from '../components/ChartDialog'
 import { DownloadIcon } from '../components/DownloadIcon'
 import { Tooltip } from '../components/Tooltip'
-import { ApiError, getUniverse, refreshTicker } from '../api/client'
-import type { UniverseDetail, UniverseEntry } from '../api/client'
+import { ApiError, getUniverse, refreshQuotes } from '../api/client'
+import type { UniverseEntry } from '../api/client'
 import { activeFilterCount, applyFilters, EMPTY_FILTERS } from '../lib/filters'
 import type { FilterState } from '../lib/filters'
 
@@ -16,15 +16,11 @@ type State =
   | { status: 'error'; message: string }
   | { status: 'ready'; entries: UniverseEntry[] }
 
-interface RefreshFailure {
-  ticker: string
-  message: string
-}
-
-type BulkRefreshState =
+type QuoteRefreshState =
   | { status: 'idle' }
-  | { status: 'running'; completed: number; total: number }
-  | { status: 'done'; total: number; failures: RefreshFailure[] }
+  | { status: 'running' }
+  | { status: 'done'; refreshed: number }
+  | { status: 'error'; message: string }
 
 const CARD = 'bg-brand-surface border border-brand-border rounded-[var(--radius-card)]'
 
@@ -32,7 +28,7 @@ export function UniversePage(): JSX.Element {
   const messages = ['Loading universe…', 'Loading takes <60s…', 'Still loading…']
   const [state, setState] = useState<State>({ status: 'loading' })
   const [messageIndex, setMessageIndex] = useState(0)
-  const [bulkRefresh, setBulkRefresh] = useState<BulkRefreshState>({ status: 'idle' })
+  const [quoteRefresh, setQuoteRefresh] = useState<QuoteRefreshState>({ status: 'idle' })
   const [filters, setFilters] = useState<FilterState>(EMPTY_FILTERS)
   const [filterDialogOpen, setFilterDialogOpen] = useState(false)
   const [selectedTicker, setSelectedTicker] = useState<string | null>(null)
@@ -52,10 +48,10 @@ export function UniversePage(): JSX.Element {
 
   function load(): void {
     setState({ status: 'loading' })
-    // Clear a lingering "done" summary from a previous run — but never stomp on an
-    // active one: AddTickerForm can call load() while a bulk refresh is still running
-    // (they're deliberately not coupled), and that run's progress must survive.
-    setBulkRefresh((prev) => (prev.status === 'running' ? prev : { status: 'idle' }))
+    // Clear a lingering "done"/"error" summary from a previous run — but never stomp on an
+    // active one: AddTickerForm can call load() while a quote refresh is still running
+    // (they're deliberately not coupled), and that run's in-flight state must survive.
+    setQuoteRefresh((prev) => (prev.status === 'running' ? prev : { status: 'idle' }))
     getUniverse()
       .then((entries) => setState({ status: 'ready', entries }))
       .catch((err: unknown) => {
@@ -77,56 +73,27 @@ export function UniversePage(): JSX.Element {
     load()
   }, [])
 
-  function patchRow(detail: UniverseDetail): void {
-    setState((prev) => {
-      if (prev.status !== 'ready') return prev
-      return {
-        status: 'ready',
-        entries: prev.entries.map((entry) => (entry.ticker === detail.ticker ? detail : entry)),
-      }
-    })
-  }
+  async function handleRefreshPrices(): Promise<void> {
+    if (quoteRefresh.status === 'running') return
 
-  async function handleRefreshAll(): Promise<void> {
-    if (state.status !== 'ready' || state.entries.length === 0) return
-    if (bulkRefresh.status === 'running') return
-
-    // Snapshot now — adding a ticker mid-run must not change what this loop iterates.
-    const tickers = state.entries.map((entry) => entry.ticker)
-    setBulkRefresh({ status: 'running', completed: 0, total: tickers.length })
-
-    const failures: RefreshFailure[] = []
-    for (const ticker of tickers) {
-      // Navigating away must stop the work, not just the re-renders — without this, every
-      // remaining ticker still fires its request after unmount.
-      if (!isMountedRef.current) break
-
-      try {
-        const result = await refreshTicker(ticker)
-        if (isMountedRef.current) patchRow(result.detail)
-      } catch (err) {
-        const message = err instanceof Error ? err.message : 'refresh failed'
-        console.error(`Bulk refresh failed for ${ticker}:`, err)
-        failures.push({ ticker, message })
-      }
-      if (isMountedRef.current) {
-        setBulkRefresh((prev) =>
-          prev.status === 'running' ? { ...prev, completed: prev.completed + 1 } : prev
-        )
-      }
-    }
-
-    if (isMountedRef.current) {
-      setBulkRefresh({ status: 'done', total: tickers.length, failures })
+    setQuoteRefresh({ status: 'running' })
+    try {
+      const result = await refreshQuotes()
+      // Refetch directly rather than via load(): load() also resets quoteRefresh to 'idle'
+      // whenever it isn't 'running', so calling it right after setting 'done' would wipe the
+      // success message in the same render pass before it ever painted.
+      const entries = await getUniverse()
+      if (!isMountedRef.current) return
+      setState({ status: 'ready', entries })
+      setQuoteRefresh({ status: 'done', refreshed: result.refreshed })
+    } catch (err) {
+      if (!isMountedRef.current) return
+      setQuoteRefresh({
+        status: 'error',
+        message: err instanceof Error ? err.message : 'Price refresh failed.',
+      })
     }
   }
-
-  const totalCount = state.status === 'ready' ? state.entries.length : 0
-
-  const bulkRefreshLabel =
-    bulkRefresh.status === 'running'
-      ? `Updating ${bulkRefresh.completed + 1} of ${bulkRefresh.total}…`
-      : `Update all data ${totalCount}`
 
   const filterResult = state.status === 'ready' ? applyFilters(state.entries, filters) : null
   const activeCount = activeFilterCount(filters)
@@ -247,41 +214,28 @@ export function UniversePage(): JSX.Element {
                 </Tooltip>
               )}
 
-              <Tooltip label="Fetch any missing price history for every ticker, up to the last close">
+              <Tooltip label="Fetch the latest intraday prices now">
                 <button
                   type="button"
-                  onClick={() => void handleRefreshAll()}
-                  disabled={bulkRefresh.status === 'running'}
-                  className={`flex-shrink-0 text-sm font-medium px-4 py-2 rounded-[var(--radius-btn)] bg-brand-primary text-white hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed ${bulkRefresh.status === 'running' ? 'pointer-events-none' : ''}`}
+                  onClick={() => void handleRefreshPrices()}
+                  disabled={quoteRefresh.status === 'running'}
+                  className={`flex-shrink-0 text-sm font-medium px-4 py-2 rounded-[var(--radius-btn)] bg-brand-primary text-white hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed ${quoteRefresh.status === 'running' ? 'pointer-events-none' : ''}`}
                 >
-                  {bulkRefreshLabel}
+                  {quoteRefresh.status === 'running' ? 'Refreshing…' : 'Refresh prices'}
                 </button>
               </Tooltip>
             </div>
 
-            {bulkRefresh.status === 'running' && (
-              <div className="w-full h-1.5 bg-brand-border rounded-full overflow-hidden mb-3">
-                <div
-                  className="h-full bg-brand-primary transition-[width]"
-                  style={{ width: `${(bulkRefresh.completed / bulkRefresh.total) * 100}%` }}
-                />
-              </div>
+            {quoteRefresh.status === 'done' && (
+              <p className="text-xs mb-3 text-[var(--color-muted)]">
+                {quoteRefresh.refreshed === 0
+                  ? 'No prices needed refreshing.'
+                  : `Refreshed ${quoteRefresh.refreshed} price${quoteRefresh.refreshed === 1 ? '' : 's'}.`}
+              </p>
             )}
 
-            {bulkRefresh.status === 'done' && (
-              <p
-                className={`text-xs mb-3 ${
-                  bulkRefresh.failures.length > 0
-                    ? 'text-brand-negative'
-                    : 'text-[var(--color-muted)]'
-                }`}
-              >
-                {bulkRefresh.failures.length === 0
-                  ? `Refreshed all ${bulkRefresh.total}.`
-                  : `Refreshed ${bulkRefresh.total - bulkRefresh.failures.length} of ${bulkRefresh.total} — ${bulkRefresh.failures.length} failed: ${bulkRefresh.failures
-                      .map((f) => `${f.ticker} (${f.message})`)
-                      .join(', ')}`}
-              </p>
+            {quoteRefresh.status === 'error' && (
+              <p className="text-xs mb-3 text-brand-negative">{quoteRefresh.message}</p>
             )}
 
             <p className="text-xs mb-3 min-h-[1rem]">

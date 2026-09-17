@@ -114,6 +114,11 @@ class NewsResponse(BaseModel):
     summary: NewsSummaryOut | None
 
 
+class QuoteRefreshResult(BaseModel):
+    refreshed: int
+    fetched_at: datetime | None
+
+
 class AddTickerRequest(BaseModel):
     ticker: str
 

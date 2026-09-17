@@ -5,14 +5,17 @@ from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
 import pandas as pd
-from fastapi import APIRouter, HTTPException, Response
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Response
 
-from app.cache import get_cached
+from app.autorefresh import active_universe_tickers, run_auto_refresh_if_due
+from app.cache import get_cached, store_quotes
 from app.db import is_enabled
 from app.export import build_universe_zip, history_to_csv
+from app.quotes import fetch_quotes
 from app.schemas import (
     AddTickerRequest,
     HistoryResponse,
+    QuoteRefreshResult,
     RefreshResult,
     StripResponse,
     UniverseDetail,
@@ -81,15 +84,37 @@ def download_universe_zip() -> Response:
 
 
 @router.get("/strip", response_model=StripResponse)
-def get_strip() -> dict:
+def get_strip(background_tasks: BackgroundTasks) -> dict:
     """Price, day change, and 5D/30D/YTD returns for the launch page, computed entirely from
-    stored data. Never fetches from yfinance; quote refresh stays owned by list_all(). Declared
-    above /{ticker}: a single-segment path here would otherwise be swallowed by that route and
-    resolve as an unknown ticker instead."""
+    stored data. Never fetches from yfinance for the response itself; quote refresh for the
+    response stays owned by list_all(). Declared above /{ticker}: a single-segment path here
+    would otherwise be swallowed by that route and resolve as an unknown ticker instead.
+
+    Also schedules run_auto_refresh_if_due (contract 0036) as a background task — TickerStrip
+    lives in App.tsx outside <Routes>, so this fires on every page load, making it the one
+    endpoint that reliably means "a user visited the site". The strip response must not wait
+    on it, so it is scheduled, never awaited."""
     _require_database()
     now_utc = datetime.now(timezone.utc)
     now_et = datetime.now(ZoneInfo("America/New_York"))
+    background_tasks.add_task(run_auto_refresh_if_due, now_utc, now_et)
     return build_strip_response(now_utc, now_et)
+
+
+@router.post("/quotes/refresh", response_model=QuoteRefreshResult)
+def refresh_quotes_endpoint() -> dict:
+    """Forces a quote fetch regardless of the 10-minute TTL — the whole point of the
+    `Refresh prices` button (contract 0036); QUOTE_TTL_MINUTES and refresh_quotes_if_stale
+    itself are untouched. Declared above /{ticker}/refresh: POST /universe/quotes/refresh
+    would otherwise match /{ticker}/refresh with ticker="quotes" and 404 — the same trap
+    contracts 0020 and 0028 hit."""
+    _require_database()
+    tickers = active_universe_tickers()
+    now_utc = datetime.now(timezone.utc)
+    quotes = fetch_quotes(tickers)
+    if quotes:
+        store_quotes(quotes, now_utc)
+    return {"refreshed": len(quotes), "fetched_at": now_utc if quotes else None}
 
 
 @router.get("/{ticker}", response_model=UniverseDetail)

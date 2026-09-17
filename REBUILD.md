@@ -860,6 +860,42 @@ about automatic function calling on every `generate_content`; the fix is
 `types.GenerateContentConfig(automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True))`.
 A `logging.Filter` on `google_genai` would also swallow real errors from the same logger.
 
+**The universe refreshes itself on a visit, once per window: 09:30 / 12:00 / 16:00 ET, weekdays.**
+Contract 0036, 2026-09-17. `app/schedule.py` is pure (`current_window_start`, `needs_auto_refresh`,
+both taking `now_et`); `app/autorefresh.py` does the sweep; `app_state(key, value_at)` — a generic
+key→timestamp table — records the claim. Triggered as a `BackgroundTasks` job from
+**`GET /universe/strip`**, because `TickerStrip` sits in `App.tsx` outside `<Routes>` and therefore
+fires on every page load — the only endpoint that reliably means "somebody visited". `/universe`
+would miss anyone who only opens the launch page.
+
+**This is cheap because `refresh_ticker` short-circuits before the network.** `is_stale` returns
+early when a ticker is current, and `_cached_last_session` is keyed per *(ET date, past-4pm)*, so a
+sweep over 20 already-current tickers costs ~1 reference fetch, not 20. Roughly 21 calls a day total.
+
+**The 12:00 window cannot fetch a bar the 09:30 window would have missed.**
+`last_completed_session` excludes today until `now_et_hour >= 16`, so both windows resolve to the
+same session date. Noon exists to refresh quotes and to catch a ticker added that morning. **Do not
+"fix" this by lowering the 16:00 cutoff** — that cutoff is what stops a partial in-progress bar being
+stored as a completed close (the AAPL null-close incident, contract 0024).
+
+**Claim the window before doing the work, and never roll the claim back on failure.** Writing
+`app_state` first narrows a two-visitor double-sweep from seconds to milliseconds; it is not a real
+lock and the contract says so. Not rolling back on error means a failing sweep waits for the next
+window instead of retrying on every page load — which is how you get rate-limited.
+
+**`Update all data N` is now `Refresh prices`** and posts to `POST /universe/quotes/refresh`, forcing
+an intraday quote fetch only. It no longer walks tickers. `POST /{ticker}/refresh` and
+`client.ts`'s `refreshTicker` both still exist and are called by nothing — deliberately kept as the
+only remaining way to force a full bar refresh. **`/universe/quotes/refresh` must be declared above
+`/{ticker}/refresh`**: both match `/universe/X/refresh`, and the wrong order resolves it as a ticker
+named "quotes" and 404s.
+
+**Testing a clock-injected function against the real database writes real state.** Verifying 0036's
+sweep with an injected in-window `now_et` wrote a genuine `app_state` claim eight hours in the
+future, pre-claiming the next morning's window. The test method was correct; the side effect was not
+anticipated. Any contract whose verification advances a stored timestamp should say so and give the
+command to clear it.
+
 **An exported `DATABASE_URL` silently beats `backend/.env`.** Cost a debugging session on
 2026-09-15. `config.py` calls `load_dotenv(path)`, and `load_dotenv` **does not override a variable
 already present in the environment** — so a stale `export DATABASE_URL=...` left in one terminal from

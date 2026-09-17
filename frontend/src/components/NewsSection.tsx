@@ -122,7 +122,7 @@ function Briefing({ summary, now }: { summary: NewsSummary; now: Date }): JSX.El
           {relativeTime(summary.created_at, now)}
         </span>
       </div>
-      <p className="font-briefing text-base leading-relaxed">{summary.text}</p>
+      <p className="font-briefing text-xl leading-relaxed">{summary.text}</p>
     </div>
   )
 }
@@ -207,27 +207,6 @@ export function NewsSection(): JSX.Element | null {
       {summary && summary.text && <Briefing summary={summary} now={now} />}
       {cards.length > 0 && (
         <div>
-          {totalPages > 1 && (
-            <div className="flex items-center justify-between gap-3 mb-3">
-              <PageButton
-                label="Previous articles"
-                disabled={page === 0}
-                onClick={() => setPage((p) => p - 1)}
-              >
-                ‹
-              </PageButton>
-              <span className="text-sm font-semibold text-brand-primary tabular-nums">
-                {page + 1} / {totalPages}
-              </span>
-              <PageButton
-                label="Next articles"
-                disabled={page === totalPages - 1}
-                onClick={() => setPage((p) => p + 1)}
-              >
-                ›
-              </PageButton>
-            </div>
-          )}
           <div className="overflow-hidden">
             <div
               className="flex transition-transform duration-500 ease-in-out motion-reduce:transition-none"
@@ -250,6 +229,27 @@ export function NewsSection(): JSX.Element | null {
               ))}
             </div>
           </div>
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between gap-3 mt-3">
+              <PageButton
+                label="Previous articles"
+                disabled={page === 0}
+                onClick={() => setPage((p) => p - 1)}
+              >
+                ‹
+              </PageButton>
+              <span className="text-sm font-semibold text-brand-primary tabular-nums">
+                {page + 1} / {totalPages}
+              </span>
+              <PageButton
+                label="Next articles"
+                disabled={page === totalPages - 1}
+                onClick={() => setPage((p) => p + 1)}
+              >
+                ›
+              </PageButton>
+            </div>
+          )}
         </div>
       )}
       {listArticles.length > 0 && (
