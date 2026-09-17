@@ -835,6 +835,31 @@ universe's actual sectors is the fix; not yet done.
 of a refresh. The import inside `refresh_news_if_stale` is deferred deliberately — moving it to module
 level deadlocks at import time.
 
+**Write contracts from the file on disk, never from a previous contract's report.** Contract 0035
+restated the launch page's element order from 0033's report. In between, Gunnar had hand-edited
+`NewsSection.tsx` — moving the carousel controls below the grid and switching them to
+`justify-between` so the buttons flank it — and committed that. The contract's ordering line
+therefore instructed a revert of his own design change, and the implementer, correctly following the
+spec, carried it out. **From inside a contract run a hand-edit and a drift are indistinguishable**,
+so the coder cannot catch this; only the planner can, by reading the current source before
+describing it.
+
+**The briefing renders above the cards, labelled `Market briefing · AI-generated`.** Contract 0035.
+The label is a requirement, not decoration: model-written market commentary on a finance dashboard
+must be identified as such on the page itself, not only in a tooltip. Prose is capped at
+`max-w-[75ch]` — six sentences run across a 1700px window is unreadable.
+
+**Briefing generation is gated on `needs_summary(latest_created_at, now_utc, articles_refreshed)`.**
+No briefing at all → generate regardless. Otherwise → only when articles actually moved **and** the
+existing one is past `SUMMARY_MIN_AGE_MINUTES`. Dropping the `articles_refreshed` conjunct turns this
+into an independent 30-minute schedule that spends a Gemini call rewriting unchanged headlines on
+every page load.
+
+**Silence SDK warnings by configuring the SDK, not by filtering its logger.** `google-genai` warns
+about automatic function calling on every `generate_content`; the fix is
+`types.GenerateContentConfig(automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True))`.
+A `logging.Filter` on `google_genai` would also swallow real errors from the same logger.
+
 **An exported `DATABASE_URL` silently beats `backend/.env`.** Cost a debugging session on
 2026-09-15. `config.py` calls `load_dotenv(path)`, and `load_dotenv` **does not override a variable
 already present in the environment** — so a stale `export DATABASE_URL=...` left in one terminal from

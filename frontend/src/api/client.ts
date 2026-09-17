@@ -94,9 +94,17 @@ export interface NewsArticle {
   source_ticker: string | null
 }
 
+export interface NewsSummary {
+  text: string
+  created_at: string
+  model: string | null
+  article_count: number | null
+}
+
 export interface NewsResponse {
   articles: NewsArticle[]
   as_of: string | null
+  summary: NewsSummary | null
 }
 
 interface RequestOptions {

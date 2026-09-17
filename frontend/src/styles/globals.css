@@ -47,6 +47,10 @@
   --color-brand-border:   var(--color-border);
   --color-brand-positive: var(--color-positive);
   --color-brand-negative: var(--color-negative);
+
+  /* Declared here rather than beside --font-heading/--font-body because @theme is what
+     generates the `font-briefing` utility; a plain custom property would not. */
+  --font-briefing: "Roboto", system-ui, sans-serif;
 }
 
 body {

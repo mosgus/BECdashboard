@@ -14,6 +14,7 @@ from app.briefing import (
 )
 from app.db import get_engine, session
 from app.models import Base, NewsArticle, NewsSummary
+from app.news import refresh_news_if_stale
 
 ET = ZoneInfo("America/New_York")
 
@@ -49,23 +50,44 @@ def _add_article(article_id: str, title: str = "Headline", publisher: str | None
         )
 
 
-# --- needs_summary --------------------------------------------------------------------------
+# --- needs_summary: all four (latest_created_at, articles_refreshed) combinations -----------
 
 
-def test_needs_summary_true_when_no_prior_summary():
-    assert needs_summary(None, datetime(2026, 9, 15, tzinfo=timezone.utc)) is True
+def test_needs_summary_true_when_no_prior_summary_and_not_refreshed():
+    now = datetime(2026, 9, 15, tzinfo=timezone.utc)
+    assert needs_summary(None, now, False) is True
 
 
-def test_needs_summary_false_when_written_recently():
+def test_needs_summary_true_when_no_prior_summary_and_refreshed():
+    now = datetime(2026, 9, 15, tzinfo=timezone.utc)
+    assert needs_summary(None, now, True) is True
+
+
+def test_needs_summary_false_when_old_enough_but_articles_not_refreshed():
+    """The bug this contract exists to fix: before it, a 2-hour-old summary with articles
+    fresh (not refreshed) still regenerated on every page load past the 30-minute floor,
+    spending a Gemini call on unchanged headlines."""
+    now = datetime(2026, 9, 15, 12, 0, tzinfo=timezone.utc)
+    latest = now - timedelta(hours=2)
+    assert needs_summary(latest, now, False) is False
+
+
+def test_needs_summary_true_when_old_enough_and_refreshed():
+    now = datetime(2026, 9, 15, 12, 0, tzinfo=timezone.utc)
+    latest = now - timedelta(hours=2)
+    assert needs_summary(latest, now, True) is True
+
+
+def test_needs_summary_false_when_written_recently_even_if_refreshed():
     now = datetime(2026, 9, 15, 12, 0, tzinfo=timezone.utc)
     latest = now - timedelta(minutes=10)
-    assert needs_summary(latest, now) is False
+    assert needs_summary(latest, now, True) is False
 
 
-def test_needs_summary_true_at_exactly_the_floor():
+def test_needs_summary_true_at_exactly_the_floor_when_refreshed():
     now = datetime(2026, 9, 15, 12, 0, tzinfo=timezone.utc)
     latest = now - timedelta(minutes=30)
-    assert needs_summary(latest, now) is True
+    assert needs_summary(latest, now, True) is True
 
 
 # --- build_prompt: the three-way branch -----------------------------------------------------
@@ -179,7 +201,7 @@ def test_refresh_briefing_noop_without_gemini_key(db_mode, monkeypatch):
     monkeypatch.delenv("GEMINI_KEY", raising=False)
     _add_article("a1")
 
-    refresh_briefing(datetime.now(timezone.utc), datetime.now(ET))
+    refresh_briefing(datetime.now(timezone.utc), datetime.now(ET), True)
 
     assert latest_briefing() is None
 
@@ -188,7 +210,7 @@ def test_refresh_briefing_noop_when_no_articles_stored(db_mode, monkeypatch):
     monkeypatch.setenv("GEMINI_KEY", "fake-key")
     monkeypatch.setattr("app.briefing.genai.Client", _fake_client_returning("Should not be called"))
 
-    refresh_briefing(datetime.now(timezone.utc), datetime.now(ET))
+    refresh_briefing(datetime.now(timezone.utc), datetime.now(ET), True)
 
     assert latest_briefing() is None
 
@@ -207,7 +229,7 @@ def test_refresh_briefing_skips_when_summary_is_recent(db_mode, monkeypatch):
         lambda api_key: type("C", (), {"models": type("M", (), {"generate_content": staticmethod(_fail_if_called)})()})(),
     )
 
-    refresh_briefing(now, now.astimezone(ET))
+    refresh_briefing(now, now.astimezone(ET), True)
 
     latest = latest_briefing()
     assert latest["summary"] == "Existing briefing"
@@ -231,7 +253,7 @@ def test_refresh_briefing_failed_generation_leaves_existing_row_untouched(db_mod
         lambda api_key: type("C", (), {"models": _RaisingModels()})(),
     )
 
-    refresh_briefing(now, now.astimezone(ET))
+    refresh_briefing(now, now.astimezone(ET), True)
 
     with session() as db:
         summaries = list(db.execute(select(NewsSummary.summary)).scalars().all())
@@ -248,7 +270,7 @@ def test_refresh_briefing_inserts_a_new_row_on_success(db_mode, monkeypatch):
 
     monkeypatch.setattr("app.briefing.genai.Client", _fake_client_returning("A fresh briefing."))
 
-    refresh_briefing(now, now.astimezone(ET))
+    refresh_briefing(now, now.astimezone(ET), True)
 
     latest = latest_briefing()
     assert latest is not None
@@ -267,7 +289,7 @@ def test_refresh_briefing_prune_excludes_the_just_inserted_row(db_mode, monkeypa
 
     monkeypatch.setattr("app.briefing.genai.Client", _fake_client_returning("A fresh briefing."))
 
-    refresh_briefing(now, now.astimezone(ET))
+    refresh_briefing(now, now.astimezone(ET), True)
 
     with session() as db:
         summaries = set(db.execute(select(NewsSummary.summary)).scalars().all())
@@ -282,11 +304,33 @@ def test_refresh_briefing_prune_keeps_a_superseded_row_under_the_retention_windo
 
     monkeypatch.setattr("app.briefing.genai.Client", _fake_client_returning("A fresh briefing."))
 
-    refresh_briefing(now, now.astimezone(ET))
+    refresh_briefing(now, now.astimezone(ET), True)
 
     with session() as db:
         summaries = set(db.execute(select(NewsSummary.summary)).scalars().all())
     assert summaries == {"Recent superseded briefing", "A fresh briefing."}
+
+
+# --- refresh_news_if_stale: the early-return bug this contract fixes ---------------------------
+
+
+def test_refresh_news_if_stale_reaches_refresh_briefing_when_articles_are_not_stale(
+    db_mode, monkeypatch
+):
+    """Before this contract, refresh_briefing sat after refresh_news_if_stale's early return
+    for "articles are already fresh", so it was unreachable whenever needs_refresh was False —
+    exactly the state a newly-set GEMINI_KEY finds itself in for up to NEWS_TTL_HOURS. Assert
+    on the call itself (a spy on app.briefing.refresh_briefing), not on reading the source."""
+    monkeypatch.setattr("app.news.needs_refresh", lambda *a, **k: False)
+
+    calls = []
+    monkeypatch.setattr("app.briefing.refresh_briefing", lambda *a: calls.append(a))
+
+    now_et = _et(15, 0)
+    now_utc = now_et.astimezone(timezone.utc)
+    refresh_news_if_stale(["AAPL"], now_utc, now_et)
+
+    assert calls == [(now_utc, now_et, False)]
 
 
 # --- latest_briefing ---------------------------------------------------------------------------

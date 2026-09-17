@@ -15,6 +15,7 @@ from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from google import genai
+from google.genai import types
 from sqlalchemy import delete, select
 
 from app.config import Settings
@@ -42,13 +43,24 @@ _FOCUS = (
 )
 
 
-def needs_summary(latest_created_at: datetime | None, now_utc: datetime) -> bool:
-    """False when a summary was written less than SUMMARY_MIN_AGE_MINUTES ago. Absorbs the
-    known concurrent-refresh race (REBUILD.md) — it is not an independent freshness schedule;
-    regeneration is really driven by the article refresh that calls this."""
+def needs_summary(
+    latest_created_at: datetime | None,
+    now_utc: datetime,
+    articles_refreshed: bool,
+) -> bool:
+    """True when no summary exists yet, regardless of whether articles just refreshed — same
+    shape as the news feed's "an empty table refreshes at any hour". Otherwise, True only when
+    articles actually moved *and* the last summary is at least SUMMARY_MIN_AGE_MINUTES old.
+
+    The `articles_refreshed` conjunct is what keeps this from becoming an independent
+    30-minute schedule of its own: without it, any page load more than 30 minutes after the
+    last briefing would spend a Gemini call rewriting headlines that have not changed. The age
+    floor itself absorbs the known concurrent-refresh race (REBUILD.md)."""
     if latest_created_at is None:
         return True
-    return now_utc - latest_created_at >= timedelta(minutes=SUMMARY_MIN_AGE_MINUTES)
+    return articles_refreshed and now_utc - latest_created_at >= timedelta(
+        minutes=SUMMARY_MIN_AGE_MINUTES
+    )
 
 
 def build_prompt(
@@ -102,7 +114,17 @@ def generate_briefing(prompt: str) -> str | None:
     settings = Settings()
     try:
         client = genai.Client(api_key=settings.gemini_key)
-        response = client.models.generate_content(model=settings.gemini_model, contents=prompt)
+        response = client.models.generate_content(
+            model=settings.gemini_model,
+            contents=prompt,
+            # Suppress the SDK's own "automatic function calling" log line by configuring the
+            # behavior off at the source, not by attaching anything to the google_genai
+            # logger — a log-record filter there would also swallow real errors emitted
+            # through that same logger.
+            config=types.GenerateContentConfig(
+                automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
+            ),
+        )
         text = (response.text or "").strip()
     except Exception:
         # Broad on purpose: this is the one network call in the module, to a third-party API
@@ -163,17 +185,22 @@ def _prune_old_summaries(now_utc: datetime, keep_id: int) -> None:
         )
 
 
-def refresh_briefing(now_utc: datetime, now_et: datetime) -> None:
+def refresh_briefing(now_utc: datetime, now_et: datetime, articles_refreshed: bool) -> None:
     """Regenerates the briefing from the most recently stored headlines. Never wipes: a failed
     or empty generation returns before writing anything, so the previous briefing — stale, but
-    present — stays on the page instead of it going blank."""
+    present — stays on the page instead of it going blank.
+
+    `articles_refreshed` is forwarded straight to needs_summary: it is what lets a newly-set
+    GEMINI_KEY produce a briefing on the very next request (no prior summary exists, so
+    needs_summary's first rule fires regardless of this flag) while still stopping every later
+    page load from spending a Gemini call on unchanged headlines."""
     settings = Settings()
     if not is_enabled() or settings.gemini_key is None:
         return
 
     latest = latest_briefing()
     latest_created_at = latest["created_at"] if latest else None
-    if not needs_summary(latest_created_at, now_utc):
+    if not needs_summary(latest_created_at, now_utc, articles_refreshed):
         return
 
     articles = recent_articles(MAX_HEADLINES)

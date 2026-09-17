@@ -1,6 +1,7 @@
 # Contract 0035 — Render the briefing, generate one when none exists, silence the AFC warning
 
-**Status:** not started
+**Status:** accepted (2026-09-16) — audited by planner. One planner-authored instruction reverted
+Gunnar's own layout change; see below. Render check (item 5) outstanding.
 **Assigned to:** sonnet
 **Author:** planner (opus)
 
@@ -277,3 +278,45 @@ At `localhost:5173/`:
 - **What happens to the four `Coming soon` cards.** Still Gunnar's, still open.
 - **Whether a failed generation should surface anything to the user.** Today it is silent and the
   previous briefing stays; that is deliberate.
+
+---
+
+## Audit (planner, 2026-09-16)
+
+- `pytest -q` → **281 passed** (from 277), with no network, database or `GEMINI_KEY`
+- `AutomaticFunctionCallingConfig(disable=True)` at `briefing.py:125`; `logging.Filter`/`addFilter`
+  → exit 1. Configured away, not filtered away.
+- `refresh_news_if_stale` restructured correctly: the staleness early-return is dissolved,
+  `articles_refreshed` is set only inside the fetch branch, and `refresh_briefing(now_utc, now_et,
+  articles_refreshed)` runs unconditionally below it. The deferred import and the broad `except`
+  both survived with their comments.
+- `max-w-[75ch]` and `Market briefing · AI-generated` present; exactly one `new Date()`;
+  `dangerouslySetInnerHTML` → exit 1
+- `git status --porcelain` lists exactly this contract's five files
+
+Live, with the real key: the AFC warning is gone from stderr and generation still succeeds.
+
+### The planner reverted Gunnar's own layout change
+
+The contract stated "Order becomes: briefing → controls → card carousel → text list". The
+implementer followed it and moved the prev/next block from below the grid to above it, flagging the
+move under Deviations — correct behaviour on its part.
+
+But the arrangement it replaced was **not** drift from contract 0033. `git diff` shows the removed
+block as `justify-between ... mt-3`, sitting after the carousel: buttons flanking the grid left and
+right, with a `text-sm font-semibold text-brand-primary` indicator between them. 0033 shipped
+`justify-end ... mb-3` above the grid with a small muted indicator. The difference is Gunnar's, made
+by hand before commit `9515e96`.
+
+**The planner wrote that ordering line from contract 0033's report rather than from the file on
+disk.** Gunnar edits this codebase between contracts; a contract that restates existing layout must
+be written from the current source, or it silently instructs a revert of his work. The implementer
+cannot catch this — from inside the run, a hand-edit and a drift look identical.
+
+### Outstanding
+
+- **Human verification item 5** — on Render, the first `/news` request after deploy should produce a
+  briefing within about a minute rather than waiting out `NEWS_TTL_HOURS`. Not verifiable locally,
+  where a briefing already exists.
+- The cold-start path was not re-proved against the live database; the implementer declined to delete
+  the real `news_summaries` row to do it, which was the right call. Covered by unit tests.

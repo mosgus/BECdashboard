@@ -167,34 +167,39 @@ def refresh_news_if_stale(tickers: list[str], now_utc: datetime, now_et: datetim
     simultaneous requests from one IP is what got Render's shared IP crumb-throttled). A
     failure on one ticker is caught and logged, not raised — the refresh continues with the
     rest, and a wipe is never issued: articles are only ever upserted or pruned by age, so a
-    refresh where every ticker fails leaves every existing row exactly as it was."""
+    refresh where every ticker fails leaves every existing row exactly as it was.
+
+    The briefing refresh below runs unconditionally, past the article-staleness check rather
+    than after an early return for it (contract 0035) — otherwise a newly-set GEMINI_KEY would
+    produce no briefing for up to NEWS_TTL_HOURS, since refresh_briefing was unreachable
+    whenever articles were already fresh. It is told whether articles actually moved so it
+    does not turn into its own 30-minute schedule."""
     if not is_enabled() or not tickers:
         return
 
-    newest_fetched_at = get_newest_fetched_at()
-    if not needs_refresh(newest_fetched_at, now_utc, now_et):
-        return
-
-    parsed_by_id: dict[str, dict] = {}
-    for ticker in tickers:
-        try:
-            raw_items = fetch_news_for(ticker)
-        except Exception:
-            # Broad on purpose: one ticker's feed being unreachable must not abort the
-            # refresh for the other nineteen. See report.
-            logger.exception("app.news: fetch_news_for(%s) failed; skipping", ticker)
-            continue
-
-        for raw in raw_items:
-            parsed = parse_article(raw, ticker, now_utc)
-            if parsed is None:
+    articles_refreshed = False
+    if needs_refresh(get_newest_fetched_at(), now_utc, now_et):
+        parsed_by_id: dict[str, dict] = {}
+        for ticker in tickers:
+            try:
+                raw_items = fetch_news_for(ticker)
+            except Exception:
+                # Broad on purpose: one ticker's feed being unreachable must not abort the
+                # refresh for the other nineteen. See report.
+                logger.exception("app.news: fetch_news_for(%s) failed; skipping", ticker)
                 continue
-            parsed_by_id.setdefault(parsed["id"], parsed)
 
-    if parsed_by_id:
-        _upsert_articles(list(parsed_by_id.values()))
+            for raw in raw_items:
+                parsed = parse_article(raw, ticker, now_utc)
+                if parsed is None:
+                    continue
+                parsed_by_id.setdefault(parsed["id"], parsed)
 
-    _prune_old_articles(now_utc)
+        if parsed_by_id:
+            _upsert_articles(list(parsed_by_id.values()))
+
+        _prune_old_articles(now_utc)
+        articles_refreshed = True
 
     # Deferred, not a module-level import: app.briefing imports recent_articles from this
     # module (contract 0034 — reuse the bounded query rather than writing a second one), so a
@@ -203,7 +208,7 @@ def refresh_news_if_stale(tickers: list[str], now_utc: datetime, now_et: datetim
     from app.briefing import refresh_briefing
 
     try:
-        refresh_briefing(now_utc, now_et)
+        refresh_briefing(now_utc, now_et, articles_refreshed)
     except Exception:
         # Broad on purpose: a briefing failure must never affect the article refresh above,
         # which has already committed by this point.

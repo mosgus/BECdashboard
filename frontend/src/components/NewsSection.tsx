@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { JSX, ReactNode } from 'react'
 import { getNews } from '../api/client'
-import type { NewsArticle } from '../api/client'
+import type { NewsArticle, NewsSummary } from '../api/client'
 import { relativeTime } from '../lib/relativeTime'
 import { Tooltip } from './Tooltip'
 
@@ -111,6 +111,22 @@ function ArticleRow({ article, now }: { article: NewsArticle; now: Date }): JSX.
   )
 }
 
+function Briefing({ summary, now }: { summary: NewsSummary; now: Date }): JSX.Element {
+  return (
+    <div className="bg-brand-surface border border-brand-border rounded-[var(--radius-card)] p-5 mb-6">
+      <div className="flex items-center justify-between gap-3 mb-2">
+        <span className="text-xs uppercase tracking-wide text-[var(--color-muted)]">
+          Market briefing · AI-generated
+        </span>
+        <span className="text-xs text-[var(--color-muted)]">
+          {relativeTime(summary.created_at, now)}
+        </span>
+      </div>
+      <p className="font-briefing text-base leading-relaxed">{summary.text}</p>
+    </div>
+  )
+}
+
 function PageButton({
   label,
   disabled,
@@ -142,6 +158,7 @@ function PageButton({
 
 export function NewsSection(): JSX.Element | null {
   const [articles, setArticles] = useState<NewsArticle[]>([])
+  const [summary, setSummary] = useState<NewsSummary | null>(null)
   const [failed, setFailed] = useState(false)
   const [page, setPage] = useState(0)
 
@@ -150,7 +167,10 @@ export function NewsSection(): JSX.Element | null {
 
     getNews(LIMIT, MAX_PER_TICKER)
       .then((response) => {
-        if (!cancelled) setArticles(response.articles)
+        if (!cancelled) {
+          setArticles(response.articles)
+          setSummary(response.summary)
+        }
       })
       .catch(() => {
         if (!cancelled) setFailed(true)
@@ -184,8 +204,30 @@ export function NewsSection(): JSX.Element | null {
 
   return (
     <section className="mt-14">
+      {summary && summary.text && <Briefing summary={summary} now={now} />}
       {cards.length > 0 && (
         <div>
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between gap-3 mb-3">
+              <PageButton
+                label="Previous articles"
+                disabled={page === 0}
+                onClick={() => setPage((p) => p - 1)}
+              >
+                ‹
+              </PageButton>
+              <span className="text-sm font-semibold text-brand-primary tabular-nums">
+                {page + 1} / {totalPages}
+              </span>
+              <PageButton
+                label="Next articles"
+                disabled={page === totalPages - 1}
+                onClick={() => setPage((p) => p + 1)}
+              >
+                ›
+              </PageButton>
+            </div>
+          )}
           <div className="overflow-hidden">
             <div
               className="flex transition-transform duration-500 ease-in-out motion-reduce:transition-none"
@@ -208,27 +250,6 @@ export function NewsSection(): JSX.Element | null {
               ))}
             </div>
           </div>
-          {totalPages > 1 && (
-            <div className="flex items-center justify-between gap-3 mt-3">
-              <PageButton
-                label="Previous articles"
-                disabled={page === 0}
-                onClick={() => setPage((p) => p - 1)}
-              >
-                ‹
-              </PageButton>
-              <span className="text-sm font-semibold text-brand-primary tabular-nums">
-                {page + 1} / {totalPages}
-              </span>
-              <PageButton
-                label="Next articles"
-                disabled={page === totalPages - 1}
-                onClick={() => setPage((p) => p + 1)}
-              >
-                ›
-              </PageButton>
-            </div>
-          )}
         </div>
       )}
       {listArticles.length > 0 && (
