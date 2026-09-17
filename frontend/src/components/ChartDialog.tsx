@@ -144,7 +144,7 @@ export function ChartDialog({ ticker, entry, onClose }: ChartDialogProps): JSX.E
 
   return (
     <div
-      className="fixed inset-0 bg-foreground/35 flex items-start justify-center pt-16 px-4 z-[100] overflow-y-auto"
+      className="fixed inset-0 bg-foreground/35 flex items-center justify-center px-4 z-[100] overflow-y-auto"
       onClick={(event) => {
         if (event.target === event.currentTarget) handleClose()
       }}
@@ -155,7 +155,7 @@ export function ChartDialog({ ticker, entry, onClose }: ChartDialogProps): JSX.E
         aria-modal="true"
         aria-label={`${ticker} price chart`}
         tabIndex={-1}
-        className={`${CARD} w-full max-w-[56rem] flex flex-col shadow-xl mb-16`}
+        className={`${CARD} w-full max-w-[80rem] flex flex-col shadow-xl mb-16`}
       >
         <div className="flex items-start justify-between gap-4 px-5 py-[1.125rem] border-b border-brand-border">
           <div>
@@ -210,7 +210,7 @@ export function ChartDialog({ ticker, entry, onClose }: ChartDialogProps): JSX.E
           )}
 
           {fetchState.status === 'loaded' && shown.length >= 2 && (
-            <ResponsiveContainer width="100%" height={320}>
+            <ResponsiveContainer width="100%" height={500}>
               <AreaChart data={shown} margin={{ top: 8, right: 8, bottom: 4, left: 0 }}>
                 <XAxis
                   dataKey="date"

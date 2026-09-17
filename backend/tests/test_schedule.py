@@ -77,3 +77,23 @@ def test_needs_auto_refresh_true_one_second_before_window_opened():
 
 def test_needs_auto_refresh_false_before_the_first_window_even_with_no_prior_refresh():
     assert needs_auto_refresh(None, _et(9, 0)) is False
+
+
+# --- include_weekends -------------------------------------------------------------------------
+
+
+def test_current_window_start_saturday_with_include_weekends_returns_a_real_window():
+    # 2026-09-19 is a Saturday; the same 10:00 slot as a weekday still falls in the 09:30 window.
+    assert current_window_start(_et(10, 0, day=19), include_weekends=True) == _window(9, 30, day=19)
+
+
+def test_current_window_start_saturday_default_is_still_none():
+    """The universe sweep must not start running at weekends as a side effect of adding the
+    flag — the default (no keyword passed) has to keep today's exact behavior."""
+    assert current_window_start(_et(10, 0, day=19)) is None
+
+
+def test_needs_auto_refresh_unaffected_by_the_new_flag_when_not_passed():
+    """Proof the universe sweep itself is untouched: called exactly as every existing call
+    site calls it (no keyword), a Saturday visit is still False."""
+    assert needs_auto_refresh(None, _et(10, 0, day=19)) is False
