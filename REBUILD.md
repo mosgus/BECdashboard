@@ -896,6 +896,38 @@ future, pre-claiming the next morning's window. The test method was correct; the
 anticipated. Any contract whose verification advances a stored timestamp should say so and give the
 command to clear it.
 
+**News and the briefing run on the same 09:30 / 12:00 / 16:00 ET windows as the universe.** Contract
+0037, 2026-09-17, replacing news's own 6-hour rolling TTL. That TTL **drifted** — measured from the
+last refresh, a first run at 10:47 put the next at 16:47, then 22:47, wandering daily. Windows are
+fixed wall-clock times. Claimed under `app_state["news_refresh"]`, a separate key from
+`app_state["auto_refresh"]` so a failing universe sweep cannot suppress news.
+
+Both are scheduled as **two separate background tasks** from `GET /universe/strip`, and `GET /news`
+is now a pure read. The strip is the right trigger because `TickerStrip` sits in `App.tsx` outside
+`<Routes>` — it fires on every page load, so news refreshes even for someone who only opens
+`/universe`, which `GET /news` could never do.
+
+**`current_window_start` takes `include_weekends`, and the two callers differ.** Bars cannot change
+over a weekend, so the universe stays weekday-only; **news publishes at weekends**, and sharing the
+gate unchanged would freeze the feed and briefing from Friday 16:00 to Monday 09:30 — about 65 hours.
+Same three times, different day coverage, one function. The flag is keyword-only and defaults to
+`False` so no existing call site changed behaviour.
+
+**`needs_news_refresh` takes two timestamps and they are not interchangeable.** `newest_fetched_at`
+is the newest article row; `last_claim_at` is the window claim. A refresh that ran and legitimately
+found nothing new still claims the window — gate on the article timestamp instead and a quiet news
+day means re-fetching on every page load. An empty feed still refreshes at any hour, weekend
+included, so a fresh deploy is never blank until 09:30.
+
+**A contract that deletes a symbol must list every file that references it.** Contract 0037
+instructed deleting `needs_refresh` without listing `tests/test_briefing.py`, which monkeypatched it
+— following the file list exactly would have left a broken test. One `grep -rn "<symbol>" backend/`
+while writing the file list prevents this. It is the fourth planner spec error of the session and
+they all share a shape: **the contract was written from a remembered picture of the tree rather than
+from the tree.** The others were a criterion requiring `git diff` to see an untracked file (0033), a
+grep pattern matching an API the codebase does not use (0031), and a restated layout that reverted
+Gunnar's own hand-edit (0035).
+
 **An exported `DATABASE_URL` silently beats `backend/.env`.** Cost a debugging session on
 2026-09-15. `config.py` calls `load_dotenv(path)`, and `load_dotenv` **does not override a variable
 already present in the environment** — so a stale `export DATABASE_URL=...` left in one terminal from

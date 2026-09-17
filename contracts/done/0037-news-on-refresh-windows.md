@@ -1,6 +1,7 @@
 # Contract 0037 — Put the news feed and briefing on the universe's refresh windows
 
-**Status:** reported
+**Status:** accepted (2026-09-17) — audited by planner. One necessary deviation caused by an
+incomplete file list; see below.
 **Assigned to:** sonnet
 **Author:** planner (opus)
 
@@ -279,3 +280,38 @@ wrong place and you are making 20 yfinance calls per page load.
   universe sweep cannot suppress news.
 - **Whether `GET /news` should keep any trigger at all** as a fallback if `/universe/strip` fails.
 - **What happens to the four `Coming soon` cards.** Still open.
+
+---
+
+## Audit (planner, 2026-09-17)
+
+- `pytest -q` → **311 passed** (from 307)
+- `NEWS_TTL_HOURS` / `NEWS_EARLIEST_ET` / `needs_refresh` → exit 1. Deleted, not merely unused.
+- `add_task` in `routers/news.py` → exit 1; `GET /news` is a pure read
+- `routers/universe.py:104-105` schedules both tasks separately
+- **Claim-first confirmed**: `_set_news_claim(now_utc)` at `news.py:276`, `refresh_news_if_stale`
+  at `:279`. Backed by a test asserting stored state after a fetch stub that raises.
+- Weekend split verified live: `Sat | universe: None | news: 2026-09-19 09:30`
+- `import app.main` succeeds — the new `app.news → app.autorefresh` edge introduces no cycle
+- One `delete(` in `news.py`, the 14-day `pub_date` prune, unchanged
+- Scope empty across `autorefresh.py`, `briefing.py`, `quotes.py`, `strip.py`, `universe.py`,
+  `models.py`, `schemas.py`; seven migrations
+
+### The deviation was forced by a planner error
+
+The contract instructed deleting `needs_refresh` but did not list `tests/test_briefing.py`, which
+monkeypatched it. Following the file list exactly would have left a broken test in the suite. The
+implementer edited it anyway, flagged it, and rewrote the test to assert the *new* invariant —
+`refresh_news_if_stale` is now unconditional, so it always calls `refresh_briefing` with
+`articles_refreshed=True` — rather than deleting the test or weakening it until it passed.
+
+**A contract that deletes a symbol must list every file that references it.** One
+`grep -rn "<symbol>" backend/` while writing the file list would have caught this. Fourth planner
+spec error this session, all the same shape: the contract written from an incomplete picture of the
+tree rather than from the tree.
+
+### Also corrected by the implementer
+
+It had previously flagged commit `931b2ea "Removed Update/Refresh all"` as possible drift. It is not
+— that is Gunnar deliberately removing the `Refresh prices` button contract 0036 added. Record
+corrected in its own report rather than left standing.
