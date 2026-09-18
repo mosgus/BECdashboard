@@ -10,6 +10,7 @@ from app.models import Base, NewsArticle, PriceBar, TickerFundamentals, TickerQu
 from app.universe import (
     AlreadyPresent,
     HISTORY_START,
+    HistoryUnavailable,
     NotInUniverse,
     UnknownSymbol,
     add,
@@ -141,17 +142,44 @@ def _raising_symbol_has_history(*_args, **_kwargs):
     raise AssertionError("symbol_has_history must not be called here")
 
 
+def _raising_refresh_ticker(*_args, **_kwargs):
+    raise AssertionError("refresh_ticker must not be called here")
+
+
+def _empty_fetch_history(ticker: str, start=None, end=None) -> pd.DataFrame:
+    """Simulates a transient Yahoo hiccup: the symbol validates, but the history fetch itself
+    comes back with no rows. Stores the empty frame, exactly like the real fetch_history does
+    unconditionally — this is what makes cache.evict load-bearing in add()."""
+    df = _history([])
+    store(ticker, df)
+    return df
+
+
+def _noop_refresh_ticker(ticker, force=False, history_start=None):
+    return {
+        "ticker": ticker,
+        "action": "none",
+        "last_session": None,
+        "bars_before": 0,
+        "bars_after": 0,
+        "drift_detected": False,
+    }
+
+
 def _patch_add(
     monkeypatch,
     has_history: bool = True,
     fundamentals_overrides: dict | None = None,
     fundamentals_fake=None,
     history_capture=None,
+    refresh_ticker_fake=None,
 ):
-    """Patch the three things add() calls, in universe.py's own namespace — symbol_has_history
-    included, since add() now checks it before ever reaching fetch_history/fetch_fundamentals.
-    Every existing test that exercises add() needs this, not just the ones added for this
-    contract: without it, a fake ticker like "AAA" hits the real network."""
+    """Patch the four things add() calls, in universe.py's own namespace — symbol_has_history
+    included, since add() now checks it before ever reaching fetch_history/fetch_fundamentals,
+    and refresh_ticker included since contract 0042 has add() call it (to catch a
+    post-16:00-ET add up to the current session) before writing the membership row. Every
+    existing test that exercises add() needs this, not just the ones added for this contract:
+    without it, a fake ticker like "AAA" hits the real network."""
     monkeypatch.setattr("app.universe.symbol_has_history", lambda ticker: has_history)
     monkeypatch.setattr(
         "app.universe.fetch_fundamentals",
@@ -159,6 +187,9 @@ def _patch_add(
     )
     monkeypatch.setattr(
         "app.universe.fetch_history", _make_fake_fetch_history(capture=history_capture)
+    )
+    monkeypatch.setattr(
+        "app.universe.refresh_ticker", refresh_ticker_fake or _noop_refresh_ticker
     )
 
 
@@ -260,6 +291,64 @@ def test_add_reactivates_inactive_ticker(db_mode, monkeypatch):
         assert row.active is True
         count = db.execute(sa_select(sa_func.count()).select_from(UniverseTicker)).scalar()
     assert count == 1  # reactivated in place, not duplicated
+
+
+# --- add refuses a zero-bar fetch (contract 0042) ------------------------------------------
+
+
+def test_add_raises_history_unavailable_and_leaves_no_row_when_fetch_returns_empty(
+    db_mode, monkeypatch
+):
+    """The central test: symbol_has_history says the symbol is real, but fetch_history comes
+    back empty — one transient Yahoo hiccup is enough. add() must refuse rather than write a
+    membership row nothing could ever repair, and must never reach fetch_fundamentals or
+    refresh_ticker once it has."""
+    monkeypatch.setattr("app.universe.symbol_has_history", lambda ticker: True)
+    monkeypatch.setattr("app.universe.fetch_history", _empty_fetch_history)
+    monkeypatch.setattr("app.universe.fetch_fundamentals", _raising_fetch_fundamentals)
+    monkeypatch.setattr("app.universe.refresh_ticker", _raising_refresh_ticker)
+
+    with pytest.raises(HistoryUnavailable):
+        add("GHOST")
+
+    with session() as db:
+        count = db.execute(sa_select(sa_func.count()).select_from(UniverseTicker)).scalar()
+    assert count == 0
+
+
+def test_add_evicts_the_cache_when_fetch_history_returns_empty(db_mode, monkeypatch):
+    """Without this, fetch_history's unconditional store() leaves the empty frame in the
+    24-hour TTL cache — a same-day retry would be served that cached empty frame, and the
+    repair path in refresh() could never see real data either."""
+    monkeypatch.setattr("app.universe.symbol_has_history", lambda ticker: True)
+    monkeypatch.setattr("app.universe.fetch_history", _empty_fetch_history)
+    monkeypatch.setattr("app.universe.fetch_fundamentals", _raising_fetch_fundamentals)
+    monkeypatch.setattr("app.universe.refresh_ticker", _raising_refresh_ticker)
+
+    evicted = []
+    monkeypatch.setattr("app.universe.evict", lambda ticker: evicted.append(ticker))
+
+    with pytest.raises(HistoryUnavailable):
+        add("GHOST")
+
+    assert evicted == ["GHOST"]
+
+
+def test_add_calls_refresh_ticker_with_history_start(db_mode, monkeypatch):
+    """Contract 0042 part 3: a ticker added after the 16:00 ET cutoff must not sit a session
+    behind the rest of the universe. add() reuses refresh_ticker's own cutoff logic rather than
+    recomputing it, so this only needs to prove the call happens with the right anchor."""
+    calls = []
+
+    def fake_refresh_ticker(ticker, **kwargs):
+        calls.append((ticker, kwargs))
+        return _noop_refresh_ticker(ticker, **kwargs)
+
+    _patch_add(monkeypatch, refresh_ticker_fake=fake_refresh_ticker)
+
+    add("AAPL")
+
+    assert calls == [("AAPL", {"history_start": HISTORY_START})]
 
 
 # --- 6 & 7. list_all: active only, ordered; empty universe returns [] ---------------------
@@ -381,6 +470,60 @@ def test_refresh_returns_refresh_ticker_action_verbatim(db_mode, monkeypatch):
     assert result["bars_after"] == 5
     assert "detail" in result
     assert result["detail"]["ticker"] == "AAPL"
+
+
+# --- refresh heals a member with no stored history (contract 0042) -------------------------
+
+
+def test_refresh_first_fetches_when_a_member_has_no_stored_history(db_mode, monkeypatch):
+    """Must fail against the code before this contract: refresh() never first-fetched, so a
+    zero-bar member — e.g. one that slipped in before add() refused those — could never
+    recover. missing_range(None, ...) returns None by design ("a first fetch is the caller's
+    job"), so without this heal call refresh_ticker's own no-op branch would fire forever."""
+    with session() as db:
+        db.add(UniverseTicker(ticker="TSLA", active=True))
+
+    called = []
+
+    def fake_fetch_history(ticker, start=None, end=None):
+        called.append((ticker, start, end))
+        df = _history(["2016-01-04"])
+        store(ticker, df)
+        return df
+
+    monkeypatch.setattr("app.universe.fetch_history", fake_fetch_history)
+    monkeypatch.setattr("app.universe.refresh_ticker", _noop_refresh_ticker)
+    monkeypatch.setattr("app.universe.fetch_fundamentals", _make_fake_fetch_fundamentals())
+
+    refresh("TSLA")
+
+    assert called == [("TSLA", HISTORY_START, None)]
+
+
+def test_refresh_does_not_raise_when_the_heal_fetch_also_returns_empty(db_mode, monkeypatch):
+    """Honest zero beats an exception: refresh() is called from the auto-refresh sweep, which
+    already catches and logs per-ticker exceptions without fixing anything, so raising here
+    would just add log noise instead of surfacing a real bars_after: 0."""
+    with session() as db:
+        db.add(UniverseTicker(ticker="TSLA", active=True))
+
+    monkeypatch.setattr("app.universe.fetch_history", _empty_fetch_history)
+    monkeypatch.setattr("app.universe.fetch_fundamentals", _make_fake_fetch_fundamentals())
+    monkeypatch.setattr(
+        "app.universe.refresh_ticker",
+        lambda ticker, force=False, history_start=None: {
+            "ticker": ticker,
+            "action": "none",
+            "last_session": None,
+            "bars_before": 0,
+            "bars_after": 0,
+            "drift_detected": False,
+        },
+    )
+
+    result = refresh("TSLA")  # must not raise
+
+    assert result["bars_after"] == 0
 
 
 # --- 12. ETF entry round-trips with the five ETF-absent fields all None ------------------

@@ -61,10 +61,22 @@ def _patch_fetches(monkeypatch, fundamentals_overrides=None, has_history=True):
         store(ticker, df)
         return df
 
-    # add() now checks symbol_has_history before ever reaching fetch_history/fetch_fundamentals.
+    def fake_refresh_ticker(ticker, force=False, history_start=None):
+        return {
+            "ticker": ticker,
+            "action": "none",
+            "last_session": None,
+            "bars_before": 0,
+            "bars_after": 0,
+            "drift_detected": False,
+        }
+
+    # add() now checks symbol_has_history before ever reaching fetch_history/fetch_fundamentals,
+    # and (contract 0042) calls refresh_ticker before writing the membership row.
     monkeypatch.setattr("app.universe.symbol_has_history", lambda ticker: has_history)
     monkeypatch.setattr("app.universe.fetch_fundamentals", fake_fetch_fundamentals)
     monkeypatch.setattr("app.universe.fetch_history", fake_fetch_history)
+    monkeypatch.setattr("app.universe.refresh_ticker", fake_refresh_ticker)
 
 
 # --- 14. GET /universe returns 200 and a JSON list -----------------------------------------
@@ -102,6 +114,18 @@ def test_post_universe_unknown_symbol_404(db_mode, client, monkeypatch):
 def test_post_universe_blank_ticker_422(db_mode, client):
     response = client.post("/universe", json={"ticker": "   "})
     assert response.status_code == 422
+
+
+def test_post_universe_history_unavailable_502(db_mode, client, monkeypatch):
+    """502, not 404: symbol_has_history already confirmed the symbol is real, so an empty
+    history fetch is an upstream failure, not a missing resource. Also confirms the two
+    existing error mappings are unaffected by adding this third one."""
+    monkeypatch.setattr("app.universe.symbol_has_history", lambda ticker: True)
+    monkeypatch.setattr("app.universe.fetch_history", lambda ticker, start=None, end=None: _history([]))
+
+    response = client.post("/universe", json={"ticker": "GHOST"})
+    assert response.status_code == 502
+    assert "GHOST" in response.json()["detail"]
 
 
 # --- 16. GET /universe/{ticker} returns 404 for an unknown ticker -------------------------
@@ -227,6 +251,17 @@ def test_post_universe_succeeds_when_fundamentals_unavailable(db_mode, client, m
         return df
 
     monkeypatch.setattr("app.universe.fetch_history", fake_fetch_history)
+    monkeypatch.setattr(
+        "app.universe.refresh_ticker",
+        lambda ticker, force=False, history_start=None: {
+            "ticker": ticker,
+            "action": "none",
+            "last_session": None,
+            "bars_before": 0,
+            "bars_after": 0,
+            "drift_detected": False,
+        },
+    )
 
     response = client.post("/universe", json={"ticker": "SPY"})
     assert response.status_code == 201

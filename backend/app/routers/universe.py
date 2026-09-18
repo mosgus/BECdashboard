@@ -26,6 +26,7 @@ from app.schemas import (
 from app.strip import build_strip_response
 from app.universe import (
     AlreadyPresent,
+    HistoryUnavailable,
     NotInUniverse,
     UnknownSymbol,
     add,
@@ -60,6 +61,12 @@ def add_ticker(payload: AddTickerRequest) -> dict:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except UnknownSymbol as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except HistoryUnavailable as exc:
+        # 502, not 404: symbol_has_history already confirmed the symbol exists — this is an
+        # upstream data failure, not a missing resource. 503 is already "no database
+        # configured". Contract 0041's client.ts retry is GET-only, so this POST is never
+        # retried by the frontend.
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
 @router.get("/export.zip")

@@ -33,6 +33,10 @@ class NotInUniverse(Exception):
     """Raised when an operation targets a ticker with no active membership row."""
 
 
+class HistoryUnavailable(Exception):
+    """Raised when a symbol validates but its history fetch returned no bars."""
+
+
 def _history_start(today: date) -> date:
     return HISTORY_START
 
@@ -59,7 +63,8 @@ def _live_quote(quote: dict | None) -> tuple[float | None, datetime | None]:
 
 def add(ticker: str) -> dict:
     """Add ticker to the universe. Order matters: validate before writing, so an unknown
-    symbol leaves no membership row behind.
+    symbol — or a symbol whose history fetch came back empty — leaves no membership row
+    behind.
 
     1. An active row already existing raises AlreadyPresent; an inactive row is
        reactivated rather than rejected.
@@ -69,11 +74,21 @@ def add(ticker: str) -> dict:
        UpstreamUnavailable instead of False, and that propagates uncaught here — "we don't
        know" must never be treated as "confirmed no.")
     3. fetch_history pulls HISTORY_YEARS of daily bars, not market_data's bare default
-       (~22 bars with no start date), which is useless for covariance or volatility.
+       (~22 bars with no start date), which is useless for covariance or volatility. A symbol
+       that validates but returns no bars (contract 0042: one transient Yahoo hiccup is
+       enough) raises HistoryUnavailable instead of writing a membership row nothing could
+       ever repair — refresh() cannot first-fetch a member with no stored history at all.
+       evict(key) clears the empty frame fetch_history unconditionally cached, so a same-day
+       retry does not get served that empty frame back from memory.
     4. fetch_fundamentals is best-effort — None is not an error and blocks nothing. A ticker
        added while Yahoo's fundamentals endpoint is down still gets its price history; the
        name and sector fill in later via refresh().
-    5. The membership row is inserted or reactivated only after step 3 succeeds.
+    5. refresh_ticker catches the new membership up to the last *completed* session before the
+       row is written (contract 0042) — added after the 16:00 ET cutoff, `end=None` above
+       stops at yesterday, and without this the ticker would sit one session behind the rest
+       of the universe until the next scheduled sweep. Reuses the same 16:00 cutoff
+       refresh_ticker/_cached_last_session already apply; nothing here recomputes it.
+    6. The membership row is inserted or reactivated only after all of the above succeeds.
     """
     key = ticker.upper()
 
@@ -86,9 +101,14 @@ def add(ticker: str) -> dict:
         raise UnknownSymbol(f"Unknown symbol: {key}")
 
     start = _history_start(date.today())
-    fetch_history(key, start=start, end=None)
+    stored = fetch_history(key, start=start, end=None)
+    if stored is None or stored.empty:
+        evict(key)
+        raise HistoryUnavailable(f"No price history returned for {key}; not added")
 
     fetch_fundamentals(key)  # best-effort; None is not an error, nothing to check here
+
+    refresh_ticker(key, history_start=HISTORY_START)
 
     with session() as db:
         row = db.get(UniverseTicker, key)
@@ -105,6 +125,14 @@ def refresh(ticker: str) -> dict:
     market_data.refresh_ticker's summary verbatim, merged with the current detail view — the
     action/session/bar counts are never recomputed here.
 
+    A member with no stored history at all (contract 0042 — e.g. a pre-existing zero-bar row
+    from before add() refused those) gets one first-fetch here before refresh_ticker runs:
+    missing_range(None, ...) returns None by design ("a first fetch is the caller's job, not a
+    repair"), so without this refresh_ticker would fall straight into its no-op branch forever.
+    A failed heal is not raised — it falls through into refresh_ticker, which reports an honest
+    bars_after: 0; this is called from the auto-refresh sweep, which already logs per-ticker
+    exceptions without fixing anything, so raising here would just add log noise.
+
     Backfills fundamentals, best-effort, if none exist yet — this is how a ticker added
     during a fundamentals outage heals itself later. Never refetches fundamentals that
     already exist; staleness there is a separate, unscoped question."""
@@ -114,6 +142,10 @@ def refresh(ticker: str) -> dict:
         row = db.get(UniverseTicker, key)
         if row is None or not row.active:
             raise NotInUniverse(f"{key} is not in the universe")
+
+    stored = get_cached(key)
+    if stored is None or stored.empty:
+        fetch_history(key, start=_history_start(date.today()), end=None)
 
     result = refresh_ticker(key, history_start=HISTORY_START)
 

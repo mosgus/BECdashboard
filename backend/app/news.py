@@ -47,7 +47,12 @@ _LOCK = threading.Lock()
 # universe — a fixed cost regardless of how many tickers the universe holds. Trivially
 # extendable later (^DJI, DIA, IWM, ^VIX are candidates) if the yield proves thin; see the
 # report for the measured baseline.
-MARKET_NEWS_TICKERS = ("^GSPC", "^IXIC", "^RUT", "SPY", "QQQ")
+# Measured per-feed on 2026-09-18, counting only articles that survive is_preferred_publisher and
+# are not already supplied by the first five: ^VIX adds 7 from four distinct quality publishers
+# (Barron's, IBD, MarketWatch, Quartz) and is the best single addition; XLF adds 10, all MT Newswires
+# pre-bell wire copy. Deliberately excluded: ^DJI adds 0 (entirely duplicates), DIA and VTI return no
+# preferred articles at all, and IWM's 6 are the same MT Newswires pre-bell series as XLF's.
+MARKET_NEWS_TICKERS = ("^GSPC", "^IXIC", "^RUT", "SPY", "QQQ", "^VIX", "XLF")
 
 # Wire services and mainstream financial press, seeded from the measured publisher split
 # (contract 0039: 488 stored articles, 46 publishers — MT Newswires produces exactly the
