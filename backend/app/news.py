@@ -28,6 +28,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from app.db import is_enabled, session
+from app.jobrun import record_run
 from app.models import AppState, NewsArticle
 from app.schedule import needs_auto_refresh
 
@@ -251,7 +252,9 @@ def _prune_old_articles(now_utc: datetime) -> None:
         db.execute(delete(NewsArticle).where(NewsArticle.pub_date < cutoff))
 
 
-def refresh_news_if_stale(tickers: list[str], now_utc: datetime, now_et: datetime) -> None:
+def refresh_news_if_stale(
+    tickers: list[str], now_utc: datetime, now_et: datetime, detail: dict | None = None
+) -> None:
     """The impure work itself: fetch/parse/upsert/prune articles for the given tickers, then
     refresh the briefing. Unconditional — no staleness check lives here any more. Contract
     0037 moved gating to run_news_refresh_if_due/needs_news_refresh, since news now refreshes
@@ -270,11 +273,19 @@ def refresh_news_if_stale(tickers: list[str], now_utc: datetime, now_et: datetim
 
     articles_refreshed is always True when calling refresh_briefing here — reaching this
     function at all means the caller already decided a refresh was due, which is exactly what
-    that flag communicates (contract 0035)."""
+    that flag communicates (contract 0035).
+
+    detail is an optional mutable dict (contract 0044's job-run bookkeeping) that, when given,
+    is populated with this run's own counts — feeds walked, articles stored, feeds that
+    raised, and whether refresh_briefing completed without raising. run_news_refresh_if_due
+    passes record_run's own detail dict straight through here rather than duplicating this
+    loop a second time just to recompute the same counts. None (the default) leaves every
+    existing direct call — tests, and this function's other production behavior — unchanged."""
     if not is_enabled() or not tickers:
         return
 
     parsed_by_id: dict[str, dict] = {}
+    errors: list[str] = []
     for ticker in tickers:
         try:
             raw_items = fetch_news_for(ticker)
@@ -282,6 +293,7 @@ def refresh_news_if_stale(tickers: list[str], now_utc: datetime, now_et: datetim
             # Broad on purpose: one ticker's feed being unreachable must not abort the
             # refresh for the other nineteen. See report.
             logger.exception("app.news: fetch_news_for(%s) failed; skipping", ticker)
+            errors.append(ticker)
             continue
 
         for raw in raw_items:
@@ -303,18 +315,31 @@ def refresh_news_if_stale(tickers: list[str], now_utc: datetime, now_et: datetim
 
     _prune_old_articles(now_utc)
 
+    if detail is not None:
+        detail["feeds"] = len(tickers)
+        detail["stored"] = len(parsed_by_id)
+        detail["errors"] = errors
+
     # Deferred, not a module-level import: app.briefing imports recent_articles from this
     # module (contract 0034 — reuse the bounded query rather than writing a second one), so a
     # top-level import here would be circular. Only reachable once this function is actually
     # called, by which point both modules have finished loading.
     from app.briefing import refresh_briefing
 
+    briefing_completed = True
     try:
         refresh_briefing(now_utc, now_et, True)
     except Exception:
         # Broad on purpose: a briefing failure must never affect the article refresh above,
         # which has already committed by this point.
+        briefing_completed = False
         logger.exception("app.news: refresh_briefing failed after a successful article refresh")
+
+    if detail is not None:
+        # Best-effort, not "a new summary was produced": refresh_briefing itself returns
+        # nothing and may legitimately no-op (needs_summary says not due yet) without that
+        # being a failure — this only distinguishes "the call completed" from "it raised".
+        detail["briefing"] = briefing_completed
 
 
 def run_news_refresh_if_due(now_utc: datetime, now_et: datetime) -> None:
@@ -330,7 +355,12 @@ def run_news_refresh_if_due(now_utc: datetime, now_et: datetime) -> None:
 
     Reads MARKET_NEWS_TICKERS, not the universe (contract 0040) — this is what keeps the
     refresh O(1) regardless of how many tickers the universe holds. No-op with no database
-    configured, or when another refresh is already running in this process (see _LOCK above)."""
+    configured, or when another refresh is already running in this process (see _LOCK above).
+
+    A run is recorded (contract 0044) only once the claim above is written — i.e. only for a
+    refresh that actually runs. GET /universe/strip fires on every page load, and this
+    function returns early whenever the window is already claimed; recording before that gate
+    would write a job_runs row per page view instead of per window."""
     if not _LOCK.acquire(blocking=False):
         return  # another visitor's refresh is already running in this process
 
@@ -345,7 +375,8 @@ def run_news_refresh_if_due(now_utc: datetime, now_et: datetime) -> None:
 
         _set_news_claim(now_utc)
 
-        refresh_news_if_stale(list(MARKET_NEWS_TICKERS), now_utc, now_et)
+        with record_run("news_refresh", now_utc) as detail:
+            refresh_news_if_stale(list(MARKET_NEWS_TICKERS), now_utc, now_et, detail=detail)
     finally:
         _LOCK.release()
 

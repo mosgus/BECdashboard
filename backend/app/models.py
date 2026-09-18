@@ -1,6 +1,6 @@
 from datetime import date as date_, datetime
 
-from sqlalchemy import BigInteger, Boolean, Date, DateTime, Float, Index, Integer, String, Text, func
+from sqlalchemy import BigInteger, Boolean, Date, DateTime, Float, Index, Integer, JSON, String, Text, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -133,3 +133,23 @@ class NewsArticle(Base):
         ),
     )
     fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class JobRun(Base):
+    """One row per automatic-refresh attempt (contract 0044) — "universe_refresh" or
+    "news_refresh". Distinct from AppState, which only ever holds the last claim timestamp:
+    this is an append-only history so "/ops" can answer "did the 09:30 refresh run, and did it
+    work?" instead of that going only to Render's stdout.
+
+    No UNIQUE(job_name, asof_date) like the reference app had — this runs up to three times a
+    day per job, one row per attempt, not per day. See app/jobrun.py."""
+
+    __tablename__ = "job_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    job_name: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    status: Mapped[str] = mapped_column(String, nullable=False)
+    duration_ms: Mapped[int | None] = mapped_column(Integer)
+    detail: Mapped[dict | None] = mapped_column(JSON)

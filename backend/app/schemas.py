@@ -135,3 +135,55 @@ class AddTickerRequest(BaseModel):
         if not value.strip():
             raise ValueError("ticker must not be blank")
         return value
+
+
+class OpsDatabaseStatus(BaseModel):
+    connected: bool
+    revision: str | None
+
+
+class OpsUniverseStatus(BaseModel):
+    active_tickers: int
+    total_bars: int
+    newest_bar_date: date | None
+
+
+class OpsNewsStatus(BaseModel):
+    article_count: int
+    newest_fetched_at: datetime | None
+
+
+class OpsBriefingStatus(BaseModel):
+    exists: bool
+    model: str | None
+    created_at: datetime | None
+
+
+class OpsWindowsStatus(BaseModel):
+    auto_refresh_last_claim: datetime | None
+    news_refresh_last_claim: datetime | None
+    current_window_start: datetime | None
+
+
+class OpsStatus(BaseModel):
+    database: OpsDatabaseStatus
+    universe: OpsUniverseStatus
+    news: OpsNewsStatus
+    briefing: OpsBriefingStatus
+    gemini_key_configured: bool
+    python: str
+    windows: OpsWindowsStatus
+
+
+class JobRunOut(BaseModel):
+    id: int
+    job_name: str
+    started_at: datetime
+    finished_at: datetime | None
+    status: str
+    duration_ms: int | None
+    detail: dict | None
+
+
+class JobRunsResponse(BaseModel):
+    job_runs: list[JobRunOut]

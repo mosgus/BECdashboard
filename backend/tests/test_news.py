@@ -2,10 +2,10 @@ from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 import pytest
-from sqlalchemy import event, select
+from sqlalchemy import event, func, select
 
 from app.db import get_engine, session
-from app.models import AppState, Base, NewsArticle, UniverseTicker
+from app.models import AppState, Base, JobRun, NewsArticle, UniverseTicker
 from app.news import (
     _LOCK,
     MARKET_NEWS_TICKERS,
@@ -273,6 +273,10 @@ def test_run_news_refresh_if_due_noop_when_window_already_claimed(db_mode, monke
 
     run_news_refresh_if_due(now_utc, now_et + timedelta(minutes=5))
 
+    with session() as db:
+        count = db.execute(select(func.count()).select_from(JobRun)).scalar()
+    assert count == 0
+
 
 def test_run_news_refresh_if_due_fetches_exactly_the_market_news_tickers(db_mode, monkeypatch):
     """The universe must never be consulted (contract 0040) — seed a fake "universe" with a
@@ -351,6 +355,96 @@ def test_lock_is_released_after_the_body_raises(db_mode, monkeypatch):
 
     assert _LOCK.acquire(blocking=False)
     _LOCK.release()
+
+
+# --- job_runs recording (contract 0044) ---------------------------------------------------------
+
+
+def _latest_job_run() -> dict | None:
+    with session() as db:
+        row = db.execute(select(JobRun).order_by(JobRun.id.desc()).limit(1)).scalars().first()
+        if row is None:
+            return None
+        return {col.name: getattr(row, col.name) for col in JobRun.__table__.columns}
+
+
+def test_one_feed_raising_records_partial_with_that_feed_in_errors(db_mode, monkeypatch):
+    """The other feeds must still be walked, and whatever they yielded still stored — a single
+    bad feed must not zero out the whole run's counts."""
+
+    def fake_fetch(ticker):
+        if ticker == MARKET_NEWS_TICKERS[0]:
+            raise RuntimeError("boom")
+        return [_raw_item(f"{ticker}-1", provider={"displayName": "Reuters"})]
+
+    monkeypatch.setattr("app.news.fetch_news_for", fake_fetch)
+    monkeypatch.setattr("app.briefing.refresh_briefing", lambda *a, **k: None)
+
+    now_et = _et(10, 0)
+    run_news_refresh_if_due(_utc(now_et), now_et)
+
+    run = _latest_job_run()
+    assert run is not None
+    assert run["job_name"] == "news_refresh"
+    assert run["status"] == "partial"
+    assert run["detail"]["errors"] == [MARKET_NEWS_TICKERS[0]]
+    assert run["detail"]["feeds"] == len(MARKET_NEWS_TICKERS)
+    assert run["detail"]["stored"] == len(MARKET_NEWS_TICKERS) - 1
+    assert run["detail"]["briefing"] is True
+
+
+def test_a_body_that_raises_records_failure_and_still_reraises(db_mode, monkeypatch):
+    monkeypatch.setattr("app.news.fetch_news_for", lambda ticker: [])
+    monkeypatch.setattr(
+        "app.news._prune_old_articles",
+        lambda now_utc: (_ for _ in ()).throw(RuntimeError("boom")),
+    )
+
+    now_et = _et(10, 0)
+    with pytest.raises(RuntimeError, match="boom"):
+        run_news_refresh_if_due(_utc(now_et), now_et)
+
+    run = _latest_job_run()
+    assert run is not None
+    assert run["job_name"] == "news_refresh"
+    assert run["status"] == "failure"
+    assert run["detail"]["error"]["type"] == "RuntimeError"
+    assert "boom" in run["detail"]["error"]["message"]
+
+
+def test_run_records_success_with_briefing_true_when_refresh_briefing_completes(db_mode, monkeypatch):
+    monkeypatch.setattr("app.news.fetch_news_for", lambda ticker: [])
+    monkeypatch.setattr("app.briefing.refresh_briefing", lambda *a, **k: None)
+
+    now_et = _et(10, 0)
+    run_news_refresh_if_due(_utc(now_et), now_et)
+
+    run = _latest_job_run()
+    assert run is not None
+    assert run["status"] == "success"
+    assert run["detail"]["feeds"] == len(MARKET_NEWS_TICKERS)
+    assert run["detail"]["stored"] == 0
+    assert run["detail"]["errors"] == []
+    assert run["detail"]["briefing"] is True
+
+
+def test_run_records_briefing_false_when_refresh_briefing_raises(db_mode, monkeypatch):
+    """briefing is best-effort (contract 0044): recorded as whether the call completed without
+    raising, not whether it actually produced a new summary — refresh_briefing itself returns
+    nothing and may legitimately no-op."""
+    monkeypatch.setattr("app.news.fetch_news_for", lambda ticker: [])
+    monkeypatch.setattr(
+        "app.briefing.refresh_briefing",
+        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("gemini boom")),
+    )
+
+    now_et = _et(10, 0)
+    run_news_refresh_if_due(_utc(now_et), now_et)  # must not raise — briefing failures are caught
+
+    run = _latest_job_run()
+    assert run is not None
+    assert run["status"] == "success"  # no feed errors — only the briefing failed
+    assert run["detail"]["briefing"] is False
 
 
 # --- dedup across tickers --------------------------------------------------------------------

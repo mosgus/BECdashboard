@@ -16,6 +16,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from app.db import is_enabled, session
+from app.jobrun import record_run
 from app.models import AppState, UniverseTicker
 from app.quotes import refresh_quotes_if_stale
 from app.schedule import needs_auto_refresh
@@ -85,7 +86,12 @@ def run_auto_refresh_if_due(now_utc: datetime, now_et: datetime) -> None:
     The claim is written before the sweep runs, not after — see module docstring — and it is
     never rolled back on failure: a window that errored waits for the next window rather than
     being retried by the next visitor thirty seconds later, which is how a failing sweep turns
-    into a rate limit."""
+    into a rate limit.
+
+    A run is recorded (contract 0044) only once the claim above is written — i.e. only for a
+    sweep that actually runs. GET /universe/strip fires on every page load, and this function
+    returns early whenever the window is already claimed; recording before that gate would
+    write a job_runs row per page view instead of per window."""
     if not _LOCK.acquire(blocking=False):
         return  # another visitor's sweep is already running in this process
 
@@ -99,15 +105,26 @@ def run_auto_refresh_if_due(now_utc: datetime, now_et: datetime) -> None:
 
         _set_state(AUTO_REFRESH_KEY, now_utc)
 
-        tickers = active_universe_tickers()
-        for ticker in tickers:
-            try:
-                refresh(ticker)
-            except Exception:
-                # Broad on purpose: one ticker's refresh failing must not abort the sweep for the
-                # rest, the same discipline app/news.py's per-ticker fetch loop uses.
-                logger.exception("app.autorefresh: refresh(%s) failed; continuing", ticker)
+        with record_run("universe_refresh", now_utc) as detail:
+            tickers = active_universe_tickers()
+            errors: list[str] = []
+            refreshed = 0
+            for ticker in tickers:
+                try:
+                    result = refresh(ticker)
+                    if result.get("action") != "none":
+                        refreshed += 1
+                except Exception:
+                    # Broad on purpose: one ticker's refresh failing must not abort the sweep
+                    # for the rest, the same discipline app/news.py's per-ticker fetch loop
+                    # uses.
+                    logger.exception("app.autorefresh: refresh(%s) failed; continuing", ticker)
+                    errors.append(ticker)
 
-        refresh_quotes_if_stale(tickers)
+            refresh_quotes_if_stale(tickers)
+
+            detail["tickers"] = len(tickers)
+            detail["refreshed"] = refreshed
+            detail["errors"] = errors
     finally:
         _LOCK.release()

@@ -6,6 +6,94 @@ Working notes from the planning conversation that led to this branch. Purpose is
 
 Limited hands-on development history with the existing app, so the goal is to rebuild page by page, feature by feature, to actually understand what's necessary — rather than carry the old architecture forward by default. Willing to make large changes where the old approach doesn't hold up.
 
+## Module map
+
+Written 2026-09-18, after a proposal to reorganise the backend into per-page folders
+(`/launch`, `/universe`, `/ops`). **That was rejected, and this map is why.**
+
+The backend is layered by *domain concept*, not by page, and the layering is load-bearing — the
+bottom two tiers are page-agnostic by construction and portfolios will reuse all of them. Three
+modules in particular refuse to sit in any one page's folder:
+
+- **`strip.py`** renders in `App.tsx` chrome on *every* page and is served from `/universe/strip`.
+- **`autorefresh.py`** is *triggered* by the launch page's strip fetch, *refreshes* universe data,
+  and is *displayed* on ops.
+- **`news.py`** is *displayed* on launch but imported by `routers/universe.py` for the strip's
+  background task.
+
+A page split would produce `launch/news.py` imported by `universe/routes.py`, and
+`universe/autorefresh.py` rendered by `ops/`. Every such placement is arbitrary and every one creates
+a cross-folder import.
+
+### Backend — `backend/app/`
+
+Nothing on a lower tier imports anything above it.
+
+```
+tier 0  config  models  schemas  freshness  schedule  export      (zero app-internal imports)
+tier 1  db → config
+tier 2  cache → db, models    quotes → cache, db    jobrun → db, models
+tier 3  market_data → cache, freshness
+tier 4  universe → cache, db, market_data, models, quotes
+tier 5  news  briefing  strip  autorefresh  ops                   (features)
+tier 6  routers/*                                                 (HTTP only)
+```
+
+| module | what it owns |
+|---|---|
+| `config.py` | `Settings`, `.env` loading, the ambient-variable conflict guard (0041) |
+| `models.py` | SQLAlchemy tables. Eight: price bars, fundamentals, universe, quotes, news articles, news summaries, app state, job runs |
+| `schemas.py` | Pydantic request/response shapes. No logic |
+| `freshness.py` | **Pure.** Is stored history stale, what range is missing, has a split restated it |
+| `schedule.py` | **Pure.** The 09:30 / 12:00 / 16:00 ET refresh windows |
+| `export.py` | **Pure.** OHLCV → CSV text, byte-compatible with the old `YF.py` |
+| `db.py` | Engine and transactional `session()` |
+| `cache.py` | Price history read/write, 24-hour in-process `TTLCache` over the database |
+| `quotes.py` | Live intraday quotes, 10-minute TTL, market-hours aware |
+| `market_data.py` | **The yfinance boundary.** Network calls stay thin; the logic around them is pure |
+| `universe.py` | Membership: add / refresh / remove, orchestrating `market_data` + `cache` |
+| `news.py` | Broad-market articles from fixed feeds, publisher-filtered at ingest |
+| `briefing.py` | The Gemini market briefing over stored headlines |
+| `strip.py` | Ticker-strip prices and returns, from stored data only |
+| `autorefresh.py` | The visit-triggered universe sweep, claimed per window |
+| `jobrun.py` | `record_run` — one `job_runs` row per sweep that actually ran. Never breaks the job it records |
+| `ops.py` | System-health aggregation and job-run history. **Booleans and counts only — never a secret** |
+| `routers/` | **The only modules that know about HTTP.** Everything below raises domain exceptions |
+
+`cache.py`, `config.py`, `db.py`, `models.py` and `main.py` have no module docstring — their function
+docstrings carry the reasoning instead.
+
+### Frontend — `frontend/src/`
+
+```
+App.tsx        Header + TickerStrip (chrome, outside <Routes>) + the routes
+pages/         LaunchPage, UniversePage
+components/    chrome:    Header, NavItem, SettingsIcon, BackendStatus, Tooltip, DownloadIcon, TickerStrip
+               launch:    NewsSection, EntryCard
+               universe:  UniverseTable, ChartDialog, FilterDialog, AddTickerForm
+lib/           pure helpers — change, filters, format, ranges, relativeTime
+api/client.ts  the single fetch boundary: base URL, ApiError, GET-only transient retry (0041)
+```
+
+**Every `lib/` function takes `now` as an argument and never reads the clock.** That is what makes
+them testable, and it is the same discipline `freshness.py` and `schedule.py` follow on the backend.
+
+`components/` is deliberately flat at 13 files. Splitting 7 shared / 4 universe / 2 launch would add
+two folders holding four and two files, and `TickerStrip` is arguable either way — chrome that fetches
+universe data. Revisit past roughly 25 components.
+
+### Where a request goes
+
+```
+GET /              → LaunchPage: NewsSection → /news        (pure read)
+                     TickerStrip → /universe/strip          (pure read + schedules both sweeps)
+GET /universe      → UniversePage: /universe, /universe/{t}/history, /universe/export.zip
+every page load    → /health (BackendStatus)
+```
+
+`/universe/strip` is the one endpoint that fires on **every** page load, which is why both background
+refreshes hang off it — it is the only reliable signal that a person is present.
+
 ## Decided
 
 **Python 3.13** for the backend.

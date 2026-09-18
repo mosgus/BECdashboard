@@ -10,7 +10,8 @@ from app.autorefresh import (
     run_auto_refresh_if_due,
 )
 from app.db import get_engine, session
-from app.models import AppState, Base, UniverseTicker
+from app.models import AppState, Base, JobRun, UniverseTicker
+from sqlalchemy import func, select
 
 ET = ZoneInfo("America/New_York")
 
@@ -43,6 +44,19 @@ def _state_value_at() -> datetime | None:
 def _window_open_et(hour: int = 10, minute: int = 0) -> datetime:
     # 2026-09-16 is a Wednesday — inside the 09:30 window at 10:00.
     return datetime(2026, 9, 16, hour, minute, tzinfo=ET)
+
+
+def _job_run_count() -> int:
+    with session() as db:
+        return db.execute(select(func.count()).select_from(JobRun)).scalar()
+
+
+def _latest_job_run() -> JobRun | None:
+    with session() as db:
+        row = db.execute(select(JobRun).order_by(JobRun.id.desc()).limit(1)).scalars().first()
+        if row is None:
+            return None
+        return {col.name: getattr(row, col.name) for col in JobRun.__table__.columns}
 
 
 # --- active_universe_tickers -----------------------------------------------------------------
@@ -78,6 +92,7 @@ def test_run_auto_refresh_noop_outside_a_window(db_mode, monkeypatch):
     run_auto_refresh_if_due(now_et.astimezone(timezone.utc), now_et)
 
     assert _state_value_at() is None
+    assert _job_run_count() == 0
 
 
 def test_run_auto_refresh_noop_when_already_claimed_this_window(db_mode, monkeypatch):
@@ -98,6 +113,8 @@ def test_run_auto_refresh_noop_when_already_claimed_this_window(db_mode, monkeyp
 
     _add_ticker("AAPL")
     run_auto_refresh_if_due(now_utc, now_et + timedelta(minutes=5))
+
+    assert _job_run_count() == 0
 
 
 # --- claim-first: the timestamp is written before the sweep, not after ------------------------
@@ -202,3 +219,55 @@ def test_lock_is_released_after_the_body_raises(db_mode, monkeypatch):
 
     assert _LOCK.acquire(blocking=False)
     _LOCK.release()
+
+
+# --- job_runs recording (contract 0044) ---------------------------------------------------------
+
+
+def test_one_ticker_raising_records_partial_with_that_ticker_in_errors(db_mode, monkeypatch):
+    _add_ticker("AAPL")
+    _add_ticker("MSFT")
+
+    called = []
+
+    def fake_refresh(ticker):
+        called.append(ticker)
+        if ticker == "AAPL":
+            raise RuntimeError("boom")
+        return {"ticker": ticker, "action": "updated"}
+
+    monkeypatch.setattr("app.autorefresh.refresh", fake_refresh)
+    monkeypatch.setattr("app.autorefresh.refresh_quotes_if_stale", lambda tickers: None)
+
+    now_et = _window_open_et()
+    run_auto_refresh_if_due(now_et.astimezone(timezone.utc), now_et)
+
+    assert called == ["AAPL", "MSFT"]  # the other ticker still refreshed
+    run = _latest_job_run()
+    assert run is not None
+    assert run["job_name"] == "universe_refresh"
+    assert run["status"] == "partial"
+    assert run["detail"]["errors"] == ["AAPL"]
+    assert run["detail"]["tickers"] == 2
+    assert run["detail"]["refreshed"] == 1
+
+
+def test_a_body_that_raises_records_failure_and_still_reraises(db_mode, monkeypatch):
+    _add_ticker("AAPL")
+
+    monkeypatch.setattr("app.autorefresh.refresh", lambda ticker: {"ticker": ticker, "action": "none"})
+    monkeypatch.setattr(
+        "app.autorefresh.refresh_quotes_if_stale",
+        lambda tickers: (_ for _ in ()).throw(RuntimeError("boom")),
+    )
+
+    now_et = _window_open_et()
+    with pytest.raises(RuntimeError, match="boom"):
+        run_auto_refresh_if_due(now_et.astimezone(timezone.utc), now_et)
+
+    run = _latest_job_run()
+    assert run is not None
+    assert run["job_name"] == "universe_refresh"
+    assert run["status"] == "failure"
+    assert run["detail"]["error"]["type"] == "RuntimeError"
+    assert "boom" in run["detail"]["error"]["message"]
