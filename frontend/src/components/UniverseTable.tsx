@@ -3,6 +3,7 @@ import type { UniverseEntry } from '../api/client'
 import { formatDateRange, formatMarketCap, formatPercent, formatPrice, formatRatio } from '../lib/format'
 import { priceChange } from '../lib/change'
 import type { ChangeDirection } from '../lib/change'
+import { typeLabel } from '../lib/tickerType'
 import { DownloadIcon } from './DownloadIcon'
 import { Tooltip } from './Tooltip'
 
@@ -23,6 +24,10 @@ const CHANGE_COLOR: Record<ChangeDirection, string> = {
 }
 
 function TypePill({ quoteType }: { quoteType: string | null }): JSX.Element {
+  if (quoteType === null) {
+    return <span className="text-[var(--color-muted)]">—</span>
+  }
+
   const isEtf = quoteType === 'ETF'
   return (
     <span
@@ -30,7 +35,7 @@ function TypePill({ quoteType }: { quoteType: string | null }): JSX.Element {
         isEtf ? 'bg-brand-primary/10 text-brand-primary' : 'bg-brand-border text-[var(--color-muted)]'
       }`}
     >
-      {isEtf ? 'ETF' : 'Equity'}
+      {typeLabel(quoteType)}
     </span>
   )
 }

@@ -35,6 +35,7 @@ const NUMERIC_GROUPS: NumericGroupSpec[] = [
 const TYPE_OPTIONS = [
   { value: 'EQUITY', label: 'Equity' },
   { value: 'ETF', label: 'ETF' },
+  { value: 'INDEX', label: 'Index' },
 ]
 
 const CHIP_BASE = 'text-[0.8125rem] px-3 py-1.5 rounded-full border cursor-pointer select-none'

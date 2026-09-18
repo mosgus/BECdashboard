@@ -120,6 +120,29 @@ def add(ticker: str) -> dict:
     return get_one(key)
 
 
+def _fundamentals_incomplete(row: dict | None) -> bool:
+    """True when the row is absent, has no short_name, or has none of the crumb-gated fields
+    (market_cap, trailing_pe, dividend_yield). Pure — takes the row, reads no clock and no
+    database.
+
+    Once contract 0051's partial rows exist, "the row is None" is never true again for a
+    ticker that ever got so much as a name from the crumb-free tiers — so retrying `.info`
+    only when the row is entirely absent would mean it is never retried again. This is the
+    self-healing condition instead: a row with a name but nothing from `.info` re-attempts
+    `.info` once per auto-refresh window (up to 3 extra requests/day/ticker) until Yahoo's
+    crumb handshake relents.
+
+    The genuine false positive: an ETF with no market cap, no P/E and no yield reads as
+    incomplete even when `.info` worked perfectly. It has a short_name, so this costs one
+    wasted request per window — distinguishing the two cases needs a provenance column this
+    contract deliberately does not add."""
+    if row is None:
+        return True
+    if row.get("short_name") is None:
+        return True
+    return row.get("market_cap") is None and row.get("trailing_pe") is None and row.get("dividend_yield") is None
+
+
 def refresh(ticker: str) -> dict:
     """Bring ticker's stored history current, or repair it if drift was detected. Returns
     market_data.refresh_ticker's summary verbatim, merged with the current detail view — the
@@ -133,9 +156,13 @@ def refresh(ticker: str) -> dict:
     bars_after: 0; this is called from the auto-refresh sweep, which already logs per-ticker
     exceptions without fixing anything, so raising here would just add log noise.
 
-    Backfills fundamentals, best-effort, if none exist yet — this is how a ticker added
-    during a fundamentals outage heals itself later. Never refetches fundamentals that
-    already exist; staleness there is a separate, unscoped question."""
+    Retries fundamentals whenever the stored row is incomplete (contract 0051), not only when
+    it is entirely absent — see _fundamentals_incomplete. The result carries which path ran
+    under "fundamentals", so the sweep in app/autorefresh.py can count outcomes without a
+    second query: "info" and "partial" are distinguished by whether the returned dict carries
+    a crumb-gated key at all (only extract_fundamentals's full `.info`-shaped dict ever does;
+    the crumb-free tiers never produce trailing_pe), "none" is every tier failing, and
+    "skipped" is a row that was already complete."""
     key = ticker.upper()
 
     with session() as db:
@@ -149,10 +176,18 @@ def refresh(ticker: str) -> dict:
 
     result = refresh_ticker(key, history_start=HISTORY_START)
 
-    if get_fundamentals(key) is None:
-        fetch_fundamentals(key)
+    if _fundamentals_incomplete(get_fundamentals(key)):
+        fetched = fetch_fundamentals(key)
+        if fetched is None:
+            fundamentals_outcome = "none"
+        elif "trailing_pe" in fetched:
+            fundamentals_outcome = "info"
+        else:
+            fundamentals_outcome = "partial"
+    else:
+        fundamentals_outcome = "skipped"
 
-    return {**result, "detail": get_one(key)}
+    return {**result, "detail": get_one(key), "fundamentals": fundamentals_outcome}
 
 
 def remove(ticker: str) -> dict:

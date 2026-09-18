@@ -3,7 +3,10 @@ from datetime import datetime, timedelta, timezone
 import pandas as pd
 import pytest
 
-from app.quotes import fetch_quotes, is_market_open, needs_refresh, refresh_quotes_if_stale
+from app.cache import store_quotes
+from app.db import get_engine
+from app.models import Base
+from app.quotes import _LOCK, fetch_quotes, is_market_open, needs_refresh, refresh_quotes_if_stale
 
 
 @pytest.fixture(autouse=True)
@@ -12,6 +15,15 @@ def isolated_from_ambient_database(monkeypatch):
     touch a real database — conftest.py's own autouse fixture already strips DATABASE_URL for
     every test, this just documents why that matters here specifically."""
     monkeypatch.delenv("DATABASE_URL", raising=False)
+
+
+@pytest.fixture
+def db_mode(tmp_path, monkeypatch):
+    url = f"sqlite:///{tmp_path}/test_quotes.db"
+    monkeypatch.setenv("DATABASE_URL", url)
+    engine = get_engine()
+    Base.metadata.create_all(engine)
+    yield engine
 
 
 def _multi_ticker_frame(closes: dict[str, list], index: pd.DatetimeIndex) -> pd.DataFrame:
@@ -113,3 +125,63 @@ def test_refresh_quotes_if_stale_noop_with_no_database(monkeypatch):
     monkeypatch.setattr("app.quotes._download_quotes", _raising_download)
 
     refresh_quotes_if_stale(["AAPL"])  # must not raise, must not fetch
+
+
+# --- contract 0051: gated on a claim, not MAX(fetched_at) over ticker_quotes rows -----------
+
+
+def test_refresh_fetches_when_a_new_ticker_has_no_quote_row_but_another_is_fresh(db_mode, monkeypatch):
+    """The exact bug: MAX(fetched_at) over rows contributes nothing for a ticker with no row
+    at all, so a batch with one fresh-quoted ticker and one brand-new one used to read as
+    "not stale" and skip the new ticker until every other ticker's TTL lapsed too. The
+    attempt-based claim has no such blind spot — a stale/absent attempt still triggers a
+    fetch regardless of what any individual ticker's row says."""
+    monkeypatch.setattr("app.quotes.is_market_open", lambda now_et: True)
+
+    now = datetime.now(timezone.utc)
+    store_quotes({"AAPL": (100.0, now)}, now)  # AAPL already has a fresh quote row
+    # MSFT has no quote row at all, and no prior refresh attempt was ever claimed.
+
+    calls = []
+
+    def fake_download(tickers):
+        calls.append(list(tickers))
+        return pd.DataFrame()
+
+    monkeypatch.setattr("app.quotes._download_quotes", fake_download)
+
+    refresh_quotes_if_stale(["AAPL", "MSFT"])
+
+    assert calls == [["AAPL", "MSFT"]]
+
+
+def test_refresh_two_calls_inside_one_ttl_window_produce_exactly_one_fetch(db_mode, monkeypatch):
+    monkeypatch.setattr("app.quotes.is_market_open", lambda now_et: True)
+
+    calls = []
+
+    def fake_download(tickers):
+        calls.append(list(tickers))
+        return pd.DataFrame()
+
+    monkeypatch.setattr("app.quotes._download_quotes", fake_download)
+
+    refresh_quotes_if_stale(["AAPL"])
+    refresh_quotes_if_stale(["AAPL"])
+
+    assert len(calls) == 1
+
+
+def test_refresh_quotes_lock_prevents_concurrent_fetch(db_mode, monkeypatch):
+    monkeypatch.setattr("app.quotes.is_market_open", lambda now_et: True)
+
+    called = []
+    monkeypatch.setattr("app.quotes._download_quotes", lambda tickers: called.append(tickers) or pd.DataFrame())
+
+    assert _LOCK.acquire(blocking=False)
+    try:
+        refresh_quotes_if_stale(["AAPL"])
+    finally:
+        _LOCK.release()
+
+    assert called == []

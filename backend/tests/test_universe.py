@@ -6,13 +6,14 @@ from sqlalchemy import event, func as sa_func, select as sa_select
 
 from app.cache import clear, get_cached, get_fundamentals, store, store_fundamentals
 from app.db import get_engine, session
-from app.models import Base, NewsArticle, PriceBar, TickerFundamentals, TickerQuote, UniverseTicker
+from app.models import AppState, Base, NewsArticle, PriceBar, TickerFundamentals, TickerQuote, UniverseTicker
 from app.universe import (
     AlreadyPresent,
     HISTORY_START,
     HistoryUnavailable,
     NotInUniverse,
     UnknownSymbol,
+    _fundamentals_incomplete,
     add,
     get_one,
     list_all,
@@ -728,9 +729,15 @@ def test_list_all_current_price_populated_when_quote_fresh_and_market_open(db_mo
     monkeypatch.setattr("app.quotes._download_quotes", _raising_download_quotes)
 
     from app.cache import store_quotes
+    from app.quotes import QUOTE_ATTEMPT_KEY
 
     now = datetime.now(timezone.utc)
     store_quotes({"AAPL": (123.45, now)}, now)
+    # Contract 0051: the refresh gate is a claim on the *attempt*, not MAX(fetched_at) over
+    # quote rows — storing a fresh quote row alone no longer prevents a refetch, so the claim
+    # itself must be seeded fresh too.
+    with session() as db:
+        db.add(AppState(key=QUOTE_ATTEMPT_KEY, value_at=now))
 
     entries = {e["ticker"]: e for e in list_all()}
     assert entries["AAPL"]["current_price"] == 123.45
@@ -888,3 +895,121 @@ def test_remove_does_not_touch_news_articles(db_mode, monkeypatch):
         article = db.get(NewsArticle, "a1")
         assert article is not None
         assert article.source_ticker == "AAPL"
+
+
+# --- contract 0051: _fundamentals_incomplete -------------------------------------------------
+
+
+def test_fundamentals_incomplete_true_when_row_is_absent():
+    assert _fundamentals_incomplete(None) is True
+
+
+def test_fundamentals_incomplete_true_when_short_name_missing():
+    row = {"short_name": None, "market_cap": 100, "trailing_pe": 20.0, "dividend_yield": 0.5}
+    assert _fundamentals_incomplete(row) is True
+
+
+def test_fundamentals_incomplete_true_when_all_crumb_gated_fields_are_none():
+    """A row with a short_name but nothing from `.info` — exactly what a tier-1/tier-2 partial
+    write leaves behind — must read as incomplete so refresh() retries `.info`."""
+    row = {"short_name": "Apple Inc.", "market_cap": None, "trailing_pe": None, "dividend_yield": None}
+    assert _fundamentals_incomplete(row) is True
+
+
+def test_fundamentals_incomplete_false_when_market_cap_present():
+    row = {"short_name": "Apple Inc.", "market_cap": 1_000_000_000, "trailing_pe": None, "dividend_yield": None}
+    assert _fundamentals_incomplete(row) is False
+
+
+def test_fundamentals_incomplete_false_when_trailing_pe_present():
+    row = {"short_name": "Apple Inc.", "market_cap": None, "trailing_pe": 20.0, "dividend_yield": None}
+    assert _fundamentals_incomplete(row) is False
+
+
+def test_fundamentals_incomplete_false_when_dividend_yield_present():
+    row = {"short_name": "Apple Inc.", "market_cap": None, "trailing_pe": None, "dividend_yield": 0.33}
+    assert _fundamentals_incomplete(row) is False
+
+
+# --- contract 0051: refresh() retries incomplete rows and reports which path ran -------------
+
+
+def test_refresh_retries_fundamentals_when_row_is_incomplete_partial(db_mode, monkeypatch):
+    """A partial row (short_name but no crumb-gated fields — exactly what a tier-1/tier-2
+    write leaves) must not be treated as done; refresh() retries .info via fetch_fundamentals."""
+    _patch_add(monkeypatch)
+    add("AAPL")
+    with session() as db:
+        row = db.get(TickerFundamentals, "AAPL")
+        row.market_cap = None
+        row.trailing_pe = None
+        row.dividend_yield = None
+
+    called = []
+
+    def fake_fetch_fundamentals(ticker):
+        called.append(ticker)
+        data = _fundamentals(ticker)
+        store_fundamentals(ticker, data)
+        return data
+
+    monkeypatch.setattr("app.universe.fetch_fundamentals", fake_fetch_fundamentals)
+    monkeypatch.setattr("app.universe.refresh_ticker", _noop_refresh_ticker)
+
+    result = refresh("AAPL")
+
+    assert called == ["AAPL"]
+    assert result["fundamentals"] == "info"
+
+
+def test_refresh_reports_fundamentals_none_when_incomplete_and_fetch_fails(db_mode, monkeypatch):
+    _patch_add(monkeypatch)
+    add("AAPL")
+    with session() as db:
+        row = db.get(TickerFundamentals, "AAPL")
+        row.market_cap = None
+        row.trailing_pe = None
+        row.dividend_yield = None
+
+    monkeypatch.setattr("app.universe.fetch_fundamentals", lambda ticker: None)
+    monkeypatch.setattr("app.universe.refresh_ticker", _noop_refresh_ticker)
+
+    result = refresh("AAPL")
+
+    assert result["fundamentals"] == "none"
+
+
+def test_refresh_reports_fundamentals_partial_when_a_crumb_free_tier_succeeds(db_mode, monkeypatch):
+    _patch_add(monkeypatch)
+    add("AAPL")
+    with session() as db:
+        row = db.get(TickerFundamentals, "AAPL")
+        row.market_cap = None
+        row.trailing_pe = None
+        row.dividend_yield = None
+
+    def fake_partial_fetch(ticker):
+        # No crumb-gated key at all — the shape fetch_fundamentals's own partial merge
+        # produces, as distinct from extract_fundamentals's always-full dict.
+        data = {"ticker": ticker, "short_name": "Apple Inc.", "fetched_at": datetime.now(timezone.utc)}
+        store_fundamentals(ticker, data, partial=True)
+        return data
+
+    monkeypatch.setattr("app.universe.fetch_fundamentals", fake_partial_fetch)
+    monkeypatch.setattr("app.universe.refresh_ticker", _noop_refresh_ticker)
+
+    result = refresh("AAPL")
+
+    assert result["fundamentals"] == "partial"
+
+
+def test_refresh_reports_fundamentals_skipped_when_row_already_complete(db_mode, monkeypatch):
+    _patch_add(monkeypatch)
+    add("AAPL")  # _fundamentals() default already sets market_cap/trailing_pe/dividend_yield
+
+    monkeypatch.setattr("app.universe.fetch_fundamentals", _raising_fetch_fundamentals)
+    monkeypatch.setattr("app.universe.refresh_ticker", _noop_refresh_ticker)
+
+    result = refresh("AAPL")
+
+    assert result["fundamentals"] == "skipped"

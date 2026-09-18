@@ -4,6 +4,7 @@ import { Area, AreaChart, ResponsiveContainer, Tooltip as RechartsTooltip, XAxis
 import { ApiError, deleteTicker, getHistory } from '../api/client'
 import type { PriceBar, UniverseEntry } from '../api/client'
 import { formatPrice } from '../lib/format'
+import { typeLabel } from '../lib/tickerType'
 import { DEFAULT_RANGE, RANGE_KEYS, hasEnoughData, sliceRange, withLiveQuote } from '../lib/ranges'
 import type { RangeKey } from '../lib/ranges'
 import { Tooltip } from './Tooltip'
@@ -213,7 +214,11 @@ export function ChartDialog({ ticker, entry, onClose, onDeleted }: ChartDialogPr
           <div>
             <div className="font-heading font-bold text-xl text-brand-primary">{ticker}</div>
             <div className="text-[0.8125rem] text-[var(--color-muted)] mt-1">
-              {[entry?.short_name, entry?.sector, entry?.quote_type === 'ETF' ? 'ETF' : 'Equity']
+              {[
+                entry?.short_name,
+                entry?.sector,
+                ...(entry !== null && entry.quote_type !== null ? [typeLabel(entry.quote_type)] : [])
+              ]
                 .filter(Boolean)
                 .join(' · ')}
             </div>

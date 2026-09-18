@@ -109,11 +109,21 @@ def run_auto_refresh_if_due(now_utc: datetime, now_et: datetime) -> None:
             tickers = active_universe_tickers()
             errors: list[str] = []
             refreshed = 0
+            # Counts how each ticker's fundamentals resolved (contract 0051) — "info" is the
+            # authoritative .info path, "partial" is at least one crumb-free tier succeeding,
+            # "none" is every tier failing, "skipped" is a row that was already complete.
+            # Whether tier 2 (the search endpoint) works from Render at all is unverifiable
+            # from a laptop where the crumb never fails, so partial > 0 with real sectors on
+            # the deployed app's /ops page is the evidence that it does.
+            fundamentals_counts = {"info": 0, "partial": 0, "none": 0, "skipped": 0}
             for ticker in tickers:
                 try:
                     result = refresh(ticker)
                     if result.get("action") != "none":
                         refreshed += 1
+                    outcome = result.get("fundamentals")
+                    if outcome in fundamentals_counts:
+                        fundamentals_counts[outcome] += 1
                 except Exception:
                     # Broad on purpose: one ticker's refresh failing must not abort the sweep
                     # for the rest, the same discipline app/news.py's per-ticker fetch loop
@@ -126,5 +136,6 @@ def run_auto_refresh_if_due(now_utc: datetime, now_et: datetime) -> None:
             detail["tickers"] = len(tickers)
             detail["refreshed"] = refreshed
             detail["errors"] = errors
+            detail["fundamentals"] = fundamentals_counts
     finally:
         _LOCK.release()

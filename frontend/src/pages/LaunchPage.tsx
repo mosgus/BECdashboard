@@ -1,6 +1,8 @@
+import { useEffect, useState } from 'react'
 import type { JSX } from 'react'
 import { EntryCard } from '../components/EntryCard'
 import { NewsSection } from '../components/NewsSection'
+import { getUniverse } from '../api/client'
 
 const ENTRY_CARDS = [
   {
@@ -22,6 +24,14 @@ const ENTRY_CARDS = [
 ]
 
 export function LaunchPage(): JSX.Element {
+  const [universeLoading, setUniverseLoading] = useState(true)
+
+  useEffect(() => {
+    getUniverse()
+      .then(() => setUniverseLoading(false))
+      .catch(() => setUniverseLoading(false))
+  }, [])
+
   return (
     <div className="min-h-screen bg-background text-foreground">
       <main className="max-w-screen-2xl mx-auto px-4 sm:px-6 pt-16 pb-20">
@@ -33,7 +43,13 @@ export function LaunchPage(): JSX.Element {
             Portfolio construction, optimization, and risk analytics.
           </p>
         </section>
-        <NewsSection />
+        {universeLoading ? (
+          <div className="mt-14 text-center text-sm text-[var(--color-muted)]">
+            Loading universe…
+          </div>
+        ) : (
+          <NewsSection />
+        )}
         <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5 mt-14">
           {ENTRY_CARDS.map((card) => (
             <EntryCard key={card.title} title={card.title} description={card.description} />

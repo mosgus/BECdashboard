@@ -77,24 +77,52 @@ def evict(ticker: str) -> None:
     _cache.pop(ticker.upper(), None)
 
 
-def store_fundamentals(ticker: str, data: dict) -> None:
+def store_fundamentals(ticker: str, data: dict, *, partial: bool = False) -> None:
     """Upsert one row into ticker_fundamentals. No-op when no database is configured —
-    fundamentals have no TTL-cache tier, so with no database there is nowhere to put them."""
+    fundamentals have no TTL-cache tier, so with no database there is nowhere to put them.
+
+    `partial=False` (the default) is today's behaviour, byte for byte: every column is
+    overwritten unconditionally, including with None. An authoritative source (`.info`) is
+    allowed to clear a field — a non-payer really can stop paying a dividend.
+
+    `partial=True` (contract 0051) never overwrites a non-null stored value with None — only
+    the keys whose incoming value is not None land in the UPDATE clause. `fetched_at` is
+    always written regardless; it is `NOT NULL` and records the last time anything succeeded
+    at all, not the last time everything did. A brand-new ticker with no row yet still gets
+    one inserted, with every crumb-gated column `data` doesn't supply left `NULL` — the exact
+    shape an ETF's row already has for genuinely-absent fields, so a partial write is
+    indistinguishable from "not reported" rather than looking like data loss.
+
+    `data` need not carry every column: a key absent entirely and a key present with value
+    None are treated identically by `.get()`, which is what keeps a partial tier-1/tier-2
+    merge (only ever supplying a handful of keys) safe to route through the exact same
+    `record` construction the full `.info` path uses."""
     if not is_enabled():
         return
 
     key = ticker.upper()
-    record = {**data, "ticker": key}
+    record = {col.name: data.get(col.name) for col in TickerFundamentals.__table__.columns}
+    record["ticker"] = key
 
     with session() as db:
         dialect = db.get_bind().dialect.name
         insert_fn = pg_insert if dialect == "postgresql" else sqlite_insert
         stmt = insert_fn(TickerFundamentals).values(record)
-        set_ = {
-            col.name: getattr(stmt.excluded, col.name)
-            for col in TickerFundamentals.__table__.columns
-            if col.name != "ticker"
-        }
+
+        if partial:
+            set_ = {
+                col.name: getattr(stmt.excluded, col.name)
+                for col in TickerFundamentals.__table__.columns
+                if col.name != "ticker" and data.get(col.name) is not None
+            }
+            set_["fetched_at"] = stmt.excluded.fetched_at
+        else:
+            set_ = {
+                col.name: getattr(stmt.excluded, col.name)
+                for col in TickerFundamentals.__table__.columns
+                if col.name != "ticker"
+            }
+
         stmt = stmt.on_conflict_do_update(index_elements=["ticker"], set_=set_)
         db.execute(stmt)
 
@@ -148,21 +176,6 @@ def _fetched_at_as_utc(dt: datetime | None) -> datetime | None:
     if dt is None:
         return None
     return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
-
-
-def get_newest_quote_fetched_at(tickers: list[str]) -> datetime | None:
-    """The most recent fetched_at among ticker_quotes rows for the given tickers, or None
-    when none exist or no database is configured. quotes.refresh_quotes_if_stale uses this to
-    decide whether a refresh is due."""
-    if not is_enabled() or not tickers:
-        return None
-
-    keys = [t.upper() for t in tickers]
-    with session() as db:
-        newest = db.execute(
-            select(func.max(TickerQuote.fetched_at)).where(TickerQuote.ticker.in_(keys))
-        ).scalar()
-    return _fetched_at_as_utc(newest)
 
 
 def get_quotes(tickers: list[str]) -> dict[str, dict]:

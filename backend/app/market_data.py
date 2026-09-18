@@ -65,6 +65,14 @@ def _download_info(ticker: str) -> dict:
     return yf.Ticker(ticker).info
 
 
+def _download_chart_meta(ticker: str) -> dict:
+    return yf.Ticker(ticker).get_history_metadata()
+
+
+def _download_search_quotes(ticker: str) -> list[dict]:
+    return yf.Search(ticker).quotes
+
+
 # --- pure: all the logic, fully tested, no network --------------------------------------
 
 
@@ -149,23 +157,99 @@ def fetch_history(ticker: str, start: date | None = None, end: date | None = Non
     return normalized
 
 
-def fetch_fundamentals(ticker: str) -> dict | None:
-    """Download, validate, extract, and persist fundamentals for ticker. Returns None when
-    Yahoo refuses the request (e.g. the crumb/401 failure that motivated this contract) or
-    the response doesn't look like a real quote — never raises. Fundamentals are best-effort
-    enrichment, not a gate: price history (symbol_has_history) is the sole authority on
-    whether a ticker exists. Nothing is written when this returns None — persisting a row of
-    all-nulls would be indistinguishable from a real ETF's genuinely-absent fields."""
+def fetch_chart_meta(ticker: str) -> dict | None:
+    """Tier 1, crumb-free. yf.Ticker(t).get_history_metadata() — the chart endpoint, the same
+    one yf.download already uses for bars and quotes, so this works from Render's IP where
+    .info 401s (contract 0013). Returns TickerFundamentals-shaped keys, or None on any failure
+    — including the shape an invalid symbol returns, which is a near-empty dict rather than a
+    raised exception, so validity is checked the same way is_valid_symbol already does for
+    `.info`: both dicts use the exact key names regularMarketPrice/shortName."""
     try:
-        info = _download_info(ticker)
+        meta = _download_chart_meta(ticker)
     except (YFException, CurlRequestException):
         return None
 
-    if not is_valid_symbol(info):
+    if not is_valid_symbol(meta):
         return None
 
-    data = extract_fundamentals(ticker, info, datetime.now(timezone.utc))
-    store_fundamentals(ticker, data)
+    return {
+        "short_name": meta.get("shortName"),
+        "long_name": meta.get("longName"),
+        "quote_type": meta.get("instrumentType"),
+        "currency": meta.get("currency"),
+        "exchange": meta.get("exchangeName"),
+        "regular_market_price": meta.get("regularMarketPrice"),
+        "previous_close": meta.get("chartPreviousClose"),
+        "fifty_two_week_high": meta.get("fiftyTwoWeekHigh"),
+        "fifty_two_week_low": meta.get("fiftyTwoWeekLow"),
+    }
+
+
+def fetch_search_profile(ticker: str) -> dict | None:
+    """Tier 2, crumb-free. yf.Search(ticker).quotes — sector and industry for equities. ETFs
+    legitimately carry neither. Returns None on failure or when no quote's symbol matches
+    ticker exactly (case-insensitively) — a search for PBR returns PBR-A second, and blindly
+    taking quotes[0] would eventually write one company's sector onto another's row."""
+    try:
+        quotes = _download_search_quotes(ticker)
+    except (YFException, CurlRequestException):
+        return None
+
+    ticker_upper = ticker.upper()
+    for quote in quotes:
+        symbol = quote.get("symbol")
+        if isinstance(symbol, str) and symbol.upper() == ticker_upper:
+            return {
+                "sector": quote.get("sector"),
+                "industry": quote.get("industry"),
+            }
+
+    return None
+
+
+def fetch_fundamentals(ticker: str) -> dict | None:
+    """Best-effort enrichment, never a gate — price history remains the sole authority on
+    whether a ticker exists (symbol_has_history). Returns the merged row, or None when every
+    tier failed. Never raises.
+
+    `.info` is tried first and, if it succeeds and looks like a real quote, is authoritative:
+    the full row is written exactly as before, overwriting every column — a non-payer really
+    can stop paying a dividend, and only an authoritative source is allowed to record that.
+    Nothing below runs in that case, so the 22 rows already populated from a laptop where the
+    crumb works keep behaving identically.
+
+    When `.info` fails or doesn't validate (the crumb/401 failure from Render's IP that
+    motivated this contract), tiers 1 and 2 run instead. If both fail, nothing is written —
+    the genuinely-unreachable case, preserved. Otherwise what came back is merged (tier 2 over
+    tier 1 for the one overlapping concern, sector/industry) and written as a **partial**:
+    never overwriting a non-null stored value with None (see cache.store_fundamentals)."""
+    info = None
+    try:
+        candidate = _download_info(ticker)
+        if is_valid_symbol(candidate):
+            info = candidate
+    except (YFException, CurlRequestException):
+        pass
+
+    if info is not None:
+        data = extract_fundamentals(ticker, info, datetime.now(timezone.utc))
+        store_fundamentals(ticker, data)
+        return data
+
+    chart_meta = fetch_chart_meta(ticker)
+    search_profile = fetch_search_profile(ticker)
+
+    if chart_meta is None and search_profile is None:
+        return None
+
+    merged: dict = {}
+    if chart_meta is not None:
+        merged.update(chart_meta)
+    if search_profile is not None:
+        merged.update(search_profile)
+
+    data = {"ticker": ticker.upper(), **merged, "fetched_at": datetime.now(timezone.utc)}
+    store_fundamentals(ticker, data, partial=True)
     return data
 
 

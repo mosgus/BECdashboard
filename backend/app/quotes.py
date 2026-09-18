@@ -3,20 +3,38 @@ free tier sleeps after ~15 minutes idle, so a background job would die with it, 
 only when someone actually asks costs nothing when nobody is looking. `is_market_open` and
 `needs_refresh` are pure — time comes in as arguments, never from the clock, the same
 discipline as freshness.py. The one impure function, refresh_quotes_if_stale, is where the
-real clock and the network call live."""
+real clock and the network call live.
 
+Gated on an app_state claim (contract 0051), not on MAX(fetched_at) over ticker_quotes rows —
+a ticker with no quote row at all contributes nothing to a MAX, so adding one could never make
+the batch look stale and the new ticker was skipped until every other ticker's TTL lapsed too.
+The claim is about the batch, not the rows, so a brand-new ticker is no longer invisible to
+the check."""
+
+import threading
 from datetime import datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 import pandas as pd
 import yfinance as yf
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
-from app.cache import get_newest_quote_fetched_at, store_quotes
-from app.db import is_enabled
+from app.db import is_enabled, session
+from app.cache import store_quotes
+from app.models import AppState
 
 QUOTE_TTL_MINUTES = 10
 MARKET_OPEN_ET = time(9, 30)
 MARKET_CLOSE_ET = time(16, 0)
+
+QUOTE_ATTEMPT_KEY = "quote_refresh_attempt"
+
+# One process, one quote refresh at a time — the same non-blocking, claim-first pattern
+# app/autorefresh.py uses, for the same reason: two requests arriving milliseconds apart must
+# not both pass the needs_refresh check and both fetch. A separate lock from autorefresh's own
+# — a running universe sweep must not block a quote refresh, and vice versa.
+_LOCK = threading.Lock()
 
 
 def is_market_open(now_et: datetime) -> bool:
@@ -84,21 +102,61 @@ def fetch_quotes(tickers: list[str]) -> dict[str, tuple[float, datetime]]:
     return quotes
 
 
+def _as_utc(dt: datetime | None) -> datetime | None:
+    """SQLite (used in tests) hands a DateTime(timezone=True) column back naive; Postgres
+    round-trips it tz-aware. value_at is always written from this module's own now_utc
+    argument, itself always UTC, so relabeling a naive read as UTC is a safe relabel, not a
+    guess — the same pattern app/autorefresh.py, app/news.py and app/cache.py use for the
+    same reason."""
+    if dt is None:
+        return None
+    return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
+
+
+def _get_quote_attempt() -> datetime | None:
+    with session() as db:
+        row = db.get(AppState, QUOTE_ATTEMPT_KEY)
+        return _as_utc(row.value_at) if row is not None else None
+
+
+def _set_quote_attempt(value_at: datetime) -> None:
+    with session() as db:
+        dialect = db.get_bind().dialect.name
+        insert_fn = pg_insert if dialect == "postgresql" else sqlite_insert
+        stmt = insert_fn(AppState).values(key=QUOTE_ATTEMPT_KEY, value_at=value_at)
+        stmt = stmt.on_conflict_do_update(index_elements=["key"], set_={"value_at": stmt.excluded.value_at})
+        db.execute(stmt)
+
+
 def refresh_quotes_if_stale(tickers: list[str]) -> None:
-    """The impure composition: read the newest fetched_at, consult needs_refresh, fetch and
-    upsert only if stale. No-op with no database configured — and that check happens before
-    any fetch is attempted, not just before the write, so a degraded deployment never makes
-    the network call at all. The only place in this module that reads the real clock."""
-    if not is_enabled() or not tickers:
-        return
+    """The impure composition: read the last refresh *attempt*, consult needs_refresh, claim
+    before fetching, and upsert only if stale. No-op with no database configured, or when
+    another quote refresh is already running in this process (see _LOCK above) — both checked
+    before any read or write, so a degraded deployment never makes the network call at all.
 
-    now_utc = datetime.now(timezone.utc)
-    now_et = datetime.now(ZoneInfo("America/New_York"))
-    newest_fetched_at = get_newest_quote_fetched_at(tickers)
+    The claim is written before the fetch, not after — same reasoning as
+    autorefresh.run_auto_refresh_if_due: this narrows, but does not eliminate, the race between
+    two visitors landing in the same TTL window, and an attempt that fetched nothing still
+    claims the window so an unquotable ticker can fire at most one attempt per TTL, not one per
+    page load. The only place in this module that reads the real clock."""
+    if not _LOCK.acquire(blocking=False):
+        return  # another visitor's quote refresh is already running in this process
 
-    if not needs_refresh(newest_fetched_at, now_utc, now_et):
-        return
+    try:
+        if not is_enabled() or not tickers:
+            return
 
-    quotes = fetch_quotes(tickers)
-    if quotes:
-        store_quotes(quotes, now_utc)
+        now_utc = datetime.now(timezone.utc)
+        now_et = datetime.now(ZoneInfo("America/New_York"))
+        last_attempt = _get_quote_attempt()
+
+        if not needs_refresh(last_attempt, now_utc, now_et):
+            return
+
+        _set_quote_attempt(now_utc)
+
+        quotes = fetch_quotes(tickers)
+        if quotes:
+            store_quotes(quotes, now_utc)
+    finally:
+        _LOCK.release()

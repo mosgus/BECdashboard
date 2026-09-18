@@ -176,6 +176,76 @@ def test_store_fundamentals_upsert_keeps_second_write(db_mode):
     assert count == 1
 
 
+# --- contract 0051: store_fundamentals(partial=True) never nulls a good stored value -------
+#
+# The regression this guards against: cache.store_fundamentals upserted every column
+# unconditionally. A partial write through that path would blank AAPL's market_cap,
+# trailing_pe and dividend_yield the next time a crumb-free tier ran instead of `.info` —
+# silently destroying every one of the 22 good rows this app already has.
+
+
+def test_store_fundamentals_partial_does_not_null_existing_crumb_gated_fields(db_mode):
+    store_fundamentals("AAPL", extract_fundamentals("AAPL", AAPL_INFO, datetime(2026, 9, 1, tzinfo=timezone.utc)))
+    assert get_fundamentals("AAPL")["market_cap"] == 4849207869440
+
+    # A tier-1/tier-2 style partial payload: only a handful of keys, the crumb-gated ones
+    # entirely absent (not even present as None) — the exact shape fetch_fundamentals's merge
+    # produces when `.info` fails but the chart endpoint and search both succeed.
+    partial_payload = {
+        "ticker": "AAPL",
+        "short_name": "Apple Inc. (renamed)",
+        "sector": "Technology",
+        "fetched_at": datetime(2026, 9, 18, tzinfo=timezone.utc),
+    }
+    store_fundamentals("AAPL", partial_payload, partial=True)
+
+    result = get_fundamentals("AAPL")
+    assert result["short_name"] == "Apple Inc. (renamed)"  # the incoming non-null value landed
+    assert result["market_cap"] == 4849207869440  # untouched
+    assert result["trailing_pe"] == 38.148106  # untouched
+    assert result["dividend_yield"] == 0.33  # untouched
+    assert result["fetched_at"] == datetime(2026, 9, 18)  # always written
+
+
+def test_store_fundamentals_non_partial_does_overwrite_crumb_gated_fields(db_mode):
+    store_fundamentals("AAPL", extract_fundamentals("AAPL", AAPL_INFO, datetime(2026, 9, 1, tzinfo=timezone.utc)))
+    assert get_fundamentals("AAPL")["market_cap"] == 4849207869440
+
+    # partial=False (the default) is today's behaviour: an authoritative .info response that
+    # genuinely has no market cap this time really does clear it.
+    bare_payload = {
+        "ticker": "AAPL",
+        "short_name": "Apple Inc.",
+        "fetched_at": datetime(2026, 9, 18, tzinfo=timezone.utc),
+    }
+    store_fundamentals("AAPL", bare_payload)
+
+    result = get_fundamentals("AAPL")
+    assert result["market_cap"] is None
+    assert result["trailing_pe"] is None
+    assert result["dividend_yield"] is None
+
+
+def test_store_fundamentals_partial_inserts_a_brand_new_row_with_nulls(db_mode):
+    """A brand-new ticker with no row at all still gets one inserted under partial=True, with
+    the crumb-gated columns left NULL — the same shape an ETF's row already has for
+    genuinely-absent fields."""
+    partial_payload = {
+        "ticker": "PBR",
+        "short_name": "Petroleo Brasileiro S.A. Petrob",
+        "quote_type": "EQUITY",
+        "fetched_at": datetime(2026, 9, 18, tzinfo=timezone.utc),
+    }
+    store_fundamentals("PBR", partial_payload, partial=True)
+
+    result = get_fundamentals("PBR")
+    assert result is not None
+    assert result["short_name"] == "Petroleo Brasileiro S.A. Petrob"
+    assert result["market_cap"] is None
+    assert result["trailing_pe"] is None
+    assert result["dividend_yield"] is None
+
+
 # --- 10. clear() leaves fundamentals rows intact in the database --------------------------
 
 
@@ -250,22 +320,32 @@ def test_symbol_has_history_raises_upstream_unavailable_on_request_failure(monke
 # distinguishing exception. fetch_fundamentals no longer decides existence at all —
 # symbol_has_history does (see test_universe.py) — so this is now a plain "couldn't fetch,
 # not an error" case.
+#
+# Contract 0051: an invalid-looking `.info` no longer means "give up" — it falls through to
+# the crumb-free tiers, so these three now also mock those two calls to fail, to exercise the
+# genuinely-unreachable case (every tier fails) rather than accidentally hitting the network.
 
 
 def test_fetch_fundamentals_returns_none_for_invalid_looking_dict(monkeypatch, db_mode):
     monkeypatch.setattr("app.market_data._download_info", lambda ticker: INVALID_INFO)
+    monkeypatch.setattr("app.market_data._download_chart_meta", lambda ticker: {})
+    monkeypatch.setattr("app.market_data._download_search_quotes", lambda ticker: [])
     result = fetch_fundamentals("NOTAREAL")
     assert result is None
 
 
 def test_fetch_fundamentals_returns_none_for_empty_dict(monkeypatch, db_mode):
     monkeypatch.setattr("app.market_data._download_info", lambda ticker: {})
+    monkeypatch.setattr("app.market_data._download_chart_meta", lambda ticker: {})
+    monkeypatch.setattr("app.market_data._download_search_quotes", lambda ticker: [])
     result = fetch_fundamentals("SPY")
     assert result is None
 
 
 def test_fetch_fundamentals_none_writes_no_row(monkeypatch, db_mode):
     monkeypatch.setattr("app.market_data._download_info", lambda ticker: INVALID_INFO)
+    monkeypatch.setattr("app.market_data._download_chart_meta", lambda ticker: {})
+    monkeypatch.setattr("app.market_data._download_search_quotes", lambda ticker: [])
     fetch_fundamentals("NOTAREAL")
     assert get_fundamentals("NOTAREAL") is None
 
@@ -279,6 +359,131 @@ def test_fetch_fundamentals_valid_symbol_stores_and_returns(monkeypatch, db_mode
     assert result["ticker"] == "AAPL"
     assert result["regular_market_price"] == 332.27
     assert get_fundamentals("AAPL") is not None
+
+
+# --- contract 0051: the tiered fetch --------------------------------------------------------
+
+
+CHART_META_PBR = {
+    "shortName": "Petroleo Brasileiro S.A. Petrob",
+    "longName": "Petróleo Brasileiro S.A. - Petrobras",
+    "instrumentType": "EQUITY",
+    "currency": "USD",
+    "exchangeName": "NYQ",
+    "regularMarketPrice": 20.895,
+    "chartPreviousClose": 21.2,
+    "fiftyTwoWeekHigh": 22.24,
+    "fiftyTwoWeekLow": 11.43,
+}
+
+SEARCH_QUOTES_PBR = [
+    {"symbol": "PBR", "sector": "Energy", "industry": "Oil & Gas Integrated", "quoteType": "EQUITY"},
+    {"symbol": "PBR-A", "sector": "Energy", "industry": "Oil & Gas Integrated", "quoteType": "EQUITY"},
+]
+
+
+def test_fetch_search_profile_returns_none_when_symbol_differs(monkeypatch):
+    """The PBR -> PBR-A case: yf.Search("PBR").quotes returns PBR-A second (and sometimes
+    first-ish depending on ranking) — taking quotes[0] blindly would eventually write one
+    company's sector onto another's row, so a search whose *only* match is a different symbol
+    must return None, not that other symbol's data."""
+    from app.market_data import fetch_search_profile
+
+    quotes_missing_pbr = [
+        {"symbol": "PBR-A", "sector": "Energy", "industry": "Oil & Gas Integrated"},
+        {"symbol": "PBRX.JK", "sector": "Consumer Cyclical", "industry": "Apparel Manufacturing"},
+    ]
+    monkeypatch.setattr("app.market_data._download_search_quotes", lambda ticker: quotes_missing_pbr)
+    assert fetch_search_profile("PBR") is None
+
+
+def test_fetch_search_profile_matches_exact_symbol_case_insensitively(monkeypatch):
+    from app.market_data import fetch_search_profile
+
+    monkeypatch.setattr("app.market_data._download_search_quotes", lambda ticker: SEARCH_QUOTES_PBR)
+    result = fetch_search_profile("pbr")
+    assert result == {"sector": "Energy", "industry": "Oil & Gas Integrated"}
+
+
+def test_fetch_chart_meta_maps_tier_one_fields(monkeypatch):
+    from app.market_data import fetch_chart_meta
+
+    monkeypatch.setattr("app.market_data._download_chart_meta", lambda ticker: CHART_META_PBR)
+    result = fetch_chart_meta("PBR")
+    assert result == {
+        "short_name": "Petroleo Brasileiro S.A. Petrob",
+        "long_name": "Petróleo Brasileiro S.A. - Petrobras",
+        "quote_type": "EQUITY",
+        "currency": "USD",
+        "exchange": "NYQ",
+        "regular_market_price": 20.895,
+        "previous_close": 21.2,
+        "fifty_two_week_high": 22.24,
+        "fifty_two_week_low": 11.43,
+    }
+
+
+def test_fetch_chart_meta_returns_none_for_invalid_symbol(monkeypatch):
+    """An invalid symbol doesn't raise from get_history_metadata() — it comes back a
+    near-empty dict, the same trap is_valid_symbol already exists to catch for `.info`."""
+    from app.market_data import fetch_chart_meta
+
+    monkeypatch.setattr(
+        "app.market_data._download_chart_meta",
+        lambda ticker: {"YF repair?": False, "tradingPeriods": "<lazy-loaded>"},
+    )
+    assert fetch_chart_meta("NOTAREALTICKERXYZ") is None
+
+
+def test_fetch_fundamentals_returns_none_when_all_three_tiers_fail(monkeypatch, db_mode):
+    """Acceptance criterion 6: every tier fails -> None, and nothing is written."""
+    monkeypatch.setattr("app.market_data._download_info", lambda ticker: INVALID_INFO)
+    monkeypatch.setattr("app.market_data._download_chart_meta", lambda ticker: {})
+    monkeypatch.setattr("app.market_data._download_search_quotes", lambda ticker: [])
+
+    result = fetch_fundamentals("NOTAREAL")
+
+    assert result is None
+    assert get_fundamentals("NOTAREAL") is None
+
+
+def test_fetch_fundamentals_merges_partial_tiers_when_info_fails(monkeypatch, db_mode):
+    monkeypatch.setattr("app.market_data._download_info", lambda ticker: INVALID_INFO)
+    monkeypatch.setattr("app.market_data._download_chart_meta", lambda ticker: CHART_META_PBR)
+    monkeypatch.setattr("app.market_data._download_search_quotes", lambda ticker: SEARCH_QUOTES_PBR)
+
+    result = fetch_fundamentals("PBR")
+
+    assert result is not None
+    assert result["short_name"] == "Petroleo Brasileiro S.A. Petrob"
+    assert result["sector"] == "Energy"
+    assert result["industry"] == "Oil & Gas Integrated"
+    assert "market_cap" not in result  # never invented from crumb-free data
+
+    stored = get_fundamentals("PBR")
+    assert stored["short_name"] == "Petroleo Brasileiro S.A. Petrob"
+    assert stored["sector"] == "Energy"
+    assert stored["market_cap"] is None  # not fabricated; genuinely not fetched
+
+
+def test_fetch_fundamentals_does_not_call_crumb_free_tiers_when_info_succeeds(monkeypatch, db_mode):
+    """Acceptance criterion 7: when `.info` succeeds, tier 1 and tier 2 are not called at all —
+    one request, as today."""
+
+    def _raising_chart_meta(ticker):
+        raise AssertionError("fetch_chart_meta must not be called when .info succeeds")
+
+    def _raising_search_quotes(ticker):
+        raise AssertionError("fetch_search_profile must not be called when .info succeeds")
+
+    monkeypatch.setattr("app.market_data._download_info", lambda ticker: AAPL_INFO)
+    monkeypatch.setattr("app.market_data._download_chart_meta", _raising_chart_meta)
+    monkeypatch.setattr("app.market_data._download_search_quotes", _raising_search_quotes)
+
+    result = fetch_fundamentals("AAPL")
+
+    assert result["ticker"] == "AAPL"
+    assert result["market_cap"] == 4849207869440
 
 
 def test_fetch_history_stores_and_returns_normalized_frame(monkeypatch, db_mode):
