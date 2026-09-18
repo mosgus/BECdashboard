@@ -24,7 +24,7 @@ from app.quotes import QUOTE_TTL_MINUTES, is_market_open, refresh_quote_for, ref
 
 logger = logging.getLogger(__name__)
 
-HISTORY_START = date(2016, 1, 1)
+HISTORY_START = date(2020, 1, 1)
 
 
 class UnknownSymbol(Exception):
