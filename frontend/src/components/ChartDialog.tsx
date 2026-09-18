@@ -196,7 +196,7 @@ export function ChartDialog({ ticker, entry, onClose, onDeleted }: ChartDialogPr
 
   return (
     <div
-      className="fixed inset-0 bg-foreground/35 flex items-center justify-center px-4 z-[100] overflow-y-auto"
+      className="fixed inset-0 bg-overlay flex items-center justify-center px-4 z-[100] overflow-y-auto"
       onClick={(event) => {
         if (event.target === event.currentTarget) handleClose()
       }}
@@ -335,7 +335,7 @@ export function ChartDialog({ ticker, entry, onClose, onDeleted }: ChartDialogPr
 
       {confirmOpen && (
         <div
-          className="fixed inset-0 bg-foreground/35 flex items-center justify-center px-4 z-[110]"
+          className="fixed inset-0 bg-overlay flex items-center justify-center px-4 z-[110]"
           onClick={(event) => {
             if (event.target === event.currentTarget && deleteState.status !== 'deleting') {
               setConfirmOpen(false)

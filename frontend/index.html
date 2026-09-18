@@ -2,6 +2,22 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <!--
+      Sets data-theme before first paint, so a saved dark preference never flashes light before
+      React mounts and the app-level theme logic (lib/theme.ts) takes over. This deliberately
+      duplicates a little of that logic rather than importing it — a module import cannot run
+      before paint — so do not "deduplicate" this away.
+    -->
+    <script>
+      (function () {
+        try {
+          var p = localStorage.getItem('bec-theme');
+          var dark = p === 'dark' || (p === 'system' &&
+            window.matchMedia('(prefers-color-scheme: dark)').matches);
+          if (dark) document.documentElement.setAttribute('data-theme', 'dark');
+        } catch (e) {}
+      })();
+    </script>
     <link rel="icon" type="image/png" href="/logo-nav.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500&family=Outfit:wght@400;600;700&family=Roboto:wght@400;500&display=swap" rel="stylesheet" />

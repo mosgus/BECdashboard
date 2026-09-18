@@ -242,3 +242,63 @@ export async function getStrip(): Promise<StripResponse> {
 export async function getNews(limit: number, maxPerTicker: number): Promise<NewsResponse> {
   return request<NewsResponse>(`/news?limit=${limit}&max_per_ticker=${maxPerTicker}`)
 }
+
+export interface OpsDatabaseStatus {
+  connected: boolean
+  revision: string | null
+}
+
+export interface OpsUniverseStatus {
+  active_tickers: number
+  total_bars: number
+  newest_bar_date: string | null
+}
+
+export interface OpsNewsStatus {
+  article_count: number
+  newest_fetched_at: string | null
+}
+
+export interface OpsBriefingStatus {
+  exists: boolean
+  model: string | null
+  created_at: string | null
+}
+
+export interface OpsWindowsStatus {
+  auto_refresh_last_claim: string | null
+  news_refresh_last_claim: string | null
+  current_window_start: string | null
+}
+
+export interface OpsStatus {
+  database: OpsDatabaseStatus
+  universe: OpsUniverseStatus
+  news: OpsNewsStatus
+  briefing: OpsBriefingStatus
+  gemini_key_configured: boolean
+  python: string
+  windows: OpsWindowsStatus
+}
+
+export interface JobRun {
+  id: number
+  job_name: string
+  started_at: string
+  finished_at: string | null
+  status: string
+  duration_ms: number | null
+  detail: Record<string, unknown> | null
+}
+
+export interface JobRunsResponse {
+  job_runs: JobRun[]
+}
+
+export async function getOpsStatus(): Promise<OpsStatus> {
+  return request<OpsStatus>('/ops/status')
+}
+
+export async function getJobRuns(limit: number): Promise<JobRunsResponse> {
+  return request<JobRunsResponse>(`/ops/job_runs?limit=${limit}`)
+}

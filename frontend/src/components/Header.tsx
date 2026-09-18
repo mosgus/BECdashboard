@@ -21,7 +21,7 @@ export function Header(): JSX.Element {
             <NavItem label="Universe" to="/universe" />
             <NavItem label="Portfolios" />
             <NavItem label="Research" />
-            <NavItem label="Settings & Ops" icon title="Settings & Ops" />
+            <NavItem label="Settings & Ops" icon title="Settings & Ops" to="/ops" />
           </nav>
           <BackendStatus />
         </div>

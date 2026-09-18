@@ -67,13 +67,44 @@ docstrings carry the reasoning instead.
 
 ```
 App.tsx        Header + TickerStrip (chrome, outside <Routes>) + the routes
-pages/         LaunchPage, UniversePage
+pages/         LaunchPage, UniversePage, OpsPage
 components/    chrome:    Header, NavItem, SettingsIcon, BackendStatus, Tooltip, DownloadIcon, TickerStrip
                launch:    NewsSection, EntryCard
                universe:  UniverseTable, ChartDialog, FilterDialog, AddTickerForm
-lib/           pure helpers — change, filters, format, ranges, relativeTime
+               ops:       ThemeSelector, SystemHealthCard, JobRunsCard
+lib/           pure helpers — change, filters, format, opsFormat, ranges, relativeTime, theme
 api/client.ts  the single fetch boundary: base URL, ApiError, GET-only transient retry (0041)
+index.html     an inline pre-paint script that sets data-theme from localStorage (see below)
 ```
+
+**`/ops`'s cards show their errors; everything else hides them.** `TickerStrip` and `NewsSection`
+return `null` on a failed fetch so the launch page never breaks because a market endpoint is slow.
+`SystemHealthCard` and `JobRunsCard` deliberately invert that — a page whose job is to tell you the
+system is unwell must not go blank exactly when it is. If that reads as an inconsistency later, it is
+not one.
+
+**Theming is nine custom properties and one attribute.** `globals.css` declares the palette in
+`:root`, overrides all nine under `:root[data-theme="dark"]`, and `@theme inline` maps every Tailwind
+utility onto them — so setting one attribute on `<html>` flips the entire app, and no component
+carries a dark-mode variant. Light mode **removes** the attribute rather than setting
+`data-theme="light"`; there is no light block and there must not need to be.
+
+Three consequences worth keeping:
+
+- **A backdrop must never derive from `--color-text`.** All three dialog scrims were
+  `bg-foreground/35`, which inverts to a *pale wash over a dark page* — a scrim that lightens what it
+  is meant to dim. They use `--color-modal-overlay` instead, dark in both themes. The source token is
+  named `--color-modal-overlay` rather than `--color-overlay` precisely so the `@theme inline`
+  mapping is not `--color-overlay: var(--color-overlay)`, which is a self-reference that resolves to
+  nothing.
+- **The pre-paint script in `index.html` duplicates `lib/theme.ts` on purpose.** A module import
+  cannot run before first paint, so deduplicating it reintroduces a white flash on every dark-mode
+  load. Its `try/catch` is required: `localStorage` throws outright in some privacy modes, and an
+  uncaught throw there runs before React mounts and leaves a blank page. `readStoredPreference` /
+  `storePreference` carry the same guard on the React side.
+- **`resolveTheme(pref, prefersDark)` takes the media-query result as an argument**, the same
+  discipline as `now` everywhere else in `lib/`. The subscription lives in `ThemeSelector`, and exists
+  only while the preference is `system` — without it "System" would only apply at page load.
 
 **Every `lib/` function takes `now` as an argument and never reads the clock.** That is what makes
 them testable, and it is the same discipline `freshness.py` and `schedule.py` follow on the backend.

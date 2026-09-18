@@ -22,7 +22,7 @@
   --color-border:   #dde3f0;
 
   /* Text */
-  --color-text:     #0C2340;
+  --color-text: #cdd5df;
   --color-muted:    #4a5d7a;
 
   /* Semantic */
@@ -36,6 +36,33 @@
   /* Typography */
   --font-heading: "Outfit", system-ui, sans-serif;
   --font-body:    "DM Sans", system-ui, sans-serif;
+
+  /* Modal backdrop. Its own token rather than deriving from --color-text/--color-foreground
+     (contract 0045): --color-text flips light in dark mode, and a backdrop that inverts along
+     with it would lighten the page it is meant to dim instead of darkening it. This value is
+     the wash the three dialog backdrops used before this token existed — #0C2340 at 35% — so
+     light mode is unchanged. Named --color-modal-overlay (not --color-overlay) so the @theme
+     inline mapping below is a reference to a different property, not a same-name
+     self-reference. */
+  --color-modal-overlay: rgb(12 35 64 / 0.35);
+}
+
+/* Starting point only (contract 0045) — nine lines in one block, deliberately not scattered
+   anywhere else, so the next adjustment is a one-block edit rather than an archaeology
+   exercise. --color-primary lightens because it is also used as text (text-brand-primary);
+   left navy it would be unreadable on a dark background. --color-accent is unchanged — the
+   gold already reads on dark. */
+:root[data-theme="dark"] {
+  --color-bg:       #0d1117;
+  --color-surface:  #161b22;
+  --color-border:   #262d38;
+  --color-text: #f3e6e6;
+  --color-muted:    #8b98a9;
+  --color-primary: #7facf4;
+  --color-accent:   #f2a900;
+  --color-positive: #3fb950;
+  --color-negative: #f85149;
+  --color-modal-overlay: rgb(0 0 0 / 0.6);
 }
 
 @theme inline {
@@ -47,6 +74,7 @@
   --color-brand-border:   var(--color-border);
   --color-brand-positive: var(--color-positive);
   --color-brand-negative: var(--color-negative);
+  --color-overlay:        var(--color-modal-overlay);
 
   /* Declared here rather than beside --font-heading/--font-body because @theme is what
      generates the `font-briefing` utility; a plain custom property would not. */

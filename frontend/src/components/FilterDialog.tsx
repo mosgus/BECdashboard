@@ -136,7 +136,7 @@ export function FilterDialog({ open, rows, filters, onChange, onClose }: FilterD
 
   return (
     <div
-      className="fixed inset-0 bg-foreground/35 flex items-start justify-center pt-16 px-4 z-[100]"
+      className="fixed inset-0 bg-overlay flex items-start justify-center pt-16 px-4 z-[100]"
       onClick={(event) => {
         if (event.target === event.currentTarget) handleClose()
       }}
