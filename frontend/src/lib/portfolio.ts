@@ -2,123 +2,251 @@ import type { UniverseEntry } from '../api/client'
 
 export interface Position {
   ticker: string
-  shares: number
+  weight: number
+  shares?: number
 }
 
 export interface Portfolio {
   id: string
   name: string
-  cash: number
+  cashWeight: number
   positions: Position[]
   updatedAt: string
 }
 
-export interface ValuedRow {
+export interface LegacyPosition {
   ticker: string
   shares: number
+}
+
+export interface LegacyPortfolio {
+  id: string
+  name: string
+  cash: number
+  positions: LegacyPosition[]
+  updatedAt: string
+}
+
+export type StoredPortfolio = Portfolio | LegacyPortfolio
+
+export interface ValuedRow {
+  ticker: string
+  shares: number | null
   name: string | null
-  price: number | null
-  value: number | null
-  weight: number | null
+  weight: number
   missing: boolean
 }
 
 export interface ValuedPortfolio {
   rows: ValuedRow[]
-  positionsValue: number
-  cash: number
-  totalValue: number
-  cashWeight: number | null
+  cashWeight: number
   missingTickers: string[]
 }
 
 /** current_price ?? last_close ?? regular_market_price — the same fallback chain
- *  UniverseTable.tsx:120 already uses. Do not invent a second one. */
+ * UniverseTable.tsx uses. This remains useful only when converting a legacy shares model. */
 export function positionPrice(entry: UniverseEntry | undefined): number | null {
   if (entry === undefined) return null
   return entry.current_price ?? entry.last_close ?? entry.regular_market_price
 }
 
-/** Pure: no clock, no storage, no network. The Universe arrives as a Map the caller built,
- * once, from GET /universe — this never fetches.
- *
- * A position can reference a ticker no longer in the Universe (contract 0038 permanently
- * deletes tickers; portfolios live in localStorage and survive that entirely). Such a row gets
- * null price/value/weight and missing: true, and never contributes to positionsValue —
- * treating a missing price as zero would silently understate the total and skew every other
- * weight. totalValue is honest about what it could actually price.
- *
- * Weights are against positionsValue + cash, never positionsValue alone — cash is part of the
- * portfolio, so position weights sum to less than 100% whenever cash is non-zero, and
- * cashWeight is the remainder. */
-export function valuePortfolio(portfolio: Portfolio, byTicker: Map<string, UniverseEntry>): ValuedPortfolio {
-  const { cash } = portfolio
-  const missingTickers: string[] = []
-  let positionsValue = 0
+function isFinitePositive(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0
+}
 
-  const priced = portfolio.positions.map((position) => {
+function isFiniteNonNegative(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0
+}
+
+/** Convert the deployed shares-and-cash shape into the allocation model without mutating it.
+ * A missing or unusable price makes the conversion unsafe, so null preserves the old record. */
+export function migrateLegacyPortfolio(
+  legacy: LegacyPortfolio,
+  byTicker: Map<string, UniverseEntry>,
+): Portfolio | null {
+  if (
+    typeof legacy !== 'object' ||
+    legacy === null ||
+    typeof legacy.id !== 'string' ||
+    typeof legacy.name !== 'string' ||
+    typeof legacy.updatedAt !== 'string' ||
+    !isFiniteNonNegative(legacy.cash) ||
+    !Array.isArray(legacy.positions)
+  ) {
+    return null
+  }
+
+  const seen = new Set<string>()
+  if (legacy.positions.length === 0) {
+    return {
+      id: legacy.id,
+      name: legacy.name,
+      cashWeight: 100,
+      positions: [],
+      updatedAt: legacy.updatedAt,
+    }
+  }
+
+  const valued: Array<{ ticker: string; shares: number; value: number }> = []
+  for (const position of legacy.positions) {
+    if (
+      typeof position !== 'object' ||
+      position === null ||
+      typeof position.ticker !== 'string' ||
+      position.ticker === '' ||
+      seen.has(position.ticker) ||
+      !isFinitePositive(position.shares)
+    ) {
+      return null
+    }
+    seen.add(position.ticker)
+
+    const price = positionPrice(byTicker.get(position.ticker))
+    if (!isFinitePositive(price)) return null
+    const value = position.shares * price
+    if (!isFinitePositive(value)) return null
+    valued.push({ ticker: position.ticker, shares: position.shares, value })
+  }
+
+  const positionsValue = valued.reduce((sum, position) => sum + position.value, 0)
+  const totalValue = positionsValue + legacy.cash
+  if (!Number.isFinite(totalValue) || !(totalValue > 0)) return null
+
+  const positions = valued.map((position) => ({
+    ticker: position.ticker,
+    shares: position.shares,
+    weight: (position.value / totalValue) * 100,
+  }))
+  const cashWeight = 100 - positions.reduce((sum, position) => sum + position.weight, 0)
+
+  if (!Number.isFinite(cashWeight) || cashWeight < 0) return null
+
+  return {
+    id: legacy.id,
+    name: legacy.name,
+    cashWeight,
+    positions,
+    updatedAt: legacy.updatedAt,
+  }
+}
+
+/** Presentation only: saved allocation weights are authoritative and never recalculate from
+ * quotes. Universe data supplies a display name and the missing-ticker warning only. */
+export function valuePortfolio(portfolio: Portfolio, byTicker: Map<string, UniverseEntry>): ValuedPortfolio {
+  const missingTickers: string[] = []
+  const rows = portfolio.positions.map((position) => {
     const entry = byTicker.get(position.ticker)
     const missing = entry === undefined
     if (missing) missingTickers.push(position.ticker)
-
-    const price = positionPrice(entry)
-    const value = price === null ? null : price * position.shares
-    if (value !== null) positionsValue += value
-
     return {
       ticker: position.ticker,
-      shares: position.shares,
+      shares: position.shares ?? null,
       name: entry?.short_name ?? null,
-      price,
-      value,
+      weight: position.weight,
       missing,
     }
   })
 
-  const totalValue = positionsValue + cash
+  return { rows, cashWeight: portfolio.cashWeight, missingTickers }
+}
 
-  const rows: ValuedRow[] = priced.map((row) => ({
-    ...row,
-    weight: row.value === null || totalValue <= 0 ? null : (row.value / totalValue) * 100,
-  }))
+function isValidCurrentPosition(value: unknown): value is Position {
+  if (typeof value !== 'object' || value === null) return false
+  const candidate = value as Record<string, unknown>
+  return (
+    typeof candidate.ticker === 'string' &&
+    candidate.ticker !== '' &&
+    typeof candidate.weight === 'number' &&
+    Number.isFinite(candidate.weight) &&
+    candidate.weight > 0 &&
+    (candidate.shares === undefined || (typeof candidate.shares === 'number' && Number.isFinite(candidate.shares) && candidate.shares > 0))
+  )
+}
 
-  // totalValue <= 0 covers the empty-portfolio case (no positions, no cash) and the unusual
-  // case of cash exactly offsetting a negative — either way this stays null rather than
-  // dividing by zero. Cash of exactly 0 against a positive total is a real, well-defined 0%.
-  const cashWeight = totalValue > 0 ? (cash / totalValue) * 100 : cash === 0 ? 0 : null
+function isValidCurrentPortfolio(value: unknown): value is Portfolio {
+  if (typeof value !== 'object' || value === null) return false
+  const candidate = value as Record<string, unknown>
+  if ('cash' in candidate || 'totalValue' in candidate) return false
+  if (
+    typeof candidate.id !== 'string' ||
+    typeof candidate.name !== 'string' ||
+    typeof candidate.cashWeight !== 'number' ||
+    !Number.isFinite(candidate.cashWeight) ||
+    candidate.cashWeight < 0 ||
+    !Array.isArray(candidate.positions) ||
+    !candidate.positions.every(isValidCurrentPosition) ||
+    typeof candidate.updatedAt !== 'string'
+  ) {
+    return false
+  }
+  const positions = candidate.positions as Position[]
+  if (new Set(positions.map((position) => position.ticker)).size !== positions.length) return false
+  const total = candidate.cashWeight + positions.reduce((sum, position) => sum + position.weight, 0)
+  return Math.abs(total - 100) <= 0.01
+}
+
+/** Append an allocation using only available cash and preserve the 100% invariant exactly. */
+export function addPositionUsingCash(portfolio: Portfolio, position: Position): Portfolio | null {
+  if (!isValidCurrentPortfolio(portfolio) || !isValidCurrentPosition(position)) return null
+  if (portfolio.positions.some((existing) => existing.ticker === position.ticker)) return null
+  if (position.weight > portfolio.cashWeight) return null
+
+  const positions = [...portfolio.positions, position]
+  const cashWeight = 100 - positions.reduce((sum, next) => sum + next.weight, 0)
+  if (!Number.isFinite(cashWeight) || cashWeight < 0) return null
 
   return {
-    rows,
-    positionsValue,
-    cash,
-    totalValue,
+    id: portfolio.id,
+    name: portfolio.name,
     cashWeight,
-    missingTickers,
+    positions,
+    updatedAt: portfolio.updatedAt,
   }
 }
 
-// --- Composer (contract 0050): shares and weight cannot both be free inputs, so entry happens
-// in one mode at a time and the other side is derived. Nothing here changes Position/Portfolio
-// shape — a stored weight would describe what was intended the day it was typed, so weight mode
-// converts to shares at entry time and discards itself (REBUILD.md: shares are the stored
-// truth, weights are derived). ---------------------------------------------------------------
+/** Remove an allocation and return its saved weight to cash without mutating the input. */
+export function removePositionToCash(portfolio: Portfolio, ticker: string): Portfolio | null {
+  if (!isValidCurrentPortfolio(portfolio)) return null
+  const index = portfolio.positions.findIndex((position) => position.ticker === ticker)
+  if (index === -1) return null
 
-/** Weight of a value against a portfolio total, in percent units (33.3 means 33.3%) — the
- * units lib/format.ts's formatPercent already expects. null when the total is not positive, so
- * an empty or fully-unpriced draft yields "—" rather than NaN or Infinity. */
+  const positions = portfolio.positions.filter((_, positionIndex) => positionIndex !== index)
+  const cashWeight = 100 - positions.reduce((sum, position) => sum + position.weight, 0)
+  if (!Number.isFinite(cashWeight) || cashWeight < 0) return null
+
+  return {
+    id: portfolio.id,
+    name: portfolio.name,
+    cashWeight,
+    positions,
+    updatedAt: portfolio.updatedAt,
+  }
+}
+
 export function weightOf(value: number | null, totalValue: number): number | null {
   if (value === null || !(totalValue > 0)) return null
   return (value / totalValue) * 100
 }
 
-/** Shares implied by a target weight. null when price is null or <= 0, when totalValue is not
- * positive, or when weightPercent is not finite — every path that would otherwise divide by
- * zero or propagate a non-finite input into the draft. */
-export function sharesForWeight(weightPercent: number, totalValue: number, price: number | null): number | null {
-  if (price === null || !(price > 0)) return null
-  if (!(totalValue > 0)) return null
-  if (!Number.isFinite(weightPercent)) return null
-  return (weightPercent / 100) * totalValue / price
+export function toFieldText(value: number, maxDecimals: number): string {
+  if (!Number.isFinite(value)) return ''
+  return value.toFixed(maxDecimals).replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '')
+}
+
+function parseFiniteOrNull(raw: string): number | null {
+  if (raw.trim() === '') return null
+  const value = Number(raw)
+  return Number.isFinite(value) ? value : null
+}
+
+function parseFinitePositive(raw: string): number | null {
+  const value = parseFiniteOrNull(raw)
+  return value !== null && value > 0 ? value : null
+}
+
+function parseFiniteNonNegative(raw: string): number | null {
+  const value = parseFiniteOrNull(raw)
+  return value !== null && value >= 0 ? value : null
 }
 
 export type EntryMode = 'shares' | 'weight'
@@ -134,14 +262,9 @@ export interface DraftSummary {
   rows: Array<{
     id: string
     ticker: string
-    price: number | null
     shares: number | null
-    value: number | null
     weight: number | null
   }>
-  cash: number
-  positionsValue: number
-  totalValue: number
   cashWeight: number | null
   allocatedPercent: number | null
   remainderPercent: number | null
@@ -149,127 +272,71 @@ export interface DraftSummary {
   problem: string | null
 }
 
-/** A computed number as text for a controlled number input (contract 0053, defect 3). Plain
- * digits only — no thousands separators (a "1,000" would parse back as NaN) and no exponent
- * (a number input rejects "1e+21"), which is why this uses toFixed + trimming rather than a
- * locale-aware formatter: those add exactly the punctuation that breaks re-parsing a number
- * input's own value back into a number. Trailing zeros are trimmed — 0.5 stays "0.5", not
- * "0.500000" — and non-finite input (NaN, Infinity, -Infinity) returns '' rather than the
- * literal word "NaN" or "Infinity" landing in a text box.
- *
- * Not a display formatter — lib/format.ts is for reading, this is for re-parsing. Applied
- * only to values that already exist; the "leave it empty when it cannot be computed" rule
- * from contract 0050 is unchanged, so a null upstream value must still resolve to '' before
- * it ever reaches this function, never be coerced through it as a stand-in for "unknown". */
-export function toFieldText(value: number, maxDecimals: number): string {
-  if (!Number.isFinite(value)) return ''
-  return value.toFixed(maxDecimals).replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '')
-}
-
-function parseFiniteOrNull(raw: string): number | null {
-  if (raw.trim() === '') return null
-  const n = Number(raw)
-  return Number.isFinite(n) ? n : null
-}
-
-function parseFinitePositive(raw: string): number | null {
-  const n = parseFiniteOrNull(raw)
-  return n !== null && n > 0 ? n : null
-}
-
-/** Pure: no clock, no storage, no network, no crypto — row ids arrive on the draft. Every
- * numeric field crosses this boundary as raw text, not a number (fix 2: a controlled number
- * input bound directly to a number cannot hold an intermediate value like "1234." — the DOM
- * reports "" there, which becomes 0 and silently wipes what was typed).
- *
- * canCreate/problem check conditions in a fixed order and report the first one unmet, so a
- * disabled Create button always has a stated reason next to it. */
+/** Pure composer validation. Weight mode never reads prices; shares mode uses them once to
+ * derive the initial allocation that is saved with the entered shares. */
 export function summariseDraft(
-  draft: { name: string; mode: EntryMode; totalValue: string; cash: string; rows: DraftRow[] },
+  draft: { name: string; mode: EntryMode; cash: string; rows: DraftRow[] },
   byTicker: Map<string, UniverseEntry>,
 ): DraftSummary {
-  if (draft.mode === 'shares') {
-    const cashParsed = draft.cash.trim() === '' ? 0 : parseFiniteOrNull(draft.cash)
-    const cash = cashParsed ?? 0
-
-    const rowResults = draft.rows.map((row) => {
-      const price = positionPrice(byTicker.get(row.ticker))
-      const shares = parseFiniteOrNull(row.shares)
-      const value = shares !== null && price !== null ? shares * price : null
-      return { id: row.id, ticker: row.ticker, price, shares, value }
-    })
-
-    const positionsValue = rowResults.reduce((sum, row) => sum + (row.value ?? 0), 0)
-    const totalValue = positionsValue + cash
-
-    const rows = rowResults.map((row) => ({ ...row, weight: weightOf(row.value, totalValue) }))
-    const cashWeight = weightOf(cash, totalValue)
+  if (draft.mode === 'weight') {
+    const cashWeight = parseFiniteNonNegative(draft.cash)
+    const rows = draft.rows.map((row) => ({
+      id: row.id,
+      ticker: row.ticker,
+      shares: null,
+      weight: parseFinitePositive(row.weight),
+    }))
+    const allocatedPercent = (cashWeight ?? 0) + rows.reduce((sum, row) => sum + (row.weight ?? 0), 0)
+    const remainderPercent = 100 - allocatedPercent
 
     let problem: string | null = null
     if (draft.name.trim() === '') problem = 'Give the portfolio a name'
     else if (draft.rows.some((row) => row.ticker === '')) problem = 'Choose a ticker for every asset'
-    else if (draft.rows.some((row) => parseFinitePositive(row.shares) === null)) problem = 'Every asset needs a share count'
-    else if (cashParsed === null) problem = 'Cash must be a valid number'
+    else if (cashWeight === null) problem = 'Cash must be a valid percentage'
+    else if (draft.rows.some((row) => parseFinitePositive(row.weight) === null)) problem = 'Every asset needs a strictly-positive weight'
+    else if (Math.abs(allocatedPercent - 100) > 0.01) problem = 'Weights must add up to 100%'
 
     return {
       rows,
-      cash,
-      positionsValue,
-      totalValue,
       cashWeight,
-      allocatedPercent: null,
-      remainderPercent: null,
+      allocatedPercent,
+      remainderPercent,
       canCreate: problem === null,
       problem,
     }
   }
 
-  // Weight mode: totalValue is an independent input (what the weights are measured against),
-  // not derived from the rows — every row and cash express a percent of it.
-  const totalValueParsed = parseFinitePositive(draft.totalValue)
-  const totalValue = totalValueParsed ?? 0
-  const cashPercentParsed = draft.cash.trim() === '' ? 0 : parseFiniteOrNull(draft.cash)
-  const cashPercent = cashPercentParsed ?? 0
-  const cash = totalValue > 0 ? totalValue * (cashPercent / 100) : 0
-
-  const rowResults = draft.rows.map((row) => {
+  const cashDollars = draft.cash.trim() === '' ? 0 : parseFiniteNonNegative(draft.cash)
+  const preliminary = draft.rows.map((row) => {
+    const shares = parseFinitePositive(row.shares)
     const price = positionPrice(byTicker.get(row.ticker))
-    const weightParsed = parseFiniteOrNull(row.weight)
-    const value = totalValue > 0 && weightParsed !== null ? totalValue * (weightParsed / 100) : null
-    const shares = weightParsed !== null ? sharesForWeight(weightParsed, totalValue, price) : null
-    return { id: row.id, ticker: row.ticker, price, shares, value, weightParsed }
+    const value = shares !== null && isFinitePositive(price) ? shares * price : null
+    return { id: row.id, ticker: row.ticker, shares, price, value }
   })
-
-  const positionsValue = rowResults.reduce((sum, row) => sum + (row.value ?? 0), 0)
-  const allocatedPercent = cashPercent + rowResults.reduce((sum, row) => sum + (row.weightParsed ?? 0), 0)
-  const remainderPercent = 100 - allocatedPercent
-
-  const rows = rowResults.map((row) => ({
+  const positionsValue = preliminary.reduce((sum, row) => sum + (row.value ?? 0), 0)
+  const totalValue = positionsValue + (cashDollars ?? 0)
+  const rows = preliminary.map((row) => ({
     id: row.id,
     ticker: row.ticker,
-    price: row.price,
     shares: row.shares,
-    value: row.value,
-    weight: row.weightParsed,
+    weight: row.value !== null && totalValue > 0 ? (row.value / totalValue) * 100 : null,
   }))
+  const cashWeight = cashDollars !== null && totalValue > 0 ? (cashDollars / totalValue) * 100 : null
+  const allocatedPercent = cashWeight === null ? null : cashWeight + rows.reduce((sum, row) => sum + (row.weight ?? 0), 0)
 
   let problem: string | null = null
   if (draft.name.trim() === '') problem = 'Give the portfolio a name'
   else if (draft.rows.some((row) => row.ticker === '')) problem = 'Choose a ticker for every asset'
-  else if (totalValueParsed === null) problem = 'Set a total portfolio value'
-  else if (cashPercentParsed === null) problem = 'Cash must be a valid percentage'
-  else if (draft.rows.some((row) => parseFinitePositive(row.weight) === null)) problem = 'Every asset needs a target weight'
-  else if (draft.rows.some((row) => positionPrice(byTicker.get(row.ticker)) === null)) problem = 'One of your assets has no price available'
-  else if (Math.abs(allocatedPercent - 100) > 0.01) problem = 'Weights must add up to 100%'
+  else if (cashDollars === null) problem = 'Cash must be a non-negative number'
+  else if (draft.rows.some((row) => parseFinitePositive(row.shares) === null)) problem = 'Every asset needs a strictly-positive share count'
+  else if (draft.rows.some((row) => !isFinitePositive(positionPrice(byTicker.get(row.ticker))))) problem = 'Every asset needs a usable current price'
+  else if (!(totalValue > 0) || !Number.isFinite(totalValue)) problem = 'The initial allocation must be greater than zero'
 
   return {
     rows,
-    cash,
-    positionsValue,
-    totalValue,
-    cashWeight: cashPercentParsed,
+    cashWeight,
     allocatedPercent,
-    remainderPercent,
+    remainderPercent: allocatedPercent === null ? null : 100 - allocatedPercent,
     canCreate: problem === null,
     problem,
   }

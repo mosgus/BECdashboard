@@ -1,4 +1,4 @@
-import type { Portfolio, Position } from './portfolio'
+import type { LegacyPortfolio, Portfolio, Position, StoredPortfolio } from './portfolio'
 
 export const PORTFOLIO_STORAGE_KEY = 'bec-portfolios'
 
@@ -6,13 +6,49 @@ function isFiniteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value)
 }
 
-function isValidPosition(value: unknown): value is Position {
+function isValidCurrentPosition(value: unknown): value is Position {
+  if (typeof value !== 'object' || value === null) return false
+  const candidate = value as Record<string, unknown>
+  return (
+    typeof candidate.ticker === 'string' &&
+    candidate.ticker !== '' &&
+    isFiniteNumber(candidate.weight) &&
+    candidate.weight > 0 &&
+    (candidate.shares === undefined || (isFiniteNumber(candidate.shares) && candidate.shares > 0))
+  )
+}
+
+function isValidLegacyPosition(value: unknown): boolean {
   if (typeof value !== 'object' || value === null) return false
   const candidate = value as Record<string, unknown>
   return typeof candidate.ticker === 'string' && isFiniteNumber(candidate.shares)
 }
 
-function isValidPortfolio(value: unknown): value is Portfolio {
+function hasUniqueTickers(positions: Array<{ ticker: string }>): boolean {
+  return new Set(positions.map((position) => position.ticker)).size === positions.length
+}
+
+function isValidCurrentPortfolio(value: unknown): value is Portfolio {
+  if (typeof value !== 'object' || value === null) return false
+  const candidate = value as Record<string, unknown>
+  if ('cash' in candidate || 'totalValue' in candidate) return false
+  if (
+    typeof candidate.id !== 'string' ||
+    typeof candidate.name !== 'string' ||
+    !isFiniteNumber(candidate.cashWeight) ||
+    candidate.cashWeight < 0 ||
+    !Array.isArray(candidate.positions) ||
+    !candidate.positions.every(isValidCurrentPosition) ||
+    !hasUniqueTickers(candidate.positions as Position[]) ||
+    typeof candidate.updatedAt !== 'string'
+  ) {
+    return false
+  }
+  const total = candidate.cashWeight + (candidate.positions as Position[]).reduce((sum, position) => sum + position.weight, 0)
+  return Math.abs(total - 100) <= 0.01
+}
+
+function isValidLegacyPortfolio(value: unknown): value is LegacyPortfolio {
   if (typeof value !== 'object' || value === null) return false
   const candidate = value as Record<string, unknown>
   return (
@@ -20,42 +56,54 @@ function isValidPortfolio(value: unknown): value is Portfolio {
     typeof candidate.name === 'string' &&
     isFiniteNumber(candidate.cash) &&
     Array.isArray(candidate.positions) &&
-    candidate.positions.every(isValidPosition) &&
+    candidate.positions.every(isValidLegacyPosition) &&
     typeof candidate.updatedAt === 'string'
   )
 }
 
-/** Reads every stored portfolio, dropping anything malformed rather than trusting it. This is
- * user-editable storage (devtools, a future schema change, a stray write from a bug) that
- * survives indefinitely — a stray shape must yield a missing portfolio, never a white screen.
- * `localStorage` access throws outright in some privacy modes, so the whole read is guarded;
- * an unguarded read in a useState initialiser would crash the page during render. */
-export function listPortfolios(): Portfolio[] {
+export function isLegacyPortfolio(value: StoredPortfolio): value is LegacyPortfolio {
+  return 'cash' in value
+}
+
+/** Read both schemas without discarding valid legacy data. Browser storage is user-editable and
+ * may be unavailable, so every access remains guarded. */
+export function listPortfolios(): StoredPortfolio[] {
   try {
     const raw = localStorage.getItem(PORTFOLIO_STORAGE_KEY)
     if (raw === null) return []
     const parsed: unknown = JSON.parse(raw)
     if (!Array.isArray(parsed)) return []
-    return parsed.filter(isValidPortfolio)
+    return parsed.filter((value): value is StoredPortfolio => isValidCurrentPortfolio(value) || isValidLegacyPortfolio(value))
   } catch {
     return []
   }
 }
 
-/** Upserts by id and stamps updatedAt — **in place**, preserving list order (contract 0050 fix
- * 1). Appending on every save instead walked whatever portfolio was being edited to the bottom
- * of the list, since persist() runs on every rename keystroke and every cash change. Guarded
- * the same way listPortfolios is — a browser that refuses to store the write still applies it
- * for this session, it just will not persist across a reload. */
+/** Save a current portfolio in place, preserving valid legacy siblings and list order. */
 export function savePortfolio(portfolio: Portfolio): void {
   try {
-    const stamped: Portfolio = { ...portfolio, updatedAt: new Date().toISOString() }
+    const stamped: Portfolio = {
+      id: portfolio.id,
+      name: portfolio.name,
+      cashWeight: portfolio.cashWeight,
+      positions: portfolio.positions,
+      updatedAt: new Date().toISOString(),
+    }
     const existing = listPortfolios()
     const index = existing.findIndex((candidate) => candidate.id === stamped.id)
     const next = index === -1 ? [...existing, stamped] : existing.map((candidate, i) => (i === index ? stamped : candidate))
     localStorage.setItem(PORTFOLIO_STORAGE_KEY, JSON.stringify(next))
   } catch {
-    // Storage unavailable — the caller's own state still reflects the change for this session.
+    // Storage unavailable — the caller's state still reflects the change for this session.
+  }
+}
+
+/** Replace the whole validated-or-legacy list after an explicit migration pass. */
+export function replacePortfolios(portfolios: StoredPortfolio[]): void {
+  try {
+    localStorage.setItem(PORTFOLIO_STORAGE_KEY, JSON.stringify(portfolios))
+  } catch {
+    // Storage unavailable — the caller's state still reflects the migration for this session.
   }
 }
 

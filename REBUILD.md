@@ -223,11 +223,11 @@ refreshes hang off it — it is the only reliable signal that a person is presen
 - All reads/writes go through a small module (`save` / `load` / `list`), so swapping in a server-backed store later is a change to one file rather than a rewrite. Same reasoning as the price-cache interface.
 - Known limits, accepted: portfolios are tied to one browser on one machine, and clearing site data loses them. CSV export is the backup story.
 
-**Position model: shares are the stored truth; weights are derived.**
-- A share count is a fact that doesn't change on its own. A weight changes every time prices move, so a stored weight silently goes stale sitting in `localStorage` — it describes what you intended on the day you typed it, not what you hold.
-- Stored per position: ticker + share count. Cash is a portfolio-level field (carried over from the old app's late-stage fix, which was the right shape).
-- Derived at display time: price × shares = value; value / total = weight.
-- The entry form offers both modes — type shares directly, or type target weights plus a total portfolio value and convert to shares once on submit. Entry mode is a UI affordance; storage is always shares.
+**Position model: saved weights are the truth; shares are optional implementation metadata.** Reversed 2026-09-18 after the portfolio's purpose was clarified: Blue Eagle is an allocation-analysis and optimization tool, not a tax lot, P&L, or brokerage-holdings ledger. Its meaningful input to analysis is the allocation, not a current market-value reconstruction.
+- Stored per position: ticker + allocation weight (percentage units) + optional share count. Stored at the portfolio level: cash weight (percentage units). Position weights plus cash weight must total 100% (within the form's stated tolerance). A dollar cash field is not meaningful for a portfolio with no required notional value.
+- A saved weight remains fixed until the user deliberately edits it or accepts a rebalance. It is not silently recomputed as prices move. This makes a model portfolio reproducible and prevents a quote refresh from rewriting the allocation that analysis is meant to assess.
+- The default entry flow is by weight: ticker + weight (and optional cash percentage), with no total portfolio value and no price requirement. A shares entry flow remains available for users who know their holdings; it derives and saves the initial weights from the entered shares and current prices. The flows must not be mixed during one initialization: shares plus a separately-entered target weight has no unambiguous meaning without a portfolio-value convention.
+- A future optional notional value may support dollar display or an implementation worksheet, but it is neither a required input nor the source of allocation truth.
 
 **API shape: cheap per-ticker validation, one heavy analyze call.**
 - `GET /tickers/{symbol}` — called as the user types. Returns validity plus the company name, so typos surface inline instead of after submitting the whole form.
@@ -1282,6 +1282,14 @@ approximation rather than a blank.
 Whether that endpoint is crumb-free **from Render's IP** is unproven and cannot be tested from a
 laptop where the crumb works. Contract 0054 builds it as a best-effort tier so a failure degrades to
 exactly today's behaviour. `beta` and `average_volume` genuinely remain `quoteSummary`-only.
+
+**Confirmed on the deployed app, 2026-09-18 (contract 0054).** After the post-push deployment,
+deleting and re-adding AAPL at 13:45 ET produced last close `337.00`, live price `335.41`, and
+`-0.47%` immediately — `(335.41 - 337.00) / 337.00`, so the targeted quote-on-add path ran rather
+than waiting for the batch claim. The same new row showed `4.92T` market cap, `38.6` P/E, and
+`0.31%` yield. Those are the timeseries/actions values above, rather than `.info`'s observed
+`4.86T` / `38.2` / `0.33%`, confirming that both tier-1.5 endpoints work from Render's IP while
+the crumb-gated `.info` path does not.
 
 The general lesson, which is the part worth keeping: **"Yahoo is blocked" was never true — one of
 Yahoo's four endpoints was.** Check which endpoint a yfinance property actually calls before

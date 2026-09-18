@@ -160,6 +160,12 @@ File follow-up contracts for anything you reject; don't fix it yourself.
 **Only once you have accepted it** — verification re-run, verdict given. Never on a coder's say-so,
 never while `Status: in-progress`, never for a contract you rejected and are waiting on fixes for.
 
+**This is a mandatory completion boundary, not housekeeping to defer.** Before sending an
+`accepted` audit verdict to Gunnar, archive the primary contract and its report together. An audit
+is not complete while either file remains in `contracts/`. Gunnar commits history; the planner
+owns this filesystem organization. Do not ask a coding agent to move contracts and do not leave
+that work for Gunnar.
+
 1. Set `Status: accepted` in the contract.
 2. Move the contract **and its report, if one exists**, into `contracts/done/`:
 
@@ -176,6 +182,11 @@ and the verdict in one place.
 `contracts/` then holds only live work: open, in-progress, and rejected-awaiting-fixes. That is
 the point — the directory is a worklist, not a history. History is `contracts/done/` and the git
 log.
+
+As the final audit check, confirm the primary contract (not the report template's own status line)
+has left `contracts/` and is present in `contracts/done/`. If a coding agent moved it early, verify
+the audit first, then correct its final status/report in `contracts/done/`; never let the premature
+move stand in for acceptance.
 
 Abandoned contracts (`Status: abandoned`) also go to `contracts/done/`. They are not deleted and
 their number is never recycled.
