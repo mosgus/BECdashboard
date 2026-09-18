@@ -8,6 +8,7 @@ duration of a full ~20-ticker sweep down to one upsert; it does not eliminate it
 is out of scope for this contract."""
 
 import logging
+import threading
 from datetime import datetime, timezone
 
 from sqlalchemy import select
@@ -23,6 +24,12 @@ from app.universe import refresh
 logger = logging.getLogger(__name__)
 
 AUTO_REFRESH_KEY = "auto_refresh"
+
+# One process, one sweep at a time (contract 0041). This is a threading.Lock, not asyncio.Lock,
+# because run_auto_refresh_if_due runs as a sync function in FastAPI's threadpool. It covers a
+# single process only; the app_state claim below is what survives a restart and would cover
+# multiple workers — the two are complementary, and neither replaces the other.
+_LOCK = threading.Lock()
 
 
 def _as_utc(dt: datetime | None) -> datetime | None:
@@ -68,7 +75,8 @@ def active_universe_tickers() -> list[str]:
 
 def run_auto_refresh_if_due(now_utc: datetime, now_et: datetime) -> None:
     """The impure composition: read the last claim, consult needs_auto_refresh, and only then
-    do any work. No-op with no database configured — checked before any read or write.
+    do any work. No-op with no database configured, or when another sweep is already running in
+    this process (see _LOCK above) — both checked before any read or write.
 
     Tickers are walked one at a time, in a plain loop, through app.universe.refresh — the same
     function POST /{ticker}/refresh uses. No concurrent fan-out of any kind (contract 0013). A
@@ -78,22 +86,28 @@ def run_auto_refresh_if_due(now_utc: datetime, now_et: datetime) -> None:
     never rolled back on failure: a window that errored waits for the next window rather than
     being retried by the next visitor thirty seconds later, which is how a failing sweep turns
     into a rate limit."""
-    if not is_enabled():
-        return
+    if not _LOCK.acquire(blocking=False):
+        return  # another visitor's sweep is already running in this process
 
-    last_refreshed_at = _get_state(AUTO_REFRESH_KEY)
-    if not needs_auto_refresh(last_refreshed_at, now_et):
-        return
+    try:
+        if not is_enabled():
+            return
 
-    _set_state(AUTO_REFRESH_KEY, now_utc)
+        last_refreshed_at = _get_state(AUTO_REFRESH_KEY)
+        if not needs_auto_refresh(last_refreshed_at, now_et):
+            return
 
-    tickers = active_universe_tickers()
-    for ticker in tickers:
-        try:
-            refresh(ticker)
-        except Exception:
-            # Broad on purpose: one ticker's refresh failing must not abort the sweep for the
-            # rest, the same discipline app/news.py's per-ticker fetch loop uses.
-            logger.exception("app.autorefresh: refresh(%s) failed; continuing", ticker)
+        _set_state(AUTO_REFRESH_KEY, now_utc)
 
-    refresh_quotes_if_stale(tickers)
+        tickers = active_universe_tickers()
+        for ticker in tickers:
+            try:
+                refresh(ticker)
+            except Exception:
+                # Broad on purpose: one ticker's refresh failing must not abort the sweep for the
+                # rest, the same discipline app/news.py's per-ticker fetch loop uses.
+                logger.exception("app.autorefresh: refresh(%s) failed; continuing", ticker)
+
+        refresh_quotes_if_stale(tickers)
+    finally:
+        _LOCK.release()

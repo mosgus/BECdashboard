@@ -19,6 +19,7 @@ weekends included — see needs_news_refresh — triggered from the same GET /un
 request that triggers app/autorefresh.py's sweep."""
 
 import logging
+import threading
 from datetime import datetime, timedelta, timezone
 
 import yfinance as yf
@@ -34,6 +35,13 @@ logger = logging.getLogger(__name__)
 
 NEWS_REFRESH_KEY = "news_refresh"
 NEWS_RETENTION_DAYS = 2
+
+# One process, one refresh at a time (contract 0041) — a separate lock from
+# app/autorefresh.py's, so a running universe sweep never blocks a news refresh, and vice
+# versa. A duplicate news refresh is more expensive than a duplicate price sweep: contract 0034
+# put a paid Gemini call at the end of this path. threading.Lock, not asyncio.Lock, since this
+# runs as a sync function in FastAPI's threadpool.
+_LOCK = threading.Lock()
 
 # Five market-wide feeds, measured together (contract 0040) rather than derived from the
 # universe — a fixed cost regardless of how many tickers the universe holds. Trivially
@@ -316,18 +324,25 @@ def run_news_refresh_if_due(now_utc: datetime, now_et: datetime) -> None:
     next visitor thirty seconds later. It waits for the next window instead.
 
     Reads MARKET_NEWS_TICKERS, not the universe (contract 0040) — this is what keeps the
-    refresh O(1) regardless of how many tickers the universe holds."""
-    if not is_enabled():
-        return
+    refresh O(1) regardless of how many tickers the universe holds. No-op with no database
+    configured, or when another refresh is already running in this process (see _LOCK above)."""
+    if not _LOCK.acquire(blocking=False):
+        return  # another visitor's refresh is already running in this process
 
-    newest_fetched_at = get_newest_fetched_at()
-    last_claim_at = _get_news_claim()
-    if not needs_news_refresh(newest_fetched_at, last_claim_at, now_et):
-        return
+    try:
+        if not is_enabled():
+            return
 
-    _set_news_claim(now_utc)
+        newest_fetched_at = get_newest_fetched_at()
+        last_claim_at = _get_news_claim()
+        if not needs_news_refresh(newest_fetched_at, last_claim_at, now_et):
+            return
 
-    refresh_news_if_stale(list(MARKET_NEWS_TICKERS), now_utc, now_et)
+        _set_news_claim(now_utc)
+
+        refresh_news_if_stale(list(MARKET_NEWS_TICKERS), now_utc, now_et)
+    finally:
+        _LOCK.release()
 
 
 def cap_per_ticker(articles: list[dict], max_per_ticker: int, limit: int) -> list[dict]:

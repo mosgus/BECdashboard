@@ -135,29 +135,64 @@ export class ApiError extends Error {
   }
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function isTransientStatus(status: number): boolean {
+  return status === 502 || status === 503 || status === 504
+}
+
 async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const baseUrl = import.meta.env.VITE_API_URL
   if (!baseUrl) {
     throw new Error('VITE_API_URL environment variable is not set')
   }
 
+  const method = options.method ?? 'GET'
   const hasBody = options.body !== undefined
-  const response = await fetch(`${baseUrl}${path}`, {
-    method: options.method ?? 'GET',
+  const init: RequestInit = {
+    method,
     headers: hasBody ? { 'Content-Type': 'application/json' } : undefined,
     body: hasBody ? JSON.stringify(options.body) : undefined,
-  })
-  const text = await response.text()
-
-  if (!response.ok) {
-    const detail = extractDetail(text)
-    const message = detail
-      ? `${detail} (${response.status})`
-      : `Request failed with status ${response.status}: ${text}`
-    throw new ApiError(response.status, message)
   }
 
-  return text ? JSON.parse(text) : (undefined as T)
+  // Retry only a GET against a transient failure — a dropped/refused connection (fetch itself
+  // rejects) or a 502/503/504, which is what a uvicorn restart or a short Render deploy blip
+  // looks like. Never POST or DELETE: POST /universe is not idempotent, and a retried add would
+  // double-fetch ten years of history. Never a 4xx or a 500 either — a 404 means the ticker
+  // doesn't exist and retrying cannot change that, and a 500 means the app already raised.
+  const retryDelaysMs = method === 'GET' ? [1000, 3000] : []
+
+  for (let attempt = 0; ; attempt++) {
+    const isLastAttempt = attempt >= retryDelaysMs.length
+
+    let response: Response
+    try {
+      response = await fetch(`${baseUrl}${path}`, init)
+    } catch (err) {
+      if (isLastAttempt) throw err
+      await sleep(retryDelaysMs[attempt])
+      continue
+    }
+
+    if (!response.ok && isTransientStatus(response.status) && !isLastAttempt) {
+      await sleep(retryDelaysMs[attempt])
+      continue
+    }
+
+    const text = await response.text()
+
+    if (!response.ok) {
+      const detail = extractDetail(text)
+      const message = detail
+        ? `${detail} (${response.status})`
+        : `Request failed with status ${response.status}: ${text}`
+      throw new ApiError(response.status, message)
+    }
+
+    return text ? JSON.parse(text) : (undefined as T)
+  }
 }
 
 export async function getHealth(): Promise<HealthResponse> {

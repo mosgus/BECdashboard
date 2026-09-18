@@ -991,6 +991,41 @@ other. When changing how many things a query iterates, grep the frontend for per
 feeds pull stale articles was measured and disproved: 380 of 381 stored rows were under two days old,
 because `NEWS_RETENTION_DAYS` bounds it. Measure the premise before building against it.
 
+**`client.ts`'s `request` retries transient failures — GET only, 502/503/504 only.** Contract 0041,
+2026-09-17. Two retries at 1000ms then 3000ms. Before it, `BackendStatus`, `TickerStrip` and
+`NewsSection` each fetched once in `useEffect(…, [])` and **latched broken permanently** on a single
+failed request — a uvicorn restart or a Render deploy's few seconds of 502 left the launch page
+showing "API offline" with no strip and no news until a manual reload.
+
+The constraints are load-bearing, not caution: **never retry POST or DELETE** (`POST /universe` is
+not idempotent — a retried add re-fetches ten years of history), and **never retry 4xx or 500** (a
+404 for an unknown ticker must fail immediately; a 500 means the app already raised, so retrying
+doubles the load and changes nothing). The implementation gets idempotency from data —
+`method === 'GET' ? [1000, 3000] : []` — so a non-GET has no delays to consume rather than relying on
+a conditional that could drift. `response.text()` must be read **after** the retry decision; reading
+it earlier consumes the body and breaks the retry.
+
+**"Empty means unset" applies to `CORS_ORIGINS` and must never be applied to `DATABASE_URL`.**
+`os.getenv("CORS_ORIGINS", "default")` returns `""` for an exported-but-empty variable, so the
+default never applies and `cors_origins` becomes `[""]` — a list matching no origin, failing silently.
+Fixed with `or`. But `DATABASE_URL=""` meaning *no database* is the safety convention every ad-hoc
+command in this project relies on to stay off production; generalising the fix there would invert the
+guard into a live production connection.
+
+**`config.py` raises at import when an ambient variable conflicts with `.env`.** Only when both are
+non-empty and differ — an empty ambient value is a deliberate opt-out, and a key absent from `.env` is
+never a conflict, which is what keeps **Render unaffected** (no `.env` file there, so `dotenv_values`
+returns `{}`). The message names the variable but prints no secret: username and host for
+`DATABASE_URL`, length only for `GEMINI_KEY`. This exists because the same failure cost two evenings
+and neither symptom named its cause — once as *"password authentication failed"*, once as
+*"API offline"* while the server logged 200s.
+
+**The refresh lock and the `app_state` claim are complementary, not redundant.** A module-level
+non-blocking `threading.Lock` (sync functions in FastAPI's threadpool, so not `asyncio.Lock`) closes
+the in-process race the claim-first write only narrowed; the claim is what survives a restart and what
+would cover multiple workers. Separate locks per module so a universe sweep never blocks a news
+refresh. It mattered more after contract 0034 put a **paid Gemini call** at the end of the news path.
+
 **An exported `DATABASE_URL` silently beats `backend/.env`.** Cost a debugging session on
 2026-09-15. `config.py` calls `load_dotenv(path)`, and `load_dotenv` **does not override a variable
 already present in the environment** — so a stale `export DATABASE_URL=...` left in one terminal from

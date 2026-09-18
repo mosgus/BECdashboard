@@ -7,6 +7,7 @@ from sqlalchemy import event, select
 from app.db import get_engine, session
 from app.models import AppState, Base, NewsArticle, UniverseTicker
 from app.news import (
+    _LOCK,
     MARKET_NEWS_TICKERS,
     NEWS_REFRESH_KEY,
     cap_per_ticker,
@@ -315,6 +316,41 @@ def test_run_news_refresh_if_due_writes_the_claim_before_the_fetch_even_if_it_ra
         assert row is not None
         value_at = row.value_at if row.value_at.tzinfo is not None else row.value_at.replace(tzinfo=timezone.utc)
     assert value_at == now_utc
+
+
+# --- _LOCK: one refresh at a time per process ---------------------------------------------------
+
+
+def test_second_call_returns_without_fetching_while_the_lock_is_held(db_mode, monkeypatch):
+    called = []
+    monkeypatch.setattr("app.news.fetch_news_for", lambda ticker: called.append(ticker) or [])
+
+    assert _LOCK.acquire(blocking=False)
+    try:
+        now_et = _et(10, 0)
+        run_news_refresh_if_due(_utc(now_et), now_et)
+    finally:
+        _LOCK.release()
+
+    assert called == []
+
+
+def test_lock_is_released_after_the_body_raises(db_mode, monkeypatch):
+    """Force an exception from somewhere the per-ticker and briefing try/excepts inside
+    refresh_news_if_stale do not shield, and confirm the lock is free again afterwards, proving
+    the finally: block ran."""
+    monkeypatch.setattr("app.news.fetch_news_for", lambda ticker: [])
+    monkeypatch.setattr(
+        "app.news._prune_old_articles",
+        lambda now_utc: (_ for _ in ()).throw(RuntimeError("boom")),
+    )
+
+    now_et = _et(10, 0)
+    with pytest.raises(RuntimeError, match="boom"):
+        run_news_refresh_if_due(_utc(now_et), now_et)
+
+    assert _LOCK.acquire(blocking=False)
+    _LOCK.release()
 
 
 # --- dedup across tickers --------------------------------------------------------------------

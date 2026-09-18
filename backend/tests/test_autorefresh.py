@@ -5,6 +5,7 @@ import pytest
 
 from app.autorefresh import (
     AUTO_REFRESH_KEY,
+    _LOCK,
     active_universe_tickers,
     run_auto_refresh_if_due,
 )
@@ -162,3 +163,42 @@ def test_run_auto_refresh_calls_refresh_quotes_if_stale_with_the_ticker_list(db_
     run_auto_refresh_if_due(now_et.astimezone(timezone.utc), now_et)
 
     assert calls == [["AAPL", "MSFT"]]
+
+
+# --- _LOCK: one sweep at a time per process -----------------------------------------------------
+
+
+def test_second_call_returns_without_fetching_while_the_lock_is_held(db_mode, monkeypatch):
+    _add_ticker("AAPL")
+
+    called = []
+    monkeypatch.setattr("app.autorefresh.refresh", lambda ticker: called.append(ticker))
+
+    assert _LOCK.acquire(blocking=False)
+    try:
+        now_et = _window_open_et()
+        run_auto_refresh_if_due(now_et.astimezone(timezone.utc), now_et)
+    finally:
+        _LOCK.release()
+
+    assert called == []
+
+
+def test_lock_is_released_after_the_body_raises(db_mode, monkeypatch):
+    """Force an exception from somewhere the per-ticker try/except does not shield — the sweep
+    body's failure isolation is deliberately narrow to just refresh(ticker) — and confirm the
+    lock is free again afterwards, proving the finally: block ran."""
+    _add_ticker("AAPL")
+
+    monkeypatch.setattr("app.autorefresh.refresh", lambda ticker: {"ticker": ticker})
+    monkeypatch.setattr(
+        "app.autorefresh.refresh_quotes_if_stale",
+        lambda tickers: (_ for _ in ()).throw(RuntimeError("boom")),
+    )
+
+    now_et = _window_open_et()
+    with pytest.raises(RuntimeError, match="boom"):
+        run_auto_refresh_if_due(now_et.astimezone(timezone.utc), now_et)
+
+    assert _LOCK.acquire(blocking=False)
+    _LOCK.release()
