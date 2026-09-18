@@ -148,7 +148,7 @@ function PageButton({
         aria-label={label}
         disabled={disabled}
         onClick={onClick}
-        className="w-10 h-10 flex items-center justify-center rounded-full bg-brand-primary text-white text-lg font-semibold disabled:opacity-40 disabled:cursor-not-allowed enabled:hover:opacity-90"
+        className="w-10 h-10 flex items-center justify-center rounded-full bg-btn-action text-btn-action-text text-lg font-semibold disabled:opacity-40 disabled:cursor-not-allowed enabled:hover:opacity-90"
       >
         {children}
       </button>

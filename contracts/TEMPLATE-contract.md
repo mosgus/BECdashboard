@@ -24,6 +24,12 @@ Modify:
 **Touch nothing else.** If the work appears to require editing a file not on this list, stop and
 report `BLOCKED` instead of editing it.
 
+**`reference files/` is read-only and never belongs on a file list.** Read it as much as the work
+needs — that is what it is for — but it is a snapshot of other working software kept so its behaviour
+can be compared against this rebuild, and an edited reference stops being evidence of anything.
+`.claude/settings.json` denies Edit and Write there; that deny list cannot see a shell redirect,
+`sed -i`, `cp` or `mv`, so do not route around it.
+
 ## Interface
 
 <Exact signatures, types, route shapes, component props. The more precise this is, the more

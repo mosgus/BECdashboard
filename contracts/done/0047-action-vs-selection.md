@@ -1,6 +1,7 @@
 # Contract 0047 — Separate action buttons from selection states
 
-**Status:** not started
+**Status:** accepted (2026-09-18) — audited by planner. Criterion 3 was miscounted in the contract;
+the implementation is correct.
 **Assigned to:** sonnet
 **Author:** planner (opus)
 
@@ -182,3 +183,38 @@ Point 4 is the one I would expect to need adjusting.
 - **Whether the filter-count badge should also soften.** Left solid deliberately; it is an indicator,
   not a selection.
 - **What happens to the four `Coming soon` cards.** Still open.
+
+---
+
+## Audit (planner, 2026-09-18)
+
+- `tsc` clean, `npm run build` succeeds, `npm run lint` → exactly 1 warning (unchanged baseline)
+- Scope empty on `globals.css`, `AddTickerForm.tsx`, `NewsSection.tsx`, `UniverseTable.tsx`,
+  `pages/`, `backend/`
+- Tinted selections now four: `UniverseTable` (pre-existing pattern), `ChartDialog:313`,
+  `ThemeSelector:54`, `FilterDialog:42`
+- `CHIP_ON` keeps `border-brand-primary`; colour literals → exit 1; `bg-brand-primary/10` compiled
+
+### Criterion 3 contradicted the contract's own table — planner error
+
+It demanded `grep "bg-brand-primary text-white"` match **three** lines, while the contract's own
+"What must NOT change" table lists **four** sites using that exact string — including
+`UniversePage.tsx:150`, the filter-count badge, explicitly required to stay solid *and* explicitly
+outside the file list.
+
+The implementer left it alone and said so, rather than editing a forbidden file to satisfy an
+arithmetic claim. That is the right call twice over: the criterion was wrong, and obeying it would
+have broken "Touch nothing else."
+
+Fifth spec error of this shape this session — a criterion asserting something the contract body
+already contradicts. The body is written first and reasoned about; the criteria get counted last and
+in a hurry.
+
+### Unrelated bug found during the audit
+
+`AddTickerForm.tsx:53` carries `dark:text-foreground`, committed in `711999c` and untouched by this
+contract. Tailwind's `dark:` variant compiles to
+`@media (prefers-color-scheme:dark){...}` — it keys off the **operating system**, not this app's
+`[data-theme="dark"]` attribute. With OS dark and app theme Light, the Add button renders
+`--color-text` (navy `#0C2340` in light mode) on `bg-brand-primary` (navy `#012169`): invisible.
+One of four theme/OS combinations. Fixed in contract 0048.

@@ -51,7 +51,7 @@ export function ThemeSelector(): JSX.Element {
                 index > 0 ? 'border-l border-brand-border' : ''
               } ${
                 active
-                  ? 'bg-brand-primary text-white'
+                  ? 'bg-btn-selected/10 text-btn-selected-text font-semibold'
                   : 'text-[var(--color-muted)] hover:bg-brand-border hover:text-foreground'
               }`}
             >

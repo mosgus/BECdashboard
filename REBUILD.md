@@ -1199,6 +1199,14 @@ And `UniversePage` warms the chunk with a bare `void import(...)` after mount �
 row click waits on a ~103 kB download behind `fallback={null}`, which reads as the click doing
 nothing. The preload sits in `UniversePage`, never in `App`, so `/` stays clean.
 
+**`reference files/` is read-only.** It is a snapshot of other working software — the old yfinance
+script, the Streamlit news section — kept so its behaviour can be compared against this rebuild.
+Read it freely; never edit, move, rename or reformat anything under it, including to fix an obvious
+bug or a stale comment. An edited reference stops being evidence, and every measurement taken against
+it becomes unverifiable. Both coder role files carry this as a hard rule, the contract template repeats
+it, and `.claude/settings.json` denies Edit/Write there — though a deny list cannot see a shell
+redirect or `sed -i`, which is why the rule is written down as well as enforced.
+
 **An exported `DATABASE_URL` silently beats `backend/.env`.** Cost a debugging session on
 2026-09-15. `config.py` calls `load_dotenv(path)`, and `load_dotenv` **does not override a variable
 already present in the environment** — so a stale `export DATABASE_URL=...` left in one terminal from

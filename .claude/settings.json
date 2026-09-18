@@ -22,7 +22,12 @@
       "Bash(gh secret:*)",
       "Bash(gh workflow:*)",
       "Read(.env)",
-      "Read(.env.*)"
+      "Read(.env.*)",
+      "Edit(reference files/**)",
+      "Write(reference files/**)",
+      "NotebookEdit(reference files/**)",
+      "Edit(./reference files/**)",
+      "Write(./reference files/**)"
     ],
     "allow": [
       "Bash(git status:*)",

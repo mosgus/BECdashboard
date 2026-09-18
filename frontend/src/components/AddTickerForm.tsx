@@ -50,7 +50,7 @@ export function AddTickerForm({ onAdded }: AddTickerFormProps): JSX.Element {
           <button
             type="submit"
             disabled={disabled}
-            className={`text-sm font-medium px-4 py-2 rounded-[var(--radius-btn)] bg-brand-primary text-white dark:text-foreground whitespace-nowrap hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed ${disabled ? 'pointer-events-none' : ''}`}
+            className={`text-sm font-medium px-4 py-2 rounded-[var(--radius-btn)] bg-btn-action text-btn-action-text whitespace-nowrap hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed ${disabled ? 'pointer-events-none' : ''}`}
           >
             {submitting ? 'Adding…' : 'Add'}
           </button>

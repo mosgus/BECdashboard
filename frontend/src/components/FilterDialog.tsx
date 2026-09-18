@@ -39,7 +39,7 @@ const TYPE_OPTIONS = [
 
 const CHIP_BASE = 'text-[0.8125rem] px-3 py-1.5 rounded-full border cursor-pointer select-none'
 const CHIP_OFF = 'bg-brand-surface border-brand-border text-[var(--color-muted)]'
-const CHIP_ON = 'bg-brand-primary border-brand-primary text-white'
+const CHIP_ON = 'bg-btn-selected/10 border-btn-selected text-btn-selected-text font-semibold'
 const CLEAR_LINK = 'text-xs text-[var(--color-muted)] underline hover:text-brand-primary'
 const GROUP = 'py-3.5 border-b border-brand-border last:border-b-0'
 const GROUP_HEAD = 'flex items-center justify-between mb-2'
@@ -275,7 +275,7 @@ export function FilterDialog({ open, rows, filters, onChange, onClose }: FilterD
             <button
               type="button"
               onClick={handleClose}
-              className="text-sm font-medium px-4 py-2 rounded-[var(--radius-btn)] bg-brand-primary text-white hover:opacity-90"
+              className="text-sm font-medium px-4 py-2 rounded-[var(--radius-btn)] bg-btn-action text-btn-action-text hover:opacity-90"
             >
               Done
             </button>

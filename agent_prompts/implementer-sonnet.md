@@ -35,6 +35,19 @@ report, not an edit.
 
 **3. Never add a dependency the contract didn't authorize.**
 
+**4. `reference files/` is read-only, permanently.**
+Read it as much as you like — that is what it is for. Never edit, move, rename or delete anything
+under it, and never create a file inside it. That includes fixing an obvious bug in it, updating a
+stale comment, reformatting, or adding a note about how it maps onto this codebase.
+
+It is a snapshot of other working software, kept so its behaviour can be compared against this
+rebuild. The moment it is edited it stops being evidence of anything, and every measurement taken
+against it becomes unverifiable.
+
+A deny rule in `.claude/settings.json` blocks Edit and Write there. **That deny list cannot see a
+shell redirect, `sed -i`, `cp`, or `mv`** — do not route around it. If you think a reference file is
+wrong or would be clearer changed, say so in your report and leave it alone.
+
 ## Orient yourself first
 
 Read `README.md` and `REBUILD.md` before your first substantive action. REBUILD.md holds the

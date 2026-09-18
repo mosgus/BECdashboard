@@ -310,7 +310,7 @@ export function ChartDialog({ ticker, entry, onClose, onDeleted }: ChartDialogPr
                     onClick={() => setRange(key)}
                     className={`text-xs font-medium px-2.5 py-1.5 rounded-[var(--radius-btn)] border border-transparent ${
                       active
-                        ? 'bg-brand-primary text-white'
+                        ? 'bg-btn-selected/10 text-btn-selected-text font-semibold'
                         : 'text-[var(--color-muted)] hover:bg-brand-border hover:text-foreground'
                     } disabled:opacity-35 disabled:cursor-not-allowed disabled:hover:bg-transparent ${disabled ? 'pointer-events-none' : ''}`}
                   >
@@ -325,7 +325,7 @@ export function ChartDialog({ ticker, entry, onClose, onDeleted }: ChartDialogPr
             <button
               type="button"
               onClick={() => setConfirmOpen(true)}
-              className="text-xs font-medium px-2.5 py-1.5 rounded-[var(--radius-btn)] border border-brand-border text-[var(--color-muted)] hover:bg-brand-negative hover:text-white"
+              className="text-xs font-medium px-2.5 py-1.5 rounded-[var(--radius-btn)] border border-brand-border text-[var(--color-muted)] hover:bg-btn-danger hover:text-btn-danger-text"
             >
               Delete ticker
             </button>
@@ -379,7 +379,7 @@ export function ChartDialog({ ticker, entry, onClose, onDeleted }: ChartDialogPr
                 type="button"
                 disabled={deleteState.status === 'deleting'}
                 onClick={() => void handleDelete(ticker)}
-                className="text-sm font-medium px-4 py-2 rounded-[var(--radius-btn)] bg-brand-negative text-white hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="text-sm font-medium px-4 py-2 rounded-[var(--radius-btn)] bg-btn-danger text-btn-danger-text hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {deleteState.status === 'deleting' ? 'Deleting…' : 'Delete'}
               </button>

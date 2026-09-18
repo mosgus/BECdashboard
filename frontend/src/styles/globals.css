@@ -22,7 +22,7 @@
   --color-border:   #dde3f0;
 
   /* Text */
-  --color-text: #cdd5df;
+  --color-text: #30578e;
   --color-muted:    #4a5d7a;
 
   /* Semantic */
@@ -45,6 +45,18 @@
      inline mapping below is a reference to a different property, not a same-name
      self-reference. */
   --color-modal-overlay: rgb(12 35 64 / 0.35);
+
+  /* Buttons (contract 0048). Default to the palette so nothing changes visually on day one;
+     the point of the indirection is that changing one of these no longer moves headings,
+     chips or status dots along with it. Named without the --color- prefix, and mapped to
+     --color-btn-* in @theme inline below, for the same reason --color-modal-overlay isn't
+     named --color-overlay there — a same-name self-reference resolves to nothing. */
+  --btn-action:        var(--color-primary);
+  --btn-action-text:   #ffffff;
+  --btn-selected:      var(--color-primary);
+  --btn-selected-text: var(--color-primary);
+  --btn-danger:        var(--color-negative);
+  --btn-danger-text:   #ffffff;
 }
 
 /* Starting point only (contract 0045) — nine lines in one block, deliberately not scattered
@@ -56,13 +68,22 @@
   --color-bg:       #0d1117;
   --color-surface:  #161b22;
   --color-border:   #262d38;
-  --color-text: #f3e6e6;
+  --color-text:     #f3e6e6;
   --color-muted:    #8b98a9;
-  --color-primary: #7facf4;
+  --color-primary:  #7facf4;
+  --color-primary:  #7facf4;
   --color-accent:   #f2a900;
   --color-positive: #3fb950;
   --color-negative: #f85149;
   --color-modal-overlay: rgb(0 0 0 / 0.6);
+
+  /* --btn-action resolves to the lightened dark-mode primary automatically (it derives from
+     --color-primary above). White text on it is thin — around 3.5:1 — so dark mode uses the
+     deep surface colour for button text instead. This is what AddTickerForm's old
+     OS-media-query variant was reaching for; it works here because it follows the theme
+     attribute rather than the OS. */
+  --btn-action-text: #0d1117;
+  --btn-danger-text: #0d1117;
 }
 
 @theme inline {
@@ -75,6 +96,12 @@
   --color-brand-positive: var(--color-positive);
   --color-brand-negative: var(--color-negative);
   --color-overlay:        var(--color-modal-overlay);
+  --color-btn-action:        var(--btn-action);
+  --color-btn-action-text:   var(--btn-action-text);
+  --color-btn-selected:      var(--btn-selected);
+  --color-btn-selected-text: var(--btn-selected-text);
+  --color-btn-danger:        var(--btn-danger);
+  --color-btn-danger-text:   var(--btn-danger-text);
 
   /* Declared here rather than beside --font-heading/--font-body because @theme is what
      generates the `font-briefing` utility; a plain custom property would not. */
