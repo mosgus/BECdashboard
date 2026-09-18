@@ -21,12 +21,13 @@ export function OpsPage(): JSX.Element {
             Refresh button), which a shared CARD wrapper here would not allow. */}
         <div className="flex flex-col gap-6">
           <SystemHealthCard />
-          <JobRunsCard />
 
           <div className={CARD}>
             <h2 className="text-[17px] font-semibold text-foreground mb-4">Theme</h2>
             <ThemeSelector />
           </div>
+
+          <JobRunsCard />
         </div>
       </main>
     </div>
