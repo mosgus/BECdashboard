@@ -1026,6 +1026,31 @@ the in-process race the claim-first write only narrowed; the claim is what survi
 would cover multiple workers. Separate locks per module so a universe sweep never blocks a news
 refresh. It mattered more after contract 0034 put a **paid Gemini call** at the end of the news path.
 
+**The test suite blocks the network by default.** Contract 0043, 2026-09-18. `tests/conftest.py`'s
+autouse `block_network` fixture patches `socket.socket.connect`, `connect_ex`,
+`socket.create_connection` **and `curl_cffi.requests.Session.request`**, raising `RuntimeError` — not
+`OSError`, because an `OSError` looks like a genuine connection failure and this codebase has five
+`except Exception: continue` handlers that would absorb it. Opt out with
+`@pytest.mark.allow_network`, registered in `backend/pytest.ini`. **Never add that marker to make an
+existing unit test pass** — patch what it calls instead.
+
+Why it was needed: every contract claimed "tests pass with no network" and that was true only by
+accident. Contract 0037 added a second `background_tasks.add_task` to `GET /universe/strip` without
+updating the tests that patch the first — and `TestClient` runs background tasks **synchronously**, so
+three tests each performed a real news refresh across every `MARKET_NEWS_TICKERS` entry, ~21 live
+Yahoo requests per suite run, against the IP Yahoo already rate-limits for this app. They passed
+regardless, because the per-ticker `except Exception: continue` swallowed the result. Runtime went
+**22.97s → 2.88s**; the slowest test is now 0.06s, previously 3.26s.
+
+**Blocking `socket` does not block a library that binds a native transport.** `yfinance` reaches
+libcurl through `curl_cffi`'s C bindings and never touches `socket.socket`. With only the socket
+patches installed, `yf.Ticker("AAPL").news` **still returned 10 live articles inside a test** —
+measured 2026-09-18. `yfinance/data.py` uses both `requests` and `curl_cffi`: the socket patches break
+the cookie/crumb flow, but contract 0030 established that `.news` needs no crumb, so it goes straight
+out. The planner initially credited the block for a 22.7s → 7.7s speedup that mostly came from fixing
+the tests. **Verify a network block by making a real call through the library you care about, never
+through `socket`.**
+
 **An exported `DATABASE_URL` silently beats `backend/.env`.** Cost a debugging session on
 2026-09-15. `config.py` calls `load_dotenv(path)`, and `load_dotenv` **does not override a variable
 already present in the environment** — so a stale `export DATABASE_URL=...` left in one terminal from

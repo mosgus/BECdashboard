@@ -1,6 +1,6 @@
 # Contract 0042 — Close the add/refresh seam: no zero-bar members, and refresh can heal one
 
-**Status:** reported
+**Status:** accepted (2026-09-18) — audited by planner, heal path verified against the real database.
 **Assigned to:** sonnet
 **Author:** planner (opus)
 
@@ -286,3 +286,42 @@ again at the end; if the script fails midway, delete it through the UI.
 - **Whether `fetch_history` should refuse to `store()` an empty frame at all**, which would make the
   `evict` in part 1 unnecessary. That is `market_data.py`, out of scope here.
 - **What happens to the four `Coming soon` cards.** Still open.
+
+---
+
+## Audit (planner, 2026-09-18)
+
+- `pytest -q` → **360 passed** (from 354)
+- `HistoryUnavailable` at `universe.py:36`, imported and caught in `routers/universe.py:64`
+- Both `date.today()` uses are `_history_start(date.today())` (lines 103, 148) — **never** an `end=`
+  argument, so the partial-bar trap contract 0024 fixed is not reintroduced
+- `evict` called at `universe.py:106` (the new zero-bar path) and `:194` (the pre-existing remove)
+- `market_data.py`, `freshness.py`, `cache.py`, `models.py`, `schemas.py` untouched — `missing_range`
+  keeps its documented "a first fetch is the caller's job" contract, and the heal lives in
+  `universe.refresh()`, the layer that owns `HISTORY_START`
+- Seven migrations
+
+Live, against the real database on a throwaway ticker: `bars after sabotage: 0` →
+`bars after refresh: 2692`. A zero-bar member now heals itself without delete-and-re-add.
+
+The `news.py` diff the implementer flagged as not its own is correct — that is Gunnar extending
+`MARKET_NEWS_TICKERS` with `^VIX` and `XLF`, which is the open question contract 0040 left to him.
+
+### The test-isolation gap this contract exposed, and the larger one behind it
+
+`add()` calling `refresh_ticker` broke `test_post_universe_succeeds_when_fundamentals_unavailable`,
+which had inline patches missing `refresh_ticker` and so began calling the real yfinance API for SPY
+(2,692 real bars). The implementer found and fixed it.
+
+Auditing that led somewhere worse. **The whole suite passes with every outbound socket blocked — in
+7.7s instead of 22.7s.** The 15-second gap is live network I/O whose results are discarded. Traced to
+`test_api_universe.py`'s three strip tests (~3.2s each) and seven `test_news.py` tests (~1.6s each).
+
+`test_get_strip_schedules_auto_refresh_background_task` patches `run_auto_refresh_if_due` but not
+`run_news_refresh_if_due` — contract **0037** added that second `add_task` and never updated these
+tests. `TestClient` runs background tasks synchronously, so each of those tests performs a real news
+refresh across all seven `MARKET_NEWS_TICKERS`. They pass anyway, because the per-ticker
+`except Exception: continue` swallows whatever happens.
+
+So the project's standing claim that "tests pass with no network" was true only by accident. Tracked
+separately in contract 0043.

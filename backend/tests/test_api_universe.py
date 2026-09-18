@@ -1,3 +1,4 @@
+import socket
 from datetime import datetime, timezone
 
 from fastapi.testclient import TestClient
@@ -9,6 +10,11 @@ from app.db import get_engine, session
 from app.main import app
 from app.models import Base, UniverseTicker
 from tests.test_universe import _fundamentals, _history
+
+# Captured at collection time, before any test has run and therefore before conftest.py's
+# block_network fixture has had a chance to monkeypatch anything — the one legitimate way to
+# get a handle on the real, unpatched method to compare against later.
+_REAL_SOCKET_CONNECT = socket.socket.connect
 
 
 @pytest.fixture(autouse=True)
@@ -27,13 +33,19 @@ def quotes_market_closed_by_default(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def no_auto_refresh_background_task(monkeypatch):
-    """GET /universe/strip now schedules run_auto_refresh_if_due via BackgroundTasks —
-    TestClient runs background tasks synchronously after the response body is built, which
-    would otherwise make every /strip test in this file exercise a real ticker sweep against
-    (unpatched) app.universe.refresh. Neutered here; the sweep's own behavior is
-    tests/test_autorefresh.py's job."""
+def no_strip_background_tasks(monkeypatch):
+    """GET /universe/strip schedules both run_auto_refresh_if_due and run_news_refresh_if_due
+    via BackgroundTasks (contract 0037 added the second) — TestClient runs background tasks
+    synchronously after the response body is built, which would otherwise make every /strip
+    test in this file exercise a real ticker sweep against (unpatched) app.universe.refresh
+    *and* a real news refresh across all of MARKET_NEWS_TICKERS. Neutered here, for every test
+    in the file via autouse, the same way isolate_from_ambient_database in conftest.py handles
+    the database side — the sweep's own behavior is tests/test_autorefresh.py's job, and the
+    news refresh's is tests/test_news.py's. A test that wants to assert on either call (e.g.
+    test_get_strip_schedules_auto_refresh_background_task below) re-patches that one name
+    locally with a spy; monkeypatch layers the two so the local one wins for that test."""
     monkeypatch.setattr("app.routers.universe.run_auto_refresh_if_due", lambda *a, **k: None)
+    monkeypatch.setattr("app.routers.universe.run_news_refresh_if_due", lambda *a, **k: None)
 
 
 @pytest.fixture
@@ -599,3 +611,25 @@ def test_get_history_json_never_fetches_from_yfinance(db_mode, client, monkeypat
 
     response = client.get("/universe/AAPL/history")
     assert response.status_code == 200
+
+
+# --- conftest.py's block_network fixture (contract 0043) ------------------------------------
+#
+# These live here rather than in conftest.py because pytest only collects test functions from
+# files matching python_files = test_*.py — conftest.py is loaded for its fixtures but never
+# collected as a test module itself. This file is the only test module contract 0043 is
+# allowed to touch, so it is where the fixture's own behavior gets proven.
+
+
+def test_block_network_raises_runtime_error_naming_the_address():
+    with pytest.raises(RuntimeError, match=r"\('example\.com', 80\)"):
+        socket.create_connection(("example.com", 80))
+
+
+@pytest.mark.allow_network
+def test_allow_network_marker_leaves_the_real_socket_connect_installed():
+    """Does not make a real connection — that would put network I/O back into the suite to
+    prove network I/O was removed. Asserting identity against the reference captured at
+    collection time (before block_network could have patched anything) is enough to prove the
+    marker made the fixture skip patching for this test."""
+    assert socket.socket.connect is _REAL_SOCKET_CONNECT
