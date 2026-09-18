@@ -3,7 +3,7 @@ import type { JSX } from 'react'
 import { Link } from 'react-router-dom'
 import type { UniverseEntry } from '../api/client'
 import { formatPercent, formatPrice, formatShares } from '../lib/format'
-import { positionPrice, summariseDraft } from '../lib/portfolio'
+import { positionPrice, summariseDraft, toFieldText } from '../lib/portfolio'
 import type { DraftRow, EntryMode, Portfolio, Position } from '../lib/portfolio'
 import { Tooltip } from './Tooltip'
 
@@ -29,8 +29,11 @@ export function NewPortfolioDialog({ universe, onCancel, onCreate }: NewPortfoli
   const [rows, setRows] = useState<DraftRow[]>([])
 
   useEffect(() => {
-    dialogRef.current?.focus()
-
+    // Deliberately does not move focus to the container here (contract 0053, defect 1) —
+    // React applies the name input's autoFocus during commit, but this effect runs after
+    // paint; the two raced and the container always won, so typing on open did nothing. The
+    // Escape listener lives on document and needs no focus inside the dialog, so it is
+    // unaffected by the removal.
     function handleKeyDown(event: KeyboardEvent): void {
       if (event.key === 'Escape') onCancel()
     }
@@ -51,13 +54,15 @@ export function NewPortfolioDialog({ universe, onCancel, onCreate }: NewPortfoli
 
     if (nextMode === 'weight') {
       // Prefill from what shares mode has already computed. Anything that could not be
-      // computed (no price, nothing typed) is left empty — never 0, never NaN.
-      setTotalValueText(summary.totalValue > 0 ? String(summary.totalValue) : '')
-      setCashText(summary.cashWeight !== null ? String(summary.cashWeight) : '')
+      // computed (no price, nothing typed) is left empty — never 0, never NaN. Every prefill
+      // goes through toFieldText (contract 0053, defect 3) rather than the raw coercion that
+      // used to write floats like "33.33333333333333" into these same fields.
+      setTotalValueText(summary.totalValue > 0 ? toFieldText(summary.totalValue, 2) : '')
+      setCashText(summary.cashWeight !== null ? toFieldText(summary.cashWeight, 2) : '')
       setRows((prev) =>
         prev.map((row) => {
           const derived = summary.rows.find((candidate) => candidate.id === row.id)
-          return { ...row, weight: derived && derived.weight !== null ? String(derived.weight) : '' }
+          return { ...row, weight: derived && derived.weight !== null ? toFieldText(derived.weight, 4) : '' }
         }),
       )
     } else {
@@ -65,11 +70,11 @@ export function NewPortfolioDialog({ universe, onCancel, onCreate }: NewPortfoli
       // a real value — check the typed text directly so an unset total doesn't write a
       // spurious "0" into the cash field it's about to become authoritative for.
       const totalWasValid = totalValueText.trim() !== '' && Number.isFinite(Number(totalValueText)) && Number(totalValueText) > 0
-      setCashText(totalWasValid ? String(summary.cash) : '')
+      setCashText(totalWasValid ? toFieldText(summary.cash, 2) : '')
       setRows((prev) =>
         prev.map((row) => {
           const derived = summary.rows.find((candidate) => candidate.id === row.id)
-          return { ...row, shares: derived && derived.shares !== null ? String(derived.shares) : '' }
+          return { ...row, shares: derived && derived.shares !== null ? toFieldText(derived.shares, 6) : '' }
         }),
       )
     }

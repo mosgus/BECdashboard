@@ -11,7 +11,13 @@ from sqlalchemy import delete, func as sa_func, select
 
 from app.cache import evict, get_cached, get_fundamentals, get_quotes
 from app.db import session
-from app.market_data import fetch_fundamentals, fetch_history, refresh_ticker, symbol_has_history
+from app.market_data import (
+    fetch_fundamentals,
+    fetch_history,
+    last_completed_session,
+    refresh_ticker,
+    symbol_has_history,
+)
 from app.models import PriceBar, TickerFundamentals, TickerQuote, UniverseTicker
 from app.quotes import QUOTE_TTL_MINUTES, is_market_open, refresh_quotes_if_stale
 
@@ -74,19 +80,26 @@ def add(ticker: str) -> dict:
        UpstreamUnavailable instead of False, and that propagates uncaught here — "we don't
        know" must never be treated as "confirmed no.")
     3. fetch_history pulls HISTORY_YEARS of daily bars, not market_data's bare default
-       (~22 bars with no start date), which is useless for covariance or volatility. A symbol
-       that validates but returns no bars (contract 0042: one transient Yahoo hiccup is
-       enough) raises HistoryUnavailable instead of writing a membership row nothing could
-       ever repair — refresh() cannot first-fetch a member with no stored history at all.
-       evict(key) clears the empty frame fetch_history unconditionally cached, so a same-day
-       retry does not get served that empty frame back from memory.
+       (~22 bars with no start date), which is useless for covariance or volatility. `end` is
+       bounded to the last *completed* session (contract 0053), never None — an unbounded
+       fetch during market hours would download through today and store its in-progress bar
+       as though it were a finished one, making last_close read today's own partial bar and
+       the change % compute to 0.00% by construction. When the reference fetch behind that
+       bound itself fails, the fallback is yesterday, never today — the same wrong answer
+       this fix exists to remove. A symbol that validates but returns no bars this way
+       (contract 0042: one transient Yahoo hiccup is enough, or now also a genuine first-day
+       listing whose only bar is today's) raises HistoryUnavailable instead of writing a
+       membership row nothing could ever repair — refresh() cannot first-fetch a member with
+       no stored history at all. evict(key) clears the empty frame fetch_history
+       unconditionally cached, so a same-day retry does not get served that empty frame back
+       from memory.
     4. fetch_fundamentals is best-effort — None is not an error and blocks nothing. A ticker
        added while Yahoo's fundamentals endpoint is down still gets its price history; the
        name and sector fill in later via refresh().
     5. refresh_ticker catches the new membership up to the last *completed* session before the
-       row is written (contract 0042) — added after the 16:00 ET cutoff, `end=None` above
-       stops at yesterday, and without this the ticker would sit one session behind the rest
-       of the universe until the next scheduled sweep. Reuses the same 16:00 cutoff
+       row is written (contract 0042) — added after the 16:00 ET cutoff, step 3's bound
+       already stops at yesterday, and without this the ticker would sit one session behind
+       the rest of the universe until the next scheduled sweep. Reuses the same 16:00 cutoff
        refresh_ticker/_cached_last_session already apply; nothing here recomputes it.
     6. The membership row is inserted or reactivated only after all of the above succeeds.
     """
@@ -101,7 +114,8 @@ def add(ticker: str) -> dict:
         raise UnknownSymbol(f"Unknown symbol: {key}")
 
     start = _history_start(date.today())
-    stored = fetch_history(key, start=start, end=None)
+    end = last_completed_session() or (date.today() - timedelta(days=1))
+    stored = fetch_history(key, start=start, end=end)
     if stored is None or stored.empty:
         evict(key)
         raise HistoryUnavailable(f"No price history returned for {key}; not added")
@@ -172,7 +186,10 @@ def refresh(ticker: str) -> dict:
 
     stored = get_cached(key)
     if stored is None or stored.empty:
-        fetch_history(key, start=_history_start(date.today()), end=None)
+        # Bounded the same way add()'s first fetch is (contract 0053) — an unbounded fetch
+        # would store today's in-progress bar as a completed session during market hours.
+        heal_end = last_completed_session() or (date.today() - timedelta(days=1))
+        fetch_history(key, start=_history_start(date.today()), end=heal_end)
 
     result = refresh_ticker(key, history_start=HISTORY_START)
 

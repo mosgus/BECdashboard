@@ -149,6 +149,23 @@ export interface DraftSummary {
   problem: string | null
 }
 
+/** A computed number as text for a controlled number input (contract 0053, defect 3). Plain
+ * digits only — no thousands separators (a "1,000" would parse back as NaN) and no exponent
+ * (a number input rejects "1e+21"), which is why this uses toFixed + trimming rather than a
+ * locale-aware formatter: those add exactly the punctuation that breaks re-parsing a number
+ * input's own value back into a number. Trailing zeros are trimmed — 0.5 stays "0.5", not
+ * "0.500000" — and non-finite input (NaN, Infinity, -Infinity) returns '' rather than the
+ * literal word "NaN" or "Infinity" landing in a text box.
+ *
+ * Not a display formatter — lib/format.ts is for reading, this is for re-parsing. Applied
+ * only to values that already exist; the "leave it empty when it cannot be computed" rule
+ * from contract 0050 is unchanged, so a null upstream value must still resolve to '' before
+ * it ever reaches this function, never be coerced through it as a stand-in for "unknown". */
+export function toFieldText(value: number, maxDecimals: number): string {
+  if (!Number.isFinite(value)) return ''
+  return value.toFixed(maxDecimals).replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '')
+}
+
 function parseFiniteOrNull(raw: string): number | null {
   if (raw.trim() === '') return null
   const n = Number(raw)
@@ -240,6 +257,7 @@ export function summariseDraft(
   if (draft.name.trim() === '') problem = 'Give the portfolio a name'
   else if (draft.rows.some((row) => row.ticker === '')) problem = 'Choose a ticker for every asset'
   else if (totalValueParsed === null) problem = 'Set a total portfolio value'
+  else if (cashPercentParsed === null) problem = 'Cash must be a valid percentage'
   else if (draft.rows.some((row) => parseFinitePositive(row.weight) === null)) problem = 'Every asset needs a target weight'
   else if (draft.rows.some((row) => positionPrice(byTicker.get(row.ticker)) === null)) problem = 'One of your assets has no price available'
   else if (Math.abs(allocatedPercent - 100) > 0.01) problem = 'Weights must add up to 100%'

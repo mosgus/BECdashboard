@@ -17,7 +17,7 @@ from app.freshness import (
     detect_drift,
     earliest_session_on_or_after,
     is_stale,
-    last_completed_session,
+    last_completed_session as _pure_last_completed_session,
     missing_range,
     pick_drift_anchors,
     prepend_range,
@@ -260,18 +260,30 @@ def _now_et() -> datetime:
 
 
 def _cached_last_session(today: date, now_et_hour: int) -> date | None:
-    """last_completed_session, behind a TTL cache keyed on (today, past 4pm ET) so refreshing
-    N tickers in the same hour-ish window costs one reference-ticker download, not N."""
+    """freshness.last_completed_session, behind a TTL cache keyed on (today, past 4pm ET) so
+    refreshing N tickers in the same hour-ish window costs one reference-ticker download, not
+    N. Imported under a private alias — see last_completed_session() below, the public,
+    argument-free wrapper external callers use, which would otherwise collide with this
+    module's own import of the pure function by the same name."""
     key = (today, now_et_hour >= 16)
     if key in _last_session_cache:
         return _last_session_cache[key]
 
     reference_raw = _download_history(REFERENCE_TICKER, None, None)
     reference_bars = normalize_history(reference_raw)
-    result = last_completed_session(today, now_et_hour, reference_bars)
+    result = _pure_last_completed_session(today, now_et_hour, reference_bars)
 
     _last_session_cache[key] = result
     return result
+
+
+def last_completed_session() -> date | None:
+    """The most recent session whose bars are final, or None when it cannot be determined —
+    the public wrapper over _cached_last_session(_now_et().date(), _now_et().hour). Callers
+    outside this module (contract 0053: universe.py's two first-fetch sites) need this value
+    and should not reach for the private helpers or call datetime.now() themselves."""
+    now_et = _now_et()
+    return _cached_last_session(now_et.date(), now_et.hour)
 
 
 def _cached_earliest_session(history_start: date) -> date | None:

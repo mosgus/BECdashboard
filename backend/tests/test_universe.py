@@ -1,4 +1,4 @@
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import pandas as pd
 import pytest
@@ -222,11 +222,39 @@ def test_add_fetches_from_history_start(db_mode, monkeypatch):
     window."""
     captured: dict = {}
     _patch_add(monkeypatch, history_capture=captured)
+    monkeypatch.setattr("app.universe.last_completed_session", lambda: date(2026, 9, 17))
 
     add("AAPL")
 
     assert captured["start"] == HISTORY_START
-    assert captured["end"] is None
+    assert captured["end"] == date(2026, 9, 17)
+
+
+def test_add_passes_end_equal_to_last_completed_session(db_mode, monkeypatch):
+    """Contract 0053: end is bounded to the last completed session, never None — an
+    unbounded fetch during market hours would store today's in-progress bar as though it
+    were a finished session."""
+    captured: dict = {}
+    _patch_add(monkeypatch, history_capture=captured)
+    monkeypatch.setattr("app.universe.last_completed_session", lambda: date(2026, 3, 3))
+
+    add("AAPL")
+
+    assert captured["end"] == date(2026, 3, 3)
+
+
+def test_add_falls_back_to_yesterday_when_last_completed_session_is_none(db_mode, monkeypatch):
+    """When the reference fetch behind last_completed_session fails and returns None, the
+    fallback is yesterday, never today — falling back to end=None would reintroduce the exact
+    bug this contract removes."""
+    captured: dict = {}
+    _patch_add(monkeypatch, history_capture=captured)
+    monkeypatch.setattr("app.universe.last_completed_session", lambda: None)
+
+    add("AAPL")
+
+    assert captured["end"] is not None
+    assert captured["end"] == date.today() - timedelta(days=1)
 
 
 # --- 3. add on an already-active ticker -------------------------------------------------
@@ -495,10 +523,11 @@ def test_refresh_first_fetches_when_a_member_has_no_stored_history(db_mode, monk
     monkeypatch.setattr("app.universe.fetch_history", fake_fetch_history)
     monkeypatch.setattr("app.universe.refresh_ticker", _noop_refresh_ticker)
     monkeypatch.setattr("app.universe.fetch_fundamentals", _make_fake_fetch_fundamentals())
+    monkeypatch.setattr("app.universe.last_completed_session", lambda: date(2026, 9, 17))
 
     refresh("TSLA")
 
-    assert called == [("TSLA", HISTORY_START, None)]
+    assert called == [("TSLA", HISTORY_START, date(2026, 9, 17))]
 
 
 def test_refresh_does_not_raise_when_the_heal_fetch_also_returns_empty(db_mode, monkeypatch):

@@ -1246,6 +1246,82 @@ opt-out. Not yet built.
 
 Recorded in both coder role files and in the contract template's Human-verification section.
 
+### Which Yahoo data needs the crumb, and which does not
+
+Measured locally 2026-09-18 with **yfinance 1.7.0**, then confirmed from the deployed app the same
+day. This is expensive to rediscover — it is the difference between "Yahoo is broken from Render" and
+"one of Yahoo's three endpoints is."
+
+Yahoo gates `quoteSummary` behind a crumb token. From Render's shared IP the crumb handshake fails
+and `.info` 401s (contract 0013). **It does not follow that nothing works**, because the data is
+spread across three endpoints with different requirements:
+
+| source | how | needs crumb | carries |
+|---|---|---|---|
+| chart | `yf.download`, `yf.Ticker(t).get_history_metadata()` | **no** | bars, `shortName`, `longName`, `instrumentType`, `currency`, `exchangeName`, `regularMarketPrice`, `chartPreviousClose`, 52-week high/low |
+| search | `yf.Search(t).quotes` | **no** | `sector`, `industry` — equities only; ETFs genuinely carry neither |
+| quoteSummary | `yf.Ticker(t).info` | **yes** | `market_cap`, `trailing_pe`, `forward_pe`, `dividend_yield`, `beta`, `average_volume` |
+
+One `get_history_metadata()` call costs ~0.27s. **`market_cap`, `trailing_pe` and `dividend_yield`
+have no crumb-free equivalent** — do not try to reconstruct market cap from a share count, because
+the share count is itself behind `quoteSummary`. On the deployed app those three columns stay `—` for
+any ticker first seen from Render, and populate only if a refresh later runs from a machine Yahoo
+will hand a crumb to.
+
+Also load-bearing: **yfinance 1.7.0 degrades rather than failing.** `data.py:_make_request` catches a
+429 or transient error from the crumb fetch, logs, and continues **without** a crumb, letting the
+endpoint decide. So crumb-free endpoints keep working while the handshake is broken — which is the
+only reason the tiering above is possible at all.
+
+Built as contract 0051: `.info` first and **authoritative** when it succeeds (full-row overwrite, one
+request, the 22 laptop-populated rows unchanged); the two crumb-free tiers only when it doesn't.
+Confirmed on Render 2026-09-18 — PBR came back `Petroleo Brasileiro S.A. Petrob` / `Equity` /
+`Energy`, so **both** tier 1 and tier 2 work from that IP.
+
+Two rules that came out of it and must not be quietly dropped:
+
+- **A partial write never overwrites a non-null stored value with `None`.**
+  `cache.store_fundamentals` upserted every column unconditionally; routing a two-field crumb-free
+  merge through that would have blanked every existing row's market cap, P/E and yield. Hence
+  `partial=True`. An authoritative source is still allowed to clear a field — a non-payer really can
+  stop paying a dividend — so `partial=False` keeps the old behaviour exactly.
+- **Retry on incompleteness, not absence.** Once partial rows exist, "the row is `None`" is never
+  true again, so a retry gated on absence never fires. The cost of gating on incompleteness is ≤3
+  extra `.info` attempts per day per Render-added ticker, and the benefit is that it self-heals the
+  moment Yahoo relents.
+
+### A batch TTL cannot be read off the rows it is meant to cover
+
+`quotes.refresh_quotes_if_stale` gated on `MAX(fetched_at)` across the requested tickers. A ticker
+with **no quote row contributes nothing to a MAX**, so a newly-added ticker could never make the
+batch look stale — it waited out everyone else's TTL before getting its first quote.
+
+`MIN` is not the fix: a ticker that permanently fails to quote would then make the batch look stale
+forever, firing a network request on every page load. The gate belongs on a **last-attempt timestamp
+in `app_state`**, claim-written before the fetch — the pattern `autorefresh.run_auto_refresh_if_due`
+already uses. An attempt that fetched nothing still claims the window. Contract 0051.
+
+The general shape: **when the decision is "has the batch been tried recently", never derive it from
+per-row data, because the rows that most need the work are exactly the rows that are missing.**
+
+### `add()` stores today's partial bar, and the change % reads 0.00% because of it
+
+Found 2026-09-18, after 0051 deployed. `universe.add()` calls `fetch_history(key, start, end=None)`,
+and `end=None` lets yfinance download **through today** — so a ticker added during market hours gets
+today's in-progress bar stored as though it were a completed session. `last_close` then reads that
+bar, making the change % a comparison of today's price against itself: **~0.00%, by construction, no
+matter how good the live quote is.** Every other ticker stops at the previous session, which is why
+only the newly-added one shows it.
+
+`refresh_ticker` does not repair it the same day: `is_stale` is `newest < last_session`, and during
+the session the stored bar is *newer* than the last completed session. It **does** self-correct at
+the next close, when `last_session` advances and `missing_range` re-fetches from the newest stored
+date precisely to overwrite a partial bar — that guard exists, it is just unreachable until the row
+goes stale.
+
+The fix is at the source: bound `add()`'s `end` to the last completed session so a partial bar is
+never written. Not yet built.
+
 ## Open questions (not decided)
 
 - **Whether tickers can be removed from the universe.** Only add and update have been specified. If removal exists, decide whether it deletes cached price history or just de-lists the ticker — the no-FK rule above means de-listing is the cheap default.
