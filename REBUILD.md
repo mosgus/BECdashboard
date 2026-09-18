@@ -965,6 +965,32 @@ memory, `is_stale` report "current", and no fetch happen — the hard delete sil
 memory and storage disagreeing in the other direction. The only manual check that distinguishes a
 real delete from a cache-reversed one is that re-adding takes seconds and refetches ten years.
 
+**News comes from five fixed market feeds, not from the universe.** Contract 0040, 2026-09-17.
+`MARKET_NEWS_TICKERS = ("^GSPC", "^IXIC", "^RUT", "SPY", "QQQ")`, and only articles from
+`PREFERRED_PUBLISHERS` are stored at all — the filter runs at **ingest**, in the refresh loop, after
+`parse_article` and outside it (a parse failure and an editorial rejection must stay
+distinguishable). The whole point is that it is **O(1) in universe size**: five feeds whether the
+universe holds 20 tickers or 500, against 500 yfinance calls per refresh under per-ticker
+aggregation. The accepted cost is that news about individual holdings disappears.
+
+**Yahoo has no top-stories channel. Do not go looking for one again.** Four routes measured
+2026-09-17, all drawing from one provider pool and all dominated by content mills:
+`finance.yahoo.com/rss/topstories` gave ~2 of 50 broad-market **and carries no publisher field**, so
+it cannot be filtered at all; `yf.Search("stock market")` gave 11 of 15 as Zacks *"Why X Outpaced the
+Stock Market Today"*; the `^GSPC`/`^IXIC`/`^RUT` feeds gave the same templates, because Yahoo attaches
+anything merely mentioning "the market"; per-ticker feeds gave 6 of 16 preferred. **The channel is
+not the variable — the publisher is.** Fixed broad feeds work only *because* they are filtered:
+unfiltered they are indistinguishable from the per-ticker feeds they replaced.
+
+**A backend constant can silently starve the frontend through an unrelated parameter.** Cutting the
+source feeds from twenty to five turned `MAX_PER_TICKER = 1` in `NewsSection.tsx` from a diversity
+control into a hard cap of **five articles** for the whole page. Nothing in either file references the
+other. When changing how many things a query iterates, grep the frontend for per-item caps.
+
+**Retention already guarantees freshness — do not add age logic.** The stated worry that per-ticker
+feeds pull stale articles was measured and disproved: 380 of 381 stored rows were under two days old,
+because `NEWS_RETENTION_DAYS` bounds it. Measure the premise before building against it.
+
 **An exported `DATABASE_URL` silently beats `backend/.env`.** Cost a debugging session on
 2026-09-15. `config.py` calls `load_dotenv(path)`, and `load_dotenv` **does not override a variable
 already present in the environment** — so a stale `export DATABASE_URL=...` left in one terminal from

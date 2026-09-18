@@ -6,8 +6,8 @@ import { relativeTime } from '../lib/relativeTime'
 import { Tooltip } from './Tooltip'
 
 const LIMIT = 20
-const MAX_PER_TICKER = 2
-const CARDS_PER_PAGE = 6
+const MAX_PER_TICKER = 0
+const CARDS_PER_PAGE = 4
 const VISIBLE_LIST_ROWS = 5
 
 /** w-full is load-bearing here, not belt-and-braces. Tooltip wraps its child in an
@@ -76,7 +76,7 @@ function ArticleCard({ article, now }: { article: NewsArticle; now: Date }): JSX
           <img
             src={article.thumbnail_url ?? undefined}
             alt=""
-            className="w-full h-40 object-cover"
+            className="w-full h-52 object-cover"
             referrerPolicy="no-referrer"
             loading="lazy"
             onError={() => setImageFailed(true)}
@@ -220,7 +220,7 @@ export function NewsSection(): JSX.Element | null {
                 <div
                   key={i}
                   inert={i !== page}
-                  className="w-full shrink-0 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 auto-rows-max gap-5"
+                  className="w-full shrink-0 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 auto-rows-max gap-5"
                 >
                   {pageCards.map((article) => (
                     <ArticleCard key={article.id} article={article} now={now} />

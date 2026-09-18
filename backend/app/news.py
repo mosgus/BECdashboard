@@ -1,12 +1,16 @@
-"""Universe-wide news: stored, not live. Contract 0030 measured `yf.Ticker(t).news` at
-0.11-0.28s per ticker from Render — fine as a background task, unacceptable inside a launch
-page render that Render already cold-starts at ~43s. needs_news_refresh/parse_article are
-pure — no database, no clock, no network. The impure functions — run_news_refresh_if_due,
-refresh_news_if_stale and recent_articles — are where the database reads/writes and the
-yfinance calls live.
+"""Broad-market news: stored, not live, from a fixed set of market-wide feeds — not the
+universe. Contract 0040 replaced per-universe-ticker aggregation with MARKET_NEWS_TICKERS
+specifically so this stays O(1) as the universe grows: walking every active ticker made
+single-stock articles scale linearly with universe size while broad-market copy did not, and
+at a few hundred tickers the feed would be almost entirely single-name noise (measured
+2026-09-17: five fixed feeds yield ~8 broad-market articles after the publisher filter, versus
+500 yfinance calls the old per-ticker approach would have cost at that universe size).
+is_preferred_publisher/needs_news_refresh/parse_article are pure — no database, no clock, no
+network. The impure functions — run_news_refresh_if_due, refresh_news_if_stale and
+recent_articles — are where the database reads/writes and the yfinance calls live.
 
-One blended feed, not one per ticker: `.news` is associated with a ticker, not about it
-(contract 0030 — AAPL's top story was about a Canadian telecom), so a per-ticker feed would
+One blended feed, not one per source: `.news` is associated with a ticker, not about it
+(contract 0030 — AAPL's top story was about a Canadian telecom), so a per-source feed would
 claim more relevance than the data supports.
 
 Contract 0037: news and the briefing no longer run on their own rolling TTL. They refresh on
@@ -22,15 +26,70 @@ from sqlalchemy import delete, func, nullslast, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
-from app.autorefresh import active_universe_tickers as _shared_active_universe_tickers
 from app.db import is_enabled, session
-from app.models import AppState, NewsArticle, UniverseTicker
+from app.models import AppState, NewsArticle
 from app.schedule import needs_auto_refresh
 
 logger = logging.getLogger(__name__)
 
 NEWS_REFRESH_KEY = "news_refresh"
 NEWS_RETENTION_DAYS = 2
+
+# Five market-wide feeds, measured together (contract 0040) rather than derived from the
+# universe — a fixed cost regardless of how many tickers the universe holds. Trivially
+# extendable later (^DJI, DIA, IWM, ^VIX are candidates) if the yield proves thin; see the
+# report for the measured baseline.
+MARKET_NEWS_TICKERS = ("^GSPC", "^IXIC", "^RUT", "SPY", "QQQ")
+
+# Wire services and mainstream financial press, seeded from the measured publisher split
+# (contract 0039: 488 stored articles, 46 publishers — MT Newswires produces exactly the
+# broad-market wire copy the briefing wants, outnumbered roughly 4-to-1 by single-name SEO
+# content from a handful of high-volume outlets). CNBC, MarketWatch and Associated Press are
+# not in the store yet as of contract 0039; they are plausible future Yahoo providers and cost
+# nothing to include ahead of time. Deliberately excluded: 24/7 Wall St., Motley Fool, Zacks,
+# GuruFocus.com, Trefis, Insider Monkey, Simply Wall St., StockStory, Stocktwits, MarketBeat —
+# the single-name SEO content this filter exists to keep out.
+#
+# Moved here from app/briefing.py in contract 0040: this module is now the ingest boundary
+# (a non-preferred article is never stored at all), and briefing.py already imports from here
+# (`from app.news import recent_articles`) — moving the constant the other way would make that
+# a circular import.
+PREFERRED_PUBLISHERS: frozenset[str] = frozenset(
+    {
+        "MT Newswires",
+        "Reuters",
+        "Bloomberg",
+        "The Wall Street Journal",
+        "Financial Times",
+        "Barrons.com",
+        "Investor's Business Daily",
+        "TheStreet",
+        "Yahoo Finance",
+        "Yahoo Finance Video",
+        "AFP",
+        "Fortune",
+        "Quartz",
+        "CBS News",
+        "Sky News",
+        "Investopedia",
+        "Kiplinger",
+        "Associated Press",
+        "CNBC",
+        "MarketWatch",
+    }
+)
+
+
+def is_preferred_publisher(publisher: str | None) -> bool:
+    """True when publisher is in PREFERRED_PUBLISHERS. Case-insensitive; None is never
+    preferred. Exact match, not substring — "Benzinga" must not match "Benzinga Prediction
+    Markets"; those are different sources that happen to share a prefix. Reads
+    PREFERRED_PUBLISHERS fresh on every call (not a derived module-level set) so it stays
+    overridable by monkeypatching just that name in tests."""
+    if publisher is None:
+        return False
+    preferred_lower = {p.lower() for p in PREFERRED_PUBLISHERS}
+    return publisher.lower() in preferred_lower
 
 
 def needs_news_refresh(
@@ -132,24 +191,6 @@ def get_newest_fetched_at() -> datetime | None:
     return _as_utc(newest)
 
 
-def active_universe_tickers() -> list[str]:
-    """One bounded query — the active universe's ticker list. Deliberately does not go
-    through app.universe.list_all(): that pulls fundamentals, bars and quotes and can trigger
-    a live-quote fetch, none of which a news refresh needs.
-
-    Kept even though run_news_refresh_if_due calls app.autorefresh's copy of this same query
-    instead (contract 0037 — reusing one existing implementation rather than writing a third)
-    — this one predates that module and remains in use by GET /news's own tests."""
-    if not is_enabled():
-        return []
-    with session() as db:
-        return list(
-            db.execute(
-                select(UniverseTicker.ticker).where(UniverseTicker.active.is_(True))
-            ).scalars().all()
-        )
-
-
 def _get_news_claim() -> datetime | None:
     if not is_enabled():
         return None
@@ -234,6 +275,14 @@ def refresh_news_if_stale(tickers: list[str], now_utc: datetime, now_et: datetim
             parsed = parse_article(raw, ticker, now_utc)
             if parsed is None:
                 continue
+            # Filtered here, not inside parse_article: that function's contract is "one
+            # yfinance item -> a row dict, or None when malformed" — folding an editorial
+            # policy into it would make a parse failure and a policy rejection
+            # indistinguishable. A non-preferred article is never stored at all (contract
+            # 0040) — retention is two days, so nothing is lost long-term, and the cards, the
+            # list and the briefing all see the same curated set with no extra plumbing.
+            if not is_preferred_publisher(parsed["publisher"]):
+                continue
             parsed_by_id.setdefault(parsed["id"], parsed)
 
     if parsed_by_id:
@@ -264,7 +313,10 @@ def run_news_refresh_if_due(now_utc: datetime, now_et: datetime) -> None:
     Claims app_state["news_refresh"] before doing any fetch — same reasoning as
     autorefresh.run_auto_refresh_if_due: this narrows, but does not eliminate, the race between
     two visitors landing in the same window, and a window that errors is never retried by the
-    next visitor thirty seconds later. It waits for the next window instead."""
+    next visitor thirty seconds later. It waits for the next window instead.
+
+    Reads MARKET_NEWS_TICKERS, not the universe (contract 0040) — this is what keeps the
+    refresh O(1) regardless of how many tickers the universe holds."""
     if not is_enabled():
         return
 
@@ -275,8 +327,7 @@ def run_news_refresh_if_due(now_utc: datetime, now_et: datetime) -> None:
 
     _set_news_claim(now_utc)
 
-    tickers = _shared_active_universe_tickers()
-    refresh_news_if_stale(tickers, now_utc, now_et)
+    refresh_news_if_stale(list(MARKET_NEWS_TICKERS), now_utc, now_et)
 
 
 def cap_per_ticker(articles: list[dict], max_per_ticker: int, limit: int) -> list[dict]:

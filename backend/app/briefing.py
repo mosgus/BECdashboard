@@ -21,7 +21,7 @@ from sqlalchemy import delete, select
 from app.config import Settings
 from app.db import is_enabled, session
 from app.models import NewsSummary
-from app.news import recent_articles
+from app.news import PREFERRED_PUBLISHERS, recent_articles
 
 logger = logging.getLogger(__name__)
 
@@ -122,41 +122,6 @@ def build_prompt(
 def _format_headline(article: dict) -> str:
     publisher = article.get("publisher")
     return f"- {article['title']} ({publisher})" if publisher else f"- {article['title']}"
-
-
-# Wire services and mainstream financial press, seeded from the measured publisher split
-# (contract 0039: 488 stored articles, 46 publishers — MT Newswires produces exactly the
-# broad-market wire copy the briefing wants, outnumbered roughly 4-to-1 by single-name SEO
-# content from a handful of high-volume outlets). CNBC, MarketWatch and Associated Press are
-# not in the store yet as of this contract; they are plausible future Yahoo providers and
-# cost nothing to include ahead of time. Deliberately excluded: 24/7 Wall St., Motley Fool,
-# Zacks, GuruFocus.com, Trefis, Insider Monkey, Simply Wall St., StockStory, Stocktwits,
-# MarketBeat — the 213 articles this preference exists to demote, not remove (they still
-# appear in the news cards; only the briefing's reading order changes).
-PREFERRED_PUBLISHERS: frozenset[str] = frozenset(
-    {
-        "MT Newswires",
-        "Reuters",
-        "Bloomberg",
-        "The Wall Street Journal",
-        "Financial Times",
-        "Barrons.com",
-        "Investor's Business Daily",
-        "TheStreet",
-        "Yahoo Finance",
-        "Yahoo Finance Video",
-        "AFP",
-        "Fortune",
-        "Quartz",
-        "CBS News",
-        "Sky News",
-        "Investopedia",
-        "Kiplinger",
-        "Associated Press",
-        "CNBC",
-        "MarketWatch",
-    }
-)
 
 
 def preferred_headlines(articles: list[dict], limit: int) -> list[dict]:

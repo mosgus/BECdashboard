@@ -7,10 +7,11 @@ from sqlalchemy import event, select
 from app.db import get_engine, session
 from app.models import AppState, Base, NewsArticle, UniverseTicker
 from app.news import (
+    MARKET_NEWS_TICKERS,
     NEWS_REFRESH_KEY,
-    active_universe_tickers,
     cap_per_ticker,
     get_newest_fetched_at,
+    is_preferred_publisher,
     needs_news_refresh,
     parse_article,
     recent_articles,
@@ -164,6 +165,61 @@ def test_parse_article_falls_back_to_description_when_summary_absent():
     assert row["summary"] == "The description."
 
 
+def test_parse_article_still_returns_a_row_for_a_non_preferred_publisher():
+    """The publisher policy lives in the refresh loop, not in the parser (contract 0040) — a
+    Zacks item is malformed-or-not exactly like any other; parse_article has no opinion on
+    editorial preference."""
+    row = parse_article(_raw_item("z1", provider={"displayName": "Zacks"}), "^GSPC", datetime.now(timezone.utc))
+    assert row is not None
+    assert row["publisher"] == "Zacks"
+
+
+# --- is_preferred_publisher ------------------------------------------------------------------
+
+
+def test_is_preferred_publisher_true_for_a_preferred_name():
+    assert is_preferred_publisher("Reuters") is True
+
+
+def test_is_preferred_publisher_false_for_a_demoted_name():
+    assert is_preferred_publisher("Zacks") is False
+
+
+def test_is_preferred_publisher_false_for_none():
+    assert is_preferred_publisher(None) is False
+
+
+def test_is_preferred_publisher_is_case_insensitive():
+    assert is_preferred_publisher("reuters") is True
+    assert is_preferred_publisher("REUTERS") is True
+
+
+def test_is_preferred_publisher_does_not_substring_match(monkeypatch):
+    monkeypatch.setattr("app.news.PREFERRED_PUBLISHERS", frozenset({"Benzinga"}))
+    assert is_preferred_publisher("Benzinga") is True
+    assert is_preferred_publisher("Benzinga Prediction Markets") is False
+
+
+# --- refresh_news_if_stale: publisher filter at ingest ----------------------------------------
+
+
+def test_refresh_stores_only_the_preferred_publishers_article(db_mode, monkeypatch):
+    def fake_fetch(ticker):
+        return [
+            _raw_item("mt1", title="Broad market update", provider={"displayName": "MT Newswires"}),
+            _raw_item("z1", title="Why XYZ outpaced the market today", provider={"displayName": "Zacks"}),
+        ]
+
+    monkeypatch.setattr("app.news.fetch_news_for", fake_fetch)
+
+    now_et = _et(9, 1)
+    refresh_news_if_stale(["^GSPC"], _utc(now_et), now_et)
+
+    with session() as db:
+        ids = list(db.execute(select(NewsArticle.id)).scalars().all())
+    assert ids == ["mt1"]
+
+
 # --- refresh_news_if_stale: failure isolation and no-wipe -----------------------------------
 
 
@@ -199,7 +255,7 @@ def test_refresh_where_one_ticker_raises_stores_the_successful_ones(db_mode, mon
     assert rows == [("msft-1", "MSFT")]
 
 
-# --- run_news_refresh_if_due: gating, claim-first, and wiring to active tickers ----------------
+# --- run_news_refresh_if_due: gating, claim-first, and wiring to the fixed feed list -----------
 
 
 def test_run_news_refresh_if_due_noop_when_window_already_claimed(db_mode, monkeypatch):
@@ -217,10 +273,13 @@ def test_run_news_refresh_if_due_noop_when_window_already_claimed(db_mode, monke
     run_news_refresh_if_due(now_utc, now_et + timedelta(minutes=5))
 
 
-def test_run_news_refresh_if_due_fetches_for_active_tickers_on_an_empty_feed(db_mode, monkeypatch):
+def test_run_news_refresh_if_due_fetches_exactly_the_market_news_tickers(db_mode, monkeypatch):
+    """The universe must never be consulted (contract 0040) — seed a fake "universe" with a
+    completely different ticker set, so this fails loudly if run_news_refresh_if_due ever goes
+    back to reading it instead of the fixed feed list."""
     with session() as db:
         db.add(UniverseTicker(ticker="AAPL", active=True))
-        db.add(UniverseTicker(ticker="RETIRED", active=False))
+        db.add(UniverseTicker(ticker="MSFT", active=True))
 
     called = []
 
@@ -233,16 +292,14 @@ def test_run_news_refresh_if_due_fetches_for_active_tickers_on_an_empty_feed(db_
     now_et = _et(10, 0)
     run_news_refresh_if_due(_utc(now_et), now_et)
 
-    assert called == ["AAPL"]
+    assert called == list(MARKET_NEWS_TICKERS)
 
 
 def test_run_news_refresh_if_due_writes_the_claim_before_the_fetch_even_if_it_raises(db_mode, monkeypatch):
-    """Assert on stored state, not source order: a fetch stub that raises on the only ticker
+    """Assert on stored state, not source order: a fetch stub that raises on the first feed
     must still leave app_state["news_refresh"] holding the new timestamp — proving the claim
     was written before the fetch ran, not after it finished."""
     _add_article("existing-1", fetched_at=datetime(2026, 1, 1, tzinfo=timezone.utc))
-    with session() as db:
-        db.add(UniverseTicker(ticker="AAPL", active=True))
 
     def _raise(ticker):
         raise RuntimeError(f"boom: {ticker}")
@@ -396,17 +453,6 @@ def test_recent_articles_default_max_per_ticker_is_uncapped(db_mode):
     rows = recent_articles(5)
 
     assert len(rows) == 5
-
-
-# --- active_universe_tickers ------------------------------------------------------------------
-
-
-def test_active_universe_tickers_excludes_inactive(db_mode):
-    with session() as db:
-        db.add(UniverseTicker(ticker="AAPL", active=True))
-        db.add(UniverseTicker(ticker="OLD", active=False))
-
-    assert active_universe_tickers() == ["AAPL"]
 
 
 # --- recent_articles ---------------------------------------------------------------------------

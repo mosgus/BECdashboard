@@ -183,6 +183,17 @@ export function ChartDialog({ ticker, entry, onClose, onDeleted }: ChartDialogPr
   const yPad = (yMax - yMin) * 0.08 || 1
   const xAxisInterval = shown.length > 0 ? Math.max(0, Math.ceil(shown.length / 5) - 1) : 0
 
+  const yTicks = (() => {
+    if (yMin === yMax) return []
+    const range = yMax - yMin
+    return [
+      yMin + range * 0.25,
+      yMin + range * 0.5,
+      yMin + range * 0.75,
+      yMax + yPad,
+    ]
+  })()
+
   return (
     <div
       className="fixed inset-0 bg-foreground/35 flex items-center justify-center px-4 z-[100] overflow-y-auto"
@@ -263,6 +274,7 @@ export function ChartDialog({ ticker, entry, onClose, onDeleted }: ChartDialogPr
                 />
                 <YAxis
                   domain={[yMin, yMax + yPad]}
+                  ticks={yTicks}
                   tickFormatter={(value: number) => formatPrice(value)}
                   tick={{ fontSize: 10, fill: 'var(--color-muted)' }}
                   axisLine={false}
