@@ -29,6 +29,13 @@ export function formatCount(v: number): string {
   return v.toLocaleString('en-US')
 }
 
+/** Share counts. Thousands separators like formatCount, but up to 6 fraction digits and no
+ *  trailing zeros — fractional shares are ordinary, and 0.5 should not read as 0.500000.
+ *  Separate from formatCount, which formats bar counts and must stay integral. */
+export function formatShares(v: number): string {
+  return v.toLocaleString('en-US', { maximumFractionDigits: 6 })
+}
+
 export function formatDateRange(a: string | null, b: string | null): string {
   if (a === null || b === null) return NIL
   return `${a} → ${b}`

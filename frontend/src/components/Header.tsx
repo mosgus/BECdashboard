@@ -19,7 +19,7 @@ export function Header(): JSX.Element {
         <div className="flex items-center flex-shrink-0">
           <nav className="flex items-center gap-0 sm:gap-1">
             <NavItem label="Universe" to="/universe" />
-            <NavItem label="Portfolios" />
+            <NavItem label="Portfolios" to="/portfolios" />
             <NavItem label="Research" />
             <NavItem label="Settings & Ops" icon title="Settings & Ops" to="/ops" />
           </nav>

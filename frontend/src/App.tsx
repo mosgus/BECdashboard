@@ -3,6 +3,7 @@ import { Header } from './components/Header'
 import { TickerStrip } from './components/TickerStrip'
 import { LaunchPage } from './pages/LaunchPage'
 import { OpsPage } from './pages/OpsPage'
+import { PortfoliosPage } from './pages/PortfoliosPage'
 import { UniversePage } from './pages/UniversePage'
 
 export default function App() {
@@ -14,6 +15,7 @@ export default function App() {
         <Route path="/" element={<LaunchPage />} />
         <Route path="/universe" element={<UniversePage />} />
         <Route path="/ops" element={<OpsPage />} />
+        <Route path="/portfolios" element={<PortfoliosPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>
