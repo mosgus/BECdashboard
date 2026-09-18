@@ -160,7 +160,7 @@ export function NewsSection(): JSX.Element | null {
   const [articles, setArticles] = useState<NewsArticle[]>([])
   const [summary, setSummary] = useState<NewsSummary | null>(null)
   const [failed, setFailed] = useState(false)
-  const [page, setPage] = useState(0)
+  const [pageIndex, setPage] = useState(0)
 
   useEffect(() => {
     let cancelled = false
@@ -181,13 +181,6 @@ export function NewsSection(): JSX.Element | null {
     }
   }, [])
 
-  // articles only ever changes once today (the fetch above never re-runs), but a page index
-  // left over from a previous, larger article set would otherwise be able to point past the
-  // end of a smaller one.
-  useEffect(() => {
-    setPage(0)
-  }, [articles])
-
   if (failed || articles.length === 0) return null
 
   const now = new Date()
@@ -201,6 +194,10 @@ export function NewsSection(): JSX.Element | null {
 
   const pages = chunk(cards, CARDS_PER_PAGE)
   const totalPages = pages.length
+  // Clamped during render rather than reset by an effect on [articles]. A stored index left
+  // over from a larger article set must not point past a smaller one, but doing that with
+  // setState inside an effect costs a second render pass for a value that is derivable here.
+  const page = Math.min(pageIndex, Math.max(0, totalPages - 1))
 
   return (
     <section className="mt-14">
@@ -234,7 +231,7 @@ export function NewsSection(): JSX.Element | null {
               <PageButton
                 label="Previous articles"
                 disabled={page === 0}
-                onClick={() => setPage((p) => p - 1)}
+                onClick={() => setPage(page - 1)}
               >
                 ‹
               </PageButton>
@@ -244,7 +241,7 @@ export function NewsSection(): JSX.Element | null {
               <PageButton
                 label="Next articles"
                 disabled={page === totalPages - 1}
-                onClick={() => setPage((p) => p + 1)}
+                onClick={() => setPage(page + 1)}
               >
                 ›
               </PageButton>
