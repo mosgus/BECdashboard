@@ -8,6 +8,7 @@ from app.cache import clear
 from app.db import get_engine, session
 from app.models import Base, PriceBar, TickerFundamentals, TickerQuote, UniverseTicker
 from app.strip import (
+    bar_window_start,
     build_strip_response,
     nth_prior_close,
     pct_return,
@@ -114,6 +115,31 @@ def test_ytd_base_close_series_starting_mid_year():
 def test_ytd_base_close_none_when_no_bar_on_or_after_cutoff():
     bars = [(date(2025, 6, 1), 50.0)]
     assert ytd_base_close(bars, 2026) is None
+
+
+# --- bar_window_start: the bounded read window ---------------------------------------------
+# Narrowing this fails silently — five_day/thirty_day/ytd are computed and returned but not
+# rendered yet, so a too-short window drops them to None with nothing on screen to notice.
+
+
+def test_bar_window_start_reaches_january_first_in_september():
+    assert bar_window_start(date(2026, 9, 18), 2026) == date(2026, 1, 1)
+
+
+def test_bar_window_start_reaches_back_past_new_year_in_early_january():
+    """1 January alone cannot satisfy nth_prior_close(bars, 30): on 5 January only a handful of
+    sessions exist in the year, so the window must reach into the previous one."""
+    assert bar_window_start(date(2027, 1, 5), 2027) == date(2026, 10, 22)
+
+
+@pytest.mark.parametrize(
+    "today",
+    [date(2026, 1, 1), date(2026, 1, 15), date(2026, 3, 1), date(2026, 7, 4), date(2026, 12, 31)],
+)
+def test_bar_window_start_always_satisfies_both_lower_bounds(today):
+    start = bar_window_start(today, today.year)
+    assert start <= date(today.year, 1, 1), "must reach 1 January for ytd_base_close"
+    assert (today - start).days >= 45, "must leave room for 31 trading sessions"
 
 
 # --- resolve_display_name --------------------------------------------------------------------

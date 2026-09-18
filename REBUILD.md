@@ -1051,6 +1051,35 @@ out. The planner initially credited the block for a 22.7s → 7.7s speedup that 
 the tests. **Verify a network block by making a real call through the library you care about, never
 through `socket`.**
 
+**The strip reads a bounded date window, not full history.** Audit fix, 2026-09-18.
+`build_strip_response` derives only five things from bars — newest close, the one before it, and the
+5-session, 30-session and YTD anchors — but read every bar for every ticker to do it: **55,917 rows
+transferred where 3,914 sufficed**, on the one endpoint that runs on every page load. `bar_window_start`
+bounds it. Measured warm, the bar query went **0.646s → 0.088s and 3,983 KB → 277 KB resident**; the
+whole function is ~0.30s median against ~0.86s before, and at 500 tickers it avoids ~1.3M rows.
+
+The window is `min(1 January, today − 75 days)` and **both bounds are load-bearing**. YTD needs the
+first session on or after 1 January; `nth_prior_close(bars, 30)` needs 31 sessions, which 1 January
+does *not* guarantee — on 5 January only a handful of sessions exist in the year. 75 calendar days is
+roughly 52 sessions. **Widening is safe, narrowing fails silently**, because `five_day` /
+`thirty_day` / `ytd` are computed and returned but not yet rendered (contracts 0028, 0033) — a short
+window drops them to `None` with nothing on screen to notice. Hence the pure, parametrised tests.
+
+`list_all` was already right by contrast — `COUNT`/`MIN`/`MAX` with `GROUP BY`, plus a window function
+ranking non-null closes, one row per ticker. The strip was the only place reading whole tables.
+
+**recharts is lazy-loaded; the launch page must never pull it.** Audit fix, 2026-09-18. `ChartDialog`
+statically imported recharts (9.3 MB on disk) into the main chunk, so every visitor downloaded the
+charting library — including launch-page-only visitors who never chart anything. `React.lazy` plus
+**conditional rendering on `selectedTicker`** split it: initial JS **650.63 kB → 296.24 kB**, gzipped
+**195.61 kB → 92.56 kB**.
+
+Both halves are required. `ChartDialog` returns `null` internally for a null ticker, so leaving it
+mounted-and-returning-null would still fetch the chunk on page load and the split would buy nothing.
+And `UniversePage` warms the chunk with a bare `void import(...)` after mount — without it the first
+row click waits on a ~103 kB download behind `fallback={null}`, which reads as the click doing
+nothing. The preload sits in `UniversePage`, never in `App`, so `/` stays clean.
+
 **An exported `DATABASE_URL` silently beats `backend/.env`.** Cost a debugging session on
 2026-09-15. `config.py` calls `load_dotenv(path)`, and `load_dotenv` **does not override a variable
 already present in the environment** — so a stale `export DATABASE_URL=...` left in one terminal from

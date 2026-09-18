@@ -1,9 +1,8 @@
-import { useEffect, useState } from 'react'
+import { Suspense, lazy, useEffect, useState } from 'react'
 import type { JSX } from 'react'
 import { AddTickerForm } from '../components/AddTickerForm'
 import { UniverseTable } from '../components/UniverseTable'
 import { FilterDialog } from '../components/FilterDialog'
-import { ChartDialog } from '../components/ChartDialog'
 import { DownloadIcon } from '../components/DownloadIcon'
 import { Tooltip } from '../components/Tooltip'
 import { ApiError, getUniverse } from '../api/client'
@@ -15,6 +14,14 @@ type State =
   | { status: 'loading' }
   | { status: 'error'; message: string }
   | { status: 'ready'; entries: UniverseEntry[] }
+
+/** Lazy so recharts (9.3 MB on disk, ~400 kB of the bundle) is not in the initial download.
+ * Nothing on the launch page charts anything, and most Universe visits never open a chart.
+ * Gated on `selectedTicker` below as well as lazily imported — kept mounted-and-returning-null,
+ * the chunk would still be fetched on page load and the split would buy nothing. */
+const ChartDialog = lazy(() =>
+  import('../components/ChartDialog').then((m) => ({ default: m.ChartDialog })),
+)
 
 const CARD = 'bg-brand-surface border border-brand-border rounded-[var(--radius-card)]'
 
@@ -51,6 +58,14 @@ export function UniversePage(): JSX.Element {
 
   useEffect(() => {
     load()
+  }, [])
+
+  // Warm the lazy chart chunk in the background once the table is on screen. Without this the
+  // first row click waits on a ~103 kB download behind `fallback={null}`, which reads as the
+  // click having done nothing. Preloading after mount keeps the initial bundle small *and* makes
+  // the dialog feel instant, which a Suspense spinner would not.
+  useEffect(() => {
+    void import('../components/ChartDialog')
   }, [])
 
   const filterResult = state.status === 'ready' ? applyFilters(state.entries, filters) : null
@@ -226,15 +241,19 @@ export function UniversePage(): JSX.Element {
               onClose={() => setFilterDialogOpen(false)}
             />
 
-            <ChartDialog
-              ticker={selectedTicker}
-              entry={state.entries.find((entry) => entry.ticker === selectedTicker) ?? null}
-              onClose={() => setSelectedTicker(null)}
-              onDeleted={() => {
-                setSelectedTicker(null)
-                load()
-              }}
-            />
+            {selectedTicker !== null && (
+              <Suspense fallback={null}>
+                <ChartDialog
+                  ticker={selectedTicker}
+                  entry={state.entries.find((entry) => entry.ticker === selectedTicker) ?? null}
+                  onClose={() => setSelectedTicker(null)}
+                  onDeleted={() => {
+                    setSelectedTicker(null)
+                    load()
+                  }}
+                />
+              </Suspense>
+            )}
           </>
         )}
       </main>
