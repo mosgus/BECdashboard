@@ -128,6 +128,37 @@ def _set_quote_attempt(value_at: datetime) -> None:
         db.execute(stmt)
 
 
+def refresh_quote_for(ticker: str) -> None:
+    """Fetch and store one ticker's live quote immediately, bypassing the batch TTL claim
+    (contract 0054). For the moment a ticker joins the universe and provably has no quote row
+    — the batch gate in refresh_quotes_if_stale is about when the batch was last *tried*, not
+    which tickers it *covered*, so a ticker added inside an existing claim window would
+    otherwise show no live price (and therefore a 0.00% change) until that window lapsed on
+    its own.
+
+    Market-hours gated, like every other quote path: outside the session the Price column
+    shows the most recent close by design, and a minute-bar fetch then would return the
+    previous session dressed as a live quote.
+
+    Does NOT read or write QUOTE_ATTEMPT_KEY — this is bounded by a deliberate user action
+    (adding a ticker), not a page load, so it cannot produce the per-page-load storm the claim
+    exists to prevent, and must not consume the batch window the next page load still needs to
+    run. No-op with no database configured, or outside market hours — both checked before the
+    fetch, not just before the write, so a degraded or after-hours deployment makes no network
+    call at all. Reuses fetch_quotes/store_quotes; a one-element list is already the correct
+    shape for those, so no second download path is needed."""
+    if not is_enabled():
+        return
+
+    now_et = datetime.now(ZoneInfo("America/New_York"))
+    if not is_market_open(now_et):
+        return
+
+    quotes = fetch_quotes([ticker])
+    if quotes:
+        store_quotes(quotes, datetime.now(timezone.utc))
+
+
 def refresh_quotes_if_stale(tickers: list[str]) -> None:
     """The impure composition: read the last refresh *attempt*, consult needs_refresh, claim
     before fetching, and upsert only if stale. No-op with no database configured, or when

@@ -380,6 +380,38 @@ def test_add_calls_refresh_ticker_with_history_start(db_mode, monkeypatch):
     assert calls == [("AAPL", {"history_start": HISTORY_START})]
 
 
+# --- contract 0054: add() gives the new ticker a live quote immediately --------------------
+
+
+def test_add_calls_refresh_quote_for_with_the_added_ticker(db_mode, monkeypatch):
+    _patch_add(monkeypatch)
+    calls = []
+    monkeypatch.setattr("app.universe.refresh_quote_for", lambda ticker: calls.append(ticker))
+
+    add("aapl")
+
+    assert calls == ["AAPL"]
+
+
+def test_add_succeeds_even_when_refresh_quote_for_raises(db_mode, monkeypatch):
+    """A quote-fetch failure must never fail the add() itself — the ticker still joins the
+    universe, it just keeps showing 0.00% change until the next batch refresh picks it up."""
+    _patch_add(monkeypatch)
+
+    def _raising(ticker):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr("app.universe.refresh_quote_for", _raising)
+
+    result = add("AAPL")
+
+    assert result["ticker"] == "AAPL"
+    with session() as db:
+        row = db.get(UniverseTicker, "AAPL")
+        assert row is not None
+        assert row.active is True
+
+
 # --- 6 & 7. list_all: active only, ordered; empty universe returns [] ---------------------
 
 
@@ -813,6 +845,41 @@ def test_list_all_quote_fetched_at_null_when_market_closed_even_with_fresh_quote
     entries = {e["ticker"]: e for e in list_all()}
     assert entries["AAPL"]["current_price"] is None
     assert entries["AAPL"]["quote_fetched_at"] is None
+
+
+# --- contract 0055: prior completed-session close -------------------------------------------
+
+
+def test_list_all_prior_close_uses_second_most_recent_non_null_close(db_mode):
+    """A null close on the newest row must not displace the prior real close."""
+    with session() as db:
+        db.add(UniverseTicker(ticker="AAPL", active=True))
+        db.add_all(
+            [
+                PriceBar(ticker="AAPL", date=date(2026, 9, 16), close=330.0),
+                PriceBar(ticker="AAPL", date=date(2026, 9, 17), close=337.0),
+                PriceBar(ticker="AAPL", date=date(2026, 9, 18), close=None),
+            ]
+        )
+
+    entry = list_all()[0]
+
+    assert entry["last_close"] == 337.0
+    assert entry["prior_close"] == 330.0
+
+
+def test_prior_close_is_none_with_one_bar_and_get_one_agrees_with_list_all(db_mode):
+    with session() as db:
+        db.add(UniverseTicker(ticker="AAPL", active=True))
+        db.add(PriceBar(ticker="AAPL", date=date(2026, 9, 17), close=337.0))
+
+    listed = list_all()[0]
+    detail = get_one("AAPL")
+
+    assert listed["last_close"] == 337.0
+    assert listed["prior_close"] is None
+    assert detail["last_close"] == listed["last_close"]
+    assert detail["prior_close"] == listed["prior_close"]
 
 
 # --- contract 0038: remove --------------------------------------------------------------------

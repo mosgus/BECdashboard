@@ -4,6 +4,7 @@ This is orchestration, not new market-data logic. Every hard problem — partial
 restatement, dtype normalization, degraded mode — is already solved in freshness.py,
 market_data.py, and cache.py; nothing here reimplements any of it."""
 
+import logging
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
@@ -19,7 +20,9 @@ from app.market_data import (
     symbol_has_history,
 )
 from app.models import PriceBar, TickerFundamentals, TickerQuote, UniverseTicker
-from app.quotes import QUOTE_TTL_MINUTES, is_market_open, refresh_quotes_if_stale
+from app.quotes import QUOTE_TTL_MINUTES, is_market_open, refresh_quote_for, refresh_quotes_if_stale
+
+logger = logging.getLogger(__name__)
 
 HISTORY_START = date(2016, 1, 1)
 
@@ -102,6 +105,12 @@ def add(ticker: str) -> dict:
        the rest of the universe until the next scheduled sweep. Reuses the same 16:00 cutoff
        refresh_ticker/_cached_last_session already apply; nothing here recomputes it.
     6. The membership row is inserted or reactivated only after all of the above succeeds.
+    7. refresh_quote_for is best-effort, after the membership row exists and before the return
+       below (contract 0054) — a ticker added inside another visitor's batch quote-claim
+       window would otherwise show no live price, and therefore a 0.00% change, until that
+       shared window happened to lapse on its own. Deliberately does not touch the batch claim
+       (QUOTE_ATTEMPT_KEY): this is a targeted fetch bounded by the act of adding a ticker, not
+       a page load, so it cannot become the per-page-load storm the claim exists to prevent.
     """
     key = ticker.upper()
 
@@ -130,6 +139,17 @@ def add(ticker: str) -> dict:
             db.add(UniverseTicker(ticker=key, active=True))
         else:
             row.active = True
+
+    try:
+        # Best-effort, exactly like fetch_fundamentals above (contract 0054) — a live quote is
+        # no more load-bearing than fundamentals are. Without this, a ticker added inside
+        # another visitor's batch claim window would show no live price, and therefore a
+        # 0.00% change, until that window lapsed on its own. Must run after the membership row
+        # is written and before get_one(key) below, which is what actually reads the quote
+        # back out.
+        refresh_quote_for(key)
+    except Exception:
+        logger.exception("app.universe: refresh_quote_for(%s) failed after add", key)
 
     return get_one(key)
 
@@ -324,11 +344,17 @@ def list_all() -> list[dict]:
                 .subquery()
             )
             latest_close_rows = db.execute(
-                select(latest_close_subq.c.ticker, latest_close_subq.c.close).where(
-                    latest_close_subq.c.rn == 1
+                select(latest_close_subq.c.ticker, latest_close_subq.c.close, latest_close_subq.c.rn).where(
+                    latest_close_subq.c.rn <= 2
                 )
             ).all()
-            last_close_by_ticker = {row.ticker: row.close for row in latest_close_rows}
+            last_close_by_ticker = {}
+            prior_close_by_ticker = {}
+            for row in latest_close_rows:
+                if row.rn == 1:
+                    last_close_by_ticker[row.ticker] = row.close
+                elif row.rn == 2:
+                    prior_close_by_ticker[row.ticker] = row.close
 
     refresh_quotes_if_stale(tickers)
     quotes_by_ticker = get_quotes(tickers) if tickers else {}
@@ -358,6 +384,7 @@ def list_all() -> list[dict]:
                 "added_at": added_at_by_ticker[ticker],
                 "current_price": current_price,
                 "last_close": last_close_by_ticker.get(ticker),
+                "prior_close": prior_close_by_ticker.get(ticker),
                 "quote_fetched_at": quote_fetched_at,
             }
         )
@@ -384,10 +411,13 @@ def get_one(ticker: str) -> dict:
     has_prices = prices is not None and not prices.empty
 
     last_close = None
+    prior_close = None
     if has_prices:
         non_null_closes = prices["close"].dropna()
         if not non_null_closes.empty:
             last_close = float(non_null_closes.iloc[-1])
+            if len(non_null_closes) >= 2:
+                prior_close = float(non_null_closes.iloc[-2])
 
     quote = get_quotes([key]).get(key)
     current_price, quote_fetched_at = _live_quote(quote)
@@ -419,5 +449,6 @@ def get_one(ticker: str) -> dict:
         "added_at": added_at,
         "current_price": current_price,
         "last_close": last_close,
+        "prior_close": prior_close,
         "quote_fetched_at": quote_fetched_at,
     }

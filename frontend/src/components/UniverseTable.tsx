@@ -79,7 +79,7 @@ export function UniverseTable({ rows, onRowClick }: UniverseTableProps): JSX.Ele
         </thead>
         <tbody>
           {rows.map((row) => {
-            const change = priceChange(row.current_price, row.last_close)
+            const change = priceChange(row.current_price, row.last_close, row.prior_close)
             return (
             <tr
               key={row.ticker}
@@ -127,12 +127,12 @@ export function UniverseTable({ rows, onRowClick }: UniverseTableProps): JSX.Ele
                 </Tooltip>{' '}
                 <Tooltip
                   label={
-                    row.current_price !== null
+                    change.live
                       ? 'Change from the last close'
-                      : 'Market closed — showing the last close'
+                      : "Last completed session's change — not a live price"
                   }
                 >
-                  <span className={`text-xs ${CHANGE_COLOR[change.direction]}`}>{change.label}</span>
+                  <span className={`text-xs ${change.live ? CHANGE_COLOR[change.direction] : 'text-[var(--color-muted)]'}`}>{change.label}</span>
                 </Tooltip>
               </td>
               <td className={`${TD} ${NOWRAP} text-right tabular-nums hidden lg:table-cell text-[var(--color-muted)]`}>

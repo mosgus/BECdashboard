@@ -326,26 +326,35 @@ def test_symbol_has_history_raises_upstream_unavailable_on_request_failure(monke
 # genuinely-unreachable case (every tier fails) rather than accidentally hitting the network.
 
 
-def test_fetch_fundamentals_returns_none_for_invalid_looking_dict(monkeypatch, db_mode):
-    monkeypatch.setattr("app.market_data._download_info", lambda ticker: INVALID_INFO)
+def _neutralize_crumb_free_tiers(monkeypatch) -> None:
+    """Contract 0054 adds a second pair of crumb-free sources (valuation measures, trailing
+    yield) that fetch_fundamentals tries whenever `.info` fails — any test exercising that
+    fallback path must mock all four network points or the two new ones reach the real
+    network, which the hermetic suite blocks (a RuntimeError from conftest.py, not caught by
+    fetch_fundamentals's except clauses)."""
     monkeypatch.setattr("app.market_data._download_chart_meta", lambda ticker: {})
     monkeypatch.setattr("app.market_data._download_search_quotes", lambda ticker: [])
+    monkeypatch.setattr("app.market_data._download_valuation_measures", lambda ticker: pd.DataFrame())
+    monkeypatch.setattr("app.market_data._download_dividend_history", lambda ticker, start, end: pd.DataFrame())
+
+
+def test_fetch_fundamentals_returns_none_for_invalid_looking_dict(monkeypatch, db_mode):
+    monkeypatch.setattr("app.market_data._download_info", lambda ticker: INVALID_INFO)
+    _neutralize_crumb_free_tiers(monkeypatch)
     result = fetch_fundamentals("NOTAREAL")
     assert result is None
 
 
 def test_fetch_fundamentals_returns_none_for_empty_dict(monkeypatch, db_mode):
     monkeypatch.setattr("app.market_data._download_info", lambda ticker: {})
-    monkeypatch.setattr("app.market_data._download_chart_meta", lambda ticker: {})
-    monkeypatch.setattr("app.market_data._download_search_quotes", lambda ticker: [])
+    _neutralize_crumb_free_tiers(monkeypatch)
     result = fetch_fundamentals("SPY")
     assert result is None
 
 
 def test_fetch_fundamentals_none_writes_no_row(monkeypatch, db_mode):
     monkeypatch.setattr("app.market_data._download_info", lambda ticker: INVALID_INFO)
-    monkeypatch.setattr("app.market_data._download_chart_meta", lambda ticker: {})
-    monkeypatch.setattr("app.market_data._download_search_quotes", lambda ticker: [])
+    _neutralize_crumb_free_tiers(monkeypatch)
     fetch_fundamentals("NOTAREAL")
     assert get_fundamentals("NOTAREAL") is None
 
@@ -435,11 +444,197 @@ def test_fetch_chart_meta_returns_none_for_invalid_symbol(monkeypatch):
     assert fetch_chart_meta("NOTAREALTICKERXYZ") is None
 
 
-def test_fetch_fundamentals_returns_none_when_all_three_tiers_fail(monkeypatch, db_mode):
-    """Acceptance criterion 6: every tier fails -> None, and nothing is written."""
+# --- contract 0054: tier 1.5, the timeseries endpoint --------------------------------------
+
+
+def test_fetch_valuation_measures_reads_current_column_by_label_not_position(monkeypatch):
+    """Acceptance criterion 6: columns deliberately ordered so position-indexing (e.g.
+    .iloc[:, 0]) would pick a dated column instead of Current."""
+    from app.market_data import fetch_valuation_measures
+
+    frame = pd.DataFrame(
+        {
+            "3/31/2026": [3_000_000_000, 30.0],
+            "Current": [4_918_239_000_000, 38.64679],
+            "12/31/2025": [3_500_000_000, 33.0],
+        },
+        index=["Market Cap", "Trailing P/E"],
+    )
+    monkeypatch.setattr("app.market_data._download_valuation_measures", lambda ticker: frame)
+
+    result = fetch_valuation_measures("AAPL")
+
+    assert result["market_cap"] == 4_918_239_000_000
+    assert result["trailing_pe"] == pytest.approx(38.64679)
+
+
+def test_fetch_valuation_measures_uses_most_recent_dated_column_when_no_current(monkeypatch):
+    """When there is no "Current" column, the most recent *dated* column wins — comparing the
+    labels as actual dates, not as strings ("12/31/2025" < "3/31/2026" lexicographically but
+    not chronologically)."""
+    from app.market_data import fetch_valuation_measures
+
+    frame = pd.DataFrame(
+        {"12/31/2025": [3_500_000_000], "3/31/2026": [4_000_000_000]},
+        index=["Market Cap"],
+    )
+    monkeypatch.setattr("app.market_data._download_valuation_measures", lambda ticker: frame)
+
+    result = fetch_valuation_measures("AAPL")
+
+    assert result["market_cap"] == 4_000_000_000
+
+
+def test_fetch_valuation_measures_missing_row_omits_that_field(monkeypatch):
+    """Acceptance criterion 7: a missing index label yields None for that field (via .get(),
+    since the key is omitted) rather than raising."""
+    from app.market_data import fetch_valuation_measures
+
+    frame = pd.DataFrame({"Current": [4_918_239_000_000]}, index=["Market Cap"])  # no Trailing P/E row
+    monkeypatch.setattr("app.market_data._download_valuation_measures", lambda ticker: frame)
+
+    result = fetch_valuation_measures("AAPL")
+
+    assert result["market_cap"] == 4_918_239_000_000
+    assert result.get("trailing_pe") is None
+
+
+def test_fetch_valuation_measures_drops_nan_market_cap(monkeypatch):
+    """Acceptance criterion 7: a NaN market cap is dropped, not stored — float('nan') reaching
+    a BigInteger column would be worse than a null."""
+    from app.market_data import fetch_valuation_measures
+
+    frame = pd.DataFrame({"Current": [float("nan"), 38.6]}, index=["Market Cap", "Trailing P/E"])
+    monkeypatch.setattr("app.market_data._download_valuation_measures", lambda ticker: frame)
+
+    result = fetch_valuation_measures("AAPL")
+
+    assert result.get("market_cap") is None
+    assert result["trailing_pe"] == pytest.approx(38.6)
+
+
+@pytest.mark.parametrize("bad_value", [float("nan"), float("inf"), float("-inf")])
+def test_fetch_valuation_measures_drops_all_non_finite_values(monkeypatch, bad_value):
+    from app.market_data import fetch_valuation_measures
+
+    frame = pd.DataFrame({"Current": [bad_value, 38.6]}, index=["Market Cap", "Trailing P/E"])
+    monkeypatch.setattr("app.market_data._download_valuation_measures", lambda ticker: frame)
+
+    result = fetch_valuation_measures("AAPL")
+
+    assert result.get("market_cap") is None
+    assert result["trailing_pe"] == pytest.approx(38.6)
+
+
+def test_fetch_valuation_measures_returns_none_for_empty_frame(monkeypatch):
+    """An ETF's response (e.g. VOO) is entirely empty — not a failure, but nothing to read."""
+    from app.market_data import fetch_valuation_measures
+
+    monkeypatch.setattr("app.market_data._download_valuation_measures", lambda ticker: pd.DataFrame())
+    assert fetch_valuation_measures("VOO") is None
+
+
+@pytest.mark.parametrize("malformed_frame", [{}, [], "not-a-frame"])
+def test_fetch_valuation_measures_returns_none_for_malformed_frame(monkeypatch, malformed_frame):
+    from app.market_data import fetch_valuation_measures
+
+    monkeypatch.setattr("app.market_data._download_valuation_measures", lambda ticker: malformed_frame)
+
+    assert fetch_valuation_measures("AAPL") is None
+
+
+def test_fetch_trailing_yield_returns_percent_units(monkeypatch):
+    """Acceptance criterion 8: 1.06 annual dividends against a 337.00 price gives
+    approximately 0.3145 — percent units, not the raw ratio 0.003145."""
+    from app.market_data import fetch_trailing_yield
+
+    history = pd.DataFrame({"Dividends": [0.0, 0.26, 0.0, 0.26, 0.27, 0.27], "Close": [330, 331, 332, 333, 335, 337.0]})
+    monkeypatch.setattr("app.market_data._download_dividend_history", lambda ticker, start, end: history)
+
+    result = fetch_trailing_yield("AAPL")
+
+    assert result == pytest.approx(1.06 / 337.0 * 100)
+    assert result == pytest.approx(0.3145, abs=0.001)
+
+
+def test_fetch_trailing_yield_none_for_non_payer(monkeypatch):
+    """Acceptance criterion 9: a zero dividend sum (TSLA-shaped) returns None, not 0.0 —
+    0.0 would be indistinguishable from "we don't know"."""
+    from app.market_data import fetch_trailing_yield
+
+    history = pd.DataFrame({"Dividends": [0.0, 0.0, 0.0], "Close": [400.0, 410.0, 420.0]})
+    monkeypatch.setattr("app.market_data._download_dividend_history", lambda ticker, start, end: history)
+
+    assert fetch_trailing_yield("TSLA") is None
+
+
+def test_fetch_trailing_yield_none_for_zero_price(monkeypatch):
+    """Acceptance criterion 9: no division by zero when the latest close is zero."""
+    from app.market_data import fetch_trailing_yield
+
+    history = pd.DataFrame({"Dividends": [0.0, 0.5], "Close": [0.0, 0.0]})
+    monkeypatch.setattr("app.market_data._download_dividend_history", lambda ticker, start, end: history)
+
+    assert fetch_trailing_yield("X") is None
+
+
+def test_fetch_trailing_yield_none_for_missing_price_column(monkeypatch):
+    from app.market_data import fetch_trailing_yield
+
+    history = pd.DataFrame({"Dividends": [0.5]})  # no Close column at all
+    monkeypatch.setattr("app.market_data._download_dividend_history", lambda ticker, start, end: history)
+
+    assert fetch_trailing_yield("X") is None
+
+
+def test_fetch_trailing_yield_none_on_empty_history(monkeypatch):
+    from app.market_data import fetch_trailing_yield
+
+    monkeypatch.setattr("app.market_data._download_dividend_history", lambda ticker, start, end: pd.DataFrame())
+    assert fetch_trailing_yield("X") is None
+
+
+def test_fetch_trailing_yield_none_for_infinite_dividends(monkeypatch):
+    from app.market_data import fetch_trailing_yield
+
+    history = pd.DataFrame({"Dividends": [float("inf")], "Close": [100.0]})
+    monkeypatch.setattr("app.market_data._download_dividend_history", lambda ticker, start, end: history)
+
+    assert fetch_trailing_yield("X") is None
+
+
+def test_fetch_trailing_yield_none_for_infinite_latest_close(monkeypatch):
+    from app.market_data import fetch_trailing_yield
+
+    history = pd.DataFrame({"Dividends": [1.0], "Close": [float("inf")]})
+    monkeypatch.setattr("app.market_data._download_dividend_history", lambda ticker, start, end: history)
+
+    assert fetch_trailing_yield("X") is None
+
+
+@pytest.mark.parametrize("function_name", ["fetch_valuation_measures", "fetch_trailing_yield"])
+def test_tier_one_point_five_readers_return_none_for_malformed_provider_data(monkeypatch, function_name):
+    from app.market_data import fetch_trailing_yield, fetch_valuation_measures
+
+    if function_name == "fetch_valuation_measures":
+        monkeypatch.setattr(
+            "app.market_data._download_valuation_measures",
+            lambda ticker: (_ for _ in ()).throw(ValueError("malformed response")),
+        )
+        assert fetch_valuation_measures("AAPL") is None
+    else:
+        monkeypatch.setattr(
+            "app.market_data._download_dividend_history",
+            lambda ticker, start, end: (_ for _ in ()).throw(ValueError("malformed response")),
+        )
+        assert fetch_trailing_yield("AAPL") is None
+
+
+def test_fetch_fundamentals_returns_none_when_all_four_crumb_free_sources_fail(monkeypatch, db_mode):
+    """Acceptance criterion 11 (contract 0054): every tier fails -> None, and nothing is
+    written."""
     monkeypatch.setattr("app.market_data._download_info", lambda ticker: INVALID_INFO)
-    monkeypatch.setattr("app.market_data._download_chart_meta", lambda ticker: {})
-    monkeypatch.setattr("app.market_data._download_search_quotes", lambda ticker: [])
+    _neutralize_crumb_free_tiers(monkeypatch)
 
     result = fetch_fundamentals("NOTAREAL")
 
@@ -451,6 +646,8 @@ def test_fetch_fundamentals_merges_partial_tiers_when_info_fails(monkeypatch, db
     monkeypatch.setattr("app.market_data._download_info", lambda ticker: INVALID_INFO)
     monkeypatch.setattr("app.market_data._download_chart_meta", lambda ticker: CHART_META_PBR)
     monkeypatch.setattr("app.market_data._download_search_quotes", lambda ticker: SEARCH_QUOTES_PBR)
+    monkeypatch.setattr("app.market_data._download_valuation_measures", lambda ticker: pd.DataFrame())
+    monkeypatch.setattr("app.market_data._download_dividend_history", lambda ticker, start, end: pd.DataFrame())
 
     result = fetch_fundamentals("PBR")
 
@@ -466,19 +663,46 @@ def test_fetch_fundamentals_merges_partial_tiers_when_info_fails(monkeypatch, db
     assert stored["market_cap"] is None  # not fabricated; genuinely not fetched
 
 
+def test_fetch_fundamentals_merges_all_four_crumb_free_sources_when_info_fails(monkeypatch, db_mode):
+    """Contract 0054: valuation measures and trailing yield now also contribute to the
+    partial merge, alongside chart meta and search profile."""
+    monkeypatch.setattr("app.market_data._download_info", lambda ticker: INVALID_INFO)
+    monkeypatch.setattr("app.market_data._download_chart_meta", lambda ticker: CHART_META_PBR)
+    monkeypatch.setattr("app.market_data._download_search_quotes", lambda ticker: SEARCH_QUOTES_PBR)
+    monkeypatch.setattr(
+        "app.market_data._download_valuation_measures",
+        lambda ticker: pd.DataFrame({"Current": [20_895_000_000, 12.5]}, index=["Market Cap", "Trailing P/E"]),
+    )
+    history = pd.DataFrame({"Dividends": [0.0, 0.5], "Close": [20.0, 21.0]})
+    monkeypatch.setattr("app.market_data._download_dividend_history", lambda ticker, start, end: history)
+
+    result = fetch_fundamentals("PBR")
+
+    assert result["short_name"] == "Petroleo Brasileiro S.A. Petrob"
+    assert result["sector"] == "Energy"
+    assert result["market_cap"] == 20_895_000_000
+    assert result["trailing_pe"] == 12.5
+    assert result["dividend_yield"] == pytest.approx(0.5 / 21.0 * 100)
+
+    stored = get_fundamentals("PBR")
+    assert stored["market_cap"] == 20_895_000_000
+
+
 def test_fetch_fundamentals_does_not_call_crumb_free_tiers_when_info_succeeds(monkeypatch, db_mode):
-    """Acceptance criterion 7: when `.info` succeeds, tier 1 and tier 2 are not called at all —
-    one request, as today."""
+    """Acceptance criterion 10 (contract 0054): when `.info` succeeds, none of the four
+    crumb-free sources is called — one request, as today."""
 
-    def _raising_chart_meta(ticker):
-        raise AssertionError("fetch_chart_meta must not be called when .info succeeds")
+    def _raising(name):
+        def _raise(ticker, *args, **kwargs):
+            raise AssertionError(f"{name} must not be called when .info succeeds")
 
-    def _raising_search_quotes(ticker):
-        raise AssertionError("fetch_search_profile must not be called when .info succeeds")
+        return _raise
 
     monkeypatch.setattr("app.market_data._download_info", lambda ticker: AAPL_INFO)
-    monkeypatch.setattr("app.market_data._download_chart_meta", _raising_chart_meta)
-    monkeypatch.setattr("app.market_data._download_search_quotes", _raising_search_quotes)
+    monkeypatch.setattr("app.market_data._download_chart_meta", _raising("fetch_chart_meta"))
+    monkeypatch.setattr("app.market_data._download_search_quotes", _raising("fetch_search_profile"))
+    monkeypatch.setattr("app.market_data._download_valuation_measures", _raising("fetch_valuation_measures"))
+    monkeypatch.setattr("app.market_data._download_dividend_history", _raising("fetch_trailing_yield"))
 
     result = fetch_fundamentals("AAPL")
 

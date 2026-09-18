@@ -4,9 +4,18 @@ import pandas as pd
 import pytest
 
 from app.cache import store_quotes
-from app.db import get_engine
+from app.db import get_engine, session
 from app.models import Base
-from app.quotes import _LOCK, fetch_quotes, is_market_open, needs_refresh, refresh_quotes_if_stale
+from app.models import AppState
+from app.quotes import (
+    _LOCK,
+    QUOTE_ATTEMPT_KEY,
+    fetch_quotes,
+    is_market_open,
+    needs_refresh,
+    refresh_quote_for,
+    refresh_quotes_if_stale,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -185,3 +194,64 @@ def test_refresh_quotes_lock_prevents_concurrent_fetch(db_mode, monkeypatch):
         _LOCK.release()
 
     assert called == []
+
+
+# --- contract 0054: refresh_quote_for -----------------------------------------------------------
+
+
+def test_refresh_quote_for_no_op_outside_market_hours(db_mode, monkeypatch):
+    monkeypatch.setattr("app.quotes.is_market_open", lambda now_et: False)
+
+    def _raising_download(_tickers):
+        raise AssertionError("must not fetch outside market hours")
+
+    monkeypatch.setattr("app.quotes._download_quotes", _raising_download)
+
+    refresh_quote_for("AAPL")  # must not raise, must not fetch
+
+
+def test_refresh_quote_for_no_op_with_no_database(monkeypatch):
+    monkeypatch.setattr("app.quotes.is_market_open", lambda now_et: True)
+
+    def _raising_download(_tickers):
+        raise AssertionError("must not fetch when no database is configured")
+
+    monkeypatch.setattr("app.quotes._download_quotes", _raising_download)
+
+    refresh_quote_for("AAPL")  # must not raise, must not fetch
+
+
+def test_refresh_quote_for_fetches_and_stores_when_open(db_mode, monkeypatch):
+    monkeypatch.setattr("app.quotes.is_market_open", lambda now_et: True)
+
+    calls = []
+    index = pd.date_range("2026-09-15 09:30", periods=2, freq="1min", tz="America/New_York")
+
+    def fake_download(tickers):
+        calls.append(list(tickers))
+        return _multi_ticker_frame({"AAPL": [100.0, 100.5]}, index)
+
+    monkeypatch.setattr("app.quotes._download_quotes", fake_download)
+
+    refresh_quote_for("AAPL")
+
+    assert calls == [["AAPL"]]
+
+
+def test_refresh_quote_for_does_not_touch_quote_attempt_key(db_mode, monkeypatch):
+    """refresh_quote_for is bounded by a deliberate add(), not a page load, and must not
+    consume the batch window that refresh_quotes_if_stale's own claim mechanism relies on."""
+    monkeypatch.setattr("app.quotes.is_market_open", lambda now_et: True)
+    index = pd.date_range("2026-09-15 09:30", periods=2, freq="1min", tz="America/New_York")
+    monkeypatch.setattr(
+        "app.quotes._download_quotes",
+        lambda tickers: _multi_ticker_frame({"AAPL": [100.0, 100.5]}, index),
+    )
+
+    with session() as db:
+        assert db.get(AppState, QUOTE_ATTEMPT_KEY) is None
+
+    refresh_quote_for("AAPL")
+
+    with session() as db:
+        assert db.get(AppState, QUOTE_ATTEMPT_KEY) is None

@@ -3,6 +3,7 @@ in it is pure and tested against captured shapes in tests/fixtures/yf_samples.py
 network, no database required to verify this module."""
 
 from datetime import date, datetime, timedelta, timezone
+import math
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -71,6 +72,14 @@ def _download_chart_meta(ticker: str) -> dict:
 
 def _download_search_quotes(ticker: str) -> list[dict]:
     return yf.Search(ticker).quotes
+
+
+def _download_valuation_measures(ticker: str) -> pd.DataFrame:
+    return yf.Ticker(ticker).get_valuation_measures()
+
+
+def _download_dividend_history(ticker: str, start: date, end: date) -> pd.DataFrame:
+    return yf.Ticker(ticker).history(start=start, end=end, actions=True, auto_adjust=False)
 
 
 # --- pure: all the logic, fully tested, no network --------------------------------------
@@ -207,6 +216,136 @@ def fetch_search_profile(ticker: str) -> dict | None:
     return None
 
 
+_VALUATION_ROW_MAP = {
+    "Market Cap": "market_cap",
+    "Trailing P/E": "trailing_pe",
+    "Forward P/E": "forward_pe",
+}
+
+
+def _most_recent_dated_column(columns: list) -> object | None:
+    """Column labels here are date-like strings ("6/30/2026"), not sortable lexicographically
+    ("12/31/2025" < "3/31/2026" as strings but not as dates) — parsed and compared as real
+    dates instead. None when nothing parses."""
+    parsed = [(pd.to_datetime(col, errors="coerce"), col) for col in columns]
+    parsed = [(ts, col) for ts, col in parsed if ts is not None and not pd.isna(ts)]
+    if not parsed:
+        return None
+    return max(parsed, key=lambda pair: pair[0])[1]
+
+
+def fetch_valuation_measures(ticker: str) -> dict | None:
+    """Tier 1.5a, crumb-free (contract 0054). yf.Ticker(t).get_valuation_measures() reads the
+    fundamentals-timeseries endpoint, NOT quoteSummary — a different host and path from the
+    one that 401s from Render's IP, so it is a candidate for working there even though that is
+    unproven until deployed.
+
+    Returns {"market_cap", "trailing_pe", "forward_pe"} for the most current column, omitting
+    any key whose row is absent or whose value is non-finite — a NaN market cap reaching the
+    BigInteger column would be worse than a null. None when the call fails outright, or when
+    the frame has no usable column at all (an ETF's response, e.g. VOO, is entirely empty —
+    that is not a failure, but there is nothing to read either way).
+
+    Reads the column literally labelled "Current" when present; otherwise the most recent
+    dated column; otherwise None. Never by position — column order is not a documented
+    guarantee, and a silent off-by-one here would write last quarter's market cap as today's."""
+    try:
+        frame = _download_valuation_measures(ticker)
+    except (
+        YFException,
+        CurlRequestException,
+        AttributeError,
+        KeyError,
+        TypeError,
+        ValueError,
+        OverflowError,
+    ):
+        return None
+
+    if not isinstance(frame, pd.DataFrame):
+        return None
+
+    if frame is None or frame.empty or len(frame.columns) == 0:
+        return None
+
+    if "Current" in frame.columns:
+        column = "Current"
+    else:
+        column = _most_recent_dated_column(list(frame.columns))
+        if column is None:
+            return None
+
+    result: dict = {}
+    for label, key in _VALUATION_ROW_MAP.items():
+        if label not in frame.index:
+            continue
+        try:
+            value = float(frame.loc[label, column])
+            if not math.isfinite(value):
+                continue
+        except (AttributeError, KeyError, TypeError, ValueError, OverflowError):
+            continue
+        result[key] = int(value) if key == "market_cap" else float(value)
+
+    return result
+
+
+def fetch_trailing_yield(ticker: str) -> float | None:
+    """Tier 1.5b, crumb-free (contract 0054). Trailing twelve-month dividends divided by the
+    latest close, in PERCENT units (0.33 means 0.33%) — the same units extract_fundamentals
+    already stores and lib/format.ts's formatPercent already expects. Do not scale it again.
+
+    Uses one year of history with actions, not the ticker object's own all-time dividends
+    accessor — that one defaults to the full available history and would download decades of
+    daily bars for a single sum. None on failure, on no dividends (a non-payer's sum is
+    exactly 0, not absent), or when the price is missing or not positive — every path that
+    would otherwise divide by zero.
+
+    This is a defensible approximation, not Yahoo's own figure: `.info`'s dividendYield is
+    Yahoo's reported value; this is trailing-twelve-months-over-latest-close, which lands
+    close but not identical (AAPL: 0.31 here against .info's reported 0.33). That is expected
+    and is the same authoritative-when-available rule the rest of the tiering follows."""
+    end = date.today()
+    start = end - timedelta(days=365)
+    try:
+        history = _download_dividend_history(ticker, start, end)
+    except (
+        YFException,
+        CurlRequestException,
+        AttributeError,
+        KeyError,
+        TypeError,
+        ValueError,
+        OverflowError,
+    ):
+        return None
+
+    try:
+        if history is None or history.empty or "Dividends" not in history.columns:
+            return None
+
+        total_dividends = float(history["Dividends"].sum())
+        if not math.isfinite(total_dividends) or not (total_dividends > 0):
+            return None
+
+        if "Close" not in history.columns:
+            return None
+        non_null_closes = history["Close"].dropna()
+        if non_null_closes.empty:
+            return None
+
+        latest_price = float(non_null_closes.iloc[-1])
+        if not math.isfinite(latest_price) or not (latest_price > 0):
+            return None
+
+        result = total_dividends / latest_price * 100
+        if not math.isfinite(result) or not (result > 0):
+            return None
+        return result
+    except (AttributeError, KeyError, TypeError, ValueError, OverflowError):
+        return None
+
+
 def fetch_fundamentals(ticker: str) -> dict | None:
     """Best-effort enrichment, never a gate — price history remains the sole authority on
     whether a ticker exists (symbol_has_history). Returns the merged row, or None when every
@@ -219,10 +358,19 @@ def fetch_fundamentals(ticker: str) -> dict | None:
     crumb works keep behaving identically.
 
     When `.info` fails or doesn't validate (the crumb/401 failure from Render's IP that
-    motivated this contract), tiers 1 and 2 run instead. If both fail, nothing is written —
-    the genuinely-unreachable case, preserved. Otherwise what came back is merged (tier 2 over
-    tier 1 for the one overlapping concern, sector/industry) and written as a **partial**:
-    never overwriting a non-null stored value with None (see cache.store_fundamentals)."""
+    motivated this contract), four crumb-free sources run instead: chart meta, search profile,
+    valuation measures, and trailing yield (contract 0054 adds the latter two — market_cap,
+    trailing_pe and dividend_yield are not actually crumb-gated after all). If all four fail,
+    nothing is written — the genuinely-unreachable case, preserved. Otherwise what came back
+    is merged, later over earlier in that order (in practice only regular_market_price could
+    overlap, and chart meta's is fine there), and written as a **partial**: never overwriting a
+    non-null stored value with None (see cache.store_fundamentals).
+
+    The trade, stated plainly: once tier 1.5 fills market_cap, _fundamentals_incomplete
+    (app/universe.py) reports the row complete and `.info` is never retried, so beta,
+    average_volume, long_name and industry stay whatever the crumb-free tiers gave them — none
+    of those four is rendered on the Universe table today. The alternative is retrying `.info`
+    forever on every ticker Render can never complete."""
     info = None
     try:
         candidate = _download_info(ticker)
@@ -238,8 +386,10 @@ def fetch_fundamentals(ticker: str) -> dict | None:
 
     chart_meta = fetch_chart_meta(ticker)
     search_profile = fetch_search_profile(ticker)
+    valuation_measures = fetch_valuation_measures(ticker)
+    trailing_yield = fetch_trailing_yield(ticker)
 
-    if chart_meta is None and search_profile is None:
+    if chart_meta is None and search_profile is None and valuation_measures is None and trailing_yield is None:
         return None
 
     merged: dict = {}
@@ -247,6 +397,10 @@ def fetch_fundamentals(ticker: str) -> dict | None:
         merged.update(chart_meta)
     if search_profile is not None:
         merged.update(search_profile)
+    if valuation_measures is not None:
+        merged.update(valuation_measures)
+    if trailing_yield is not None:
+        merged["dividend_yield"] = trailing_yield
 
     data = {"ticker": ticker.upper(), **merged, "fetched_at": datetime.now(timezone.utc)}
     store_fundamentals(ticker, data, partial=True)

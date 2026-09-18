@@ -45,7 +45,7 @@ export function LaunchPage(): JSX.Element {
         </section>
         {universeLoading ? (
           <div className="mt-14 text-center text-sm text-[var(--color-muted)]">
-            Loading universe…
+            Loading data…
           </div>
         ) : (
           <NewsSection />

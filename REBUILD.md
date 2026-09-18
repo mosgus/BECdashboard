@@ -1262,11 +1262,30 @@ spread across three endpoints with different requirements:
 | search | `yf.Search(t).quotes` | **no** | `sector`, `industry` — equities only; ETFs genuinely carry neither |
 | quoteSummary | `yf.Ticker(t).info` | **yes** | `market_cap`, `trailing_pe`, `forward_pe`, `dividend_yield`, `beta`, `average_volume` |
 
-One `get_history_metadata()` call costs ~0.27s. **`market_cap`, `trailing_pe` and `dividend_yield`
-have no crumb-free equivalent** — do not try to reconstruct market cap from a share count, because
-the share count is itself behind `quoteSummary`. On the deployed app those three columns stay `—` for
-any ticker first seen from Render, and populate only if a refresh later runs from a machine Yahoo
-will hand a crumb to.
+One `get_history_metadata()` call costs ~0.27s.
+
+**Correction, same day:** the line that stood here — that `market_cap`, `trailing_pe` and
+`dividend_yield` have no crumb-free equivalent — was wrong, and was written without checking
+yfinance's source. There is a **fourth** endpoint:
+
+| source | how | needs crumb | carries |
+|---|---|---|---|
+| fundamentals-timeseries | `yf.Ticker(t).get_valuation_measures()`, and `fast_info.shares` via `get_shares_full` | **unproven** — not `quoteSummary` | `Market Cap`, `Trailing P/E`, `Forward P/E`, enterprise-value ratios, `Price/Sales`, `Price/Book` |
+
+It lives at `ws/fundamentals-timeseries/v1/finance/timeseries/{ticker}` on `query2` (`base.py:519`),
+**not** `v10/finance/quoteSummary`. For AAPL it returns `Market Cap 4.918e12` and
+`Trailing P/E 38.65`, against `.info`'s `4.86T` and `38.2`. Dividend yield is derivable from the
+chart/actions endpoint, which is already proven from Render: AAPL's trailing twelve months is `1.06`,
+so `1.06 ÷ 337 × 100 = 0.31%` against `.info`'s reported `0.33%` — close, and a defensible
+approximation rather than a blank.
+
+Whether that endpoint is crumb-free **from Render's IP** is unproven and cannot be tested from a
+laptop where the crumb works. Contract 0054 builds it as a best-effort tier so a failure degrades to
+exactly today's behaviour. `beta` and `average_volume` genuinely remain `quoteSummary`-only.
+
+The general lesson, which is the part worth keeping: **"Yahoo is blocked" was never true — one of
+Yahoo's four endpoints was.** Check which endpoint a yfinance property actually calls before
+concluding the data is unreachable; `fast_info` and `.info` do not share a source.
 
 Also load-bearing: **yfinance 1.7.0 degrades rather than failing.** `data.py:_make_request` catches a
 429 or transient error from the crumb fetch, logs, and continues **without** a crumb, letting the
@@ -1303,6 +1322,14 @@ already uses. An attempt that fetched nothing still claims the window. Contract 
 
 The general shape: **when the decision is "has the batch been tried recently", never derive it from
 per-row data, because the rows that most need the work are exactly the rows that are missing.**
+
+**And the claim has the same blind spot** — found 2026-09-18, when a ticker added at 12:08 PM still
+showed `0.00%`. A global timestamp knows *when the batch was last tried* and nothing about *which
+tickers it covered*, so a ticker added inside a live window waits out the TTL exactly as it did under
+`MAX`. Making the gate coverage-aware brings back the storm it exists to prevent. The answer is a
+**targeted fetch at the moment of the add** (contract 0054) — bounded by a deliberate user action, so
+it cannot fire on a page load. The batch gate stays purely time-based; coverage is handled at the one
+point where a ticker is known to be new.
 
 ### `add()` stores today's partial bar, and the change % reads 0.00% because of it
 
