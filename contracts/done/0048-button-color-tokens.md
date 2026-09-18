@@ -1,6 +1,6 @@
 # Contract 0048 — Dedicated CSS variables for button colours
 
-**Status:** reported
+**Status:** accepted (2026-09-18) — audited by planner. Gunnar has since tuned the token values.
 **Assigned to:** sonnet
 **Author:** planner (opus)
 
@@ -246,3 +246,39 @@ Step 5 is the one that proves the contract did what it set out to do.
 - **Whether the eight sites should collapse into a shared `<Button>` component.** A real refactor,
   and easier to judge once the tokens exist.
 - **What happens to the four `Coming soon` cards.** Still open.
+
+---
+
+## Audit (planner, 2026-09-18)
+
+- `tsc` clean, `npm run build` succeeds, `npm run lint` → exactly 1 warning (unchanged baseline)
+- `grep -rn "dark:" frontend/src/` → **exit 1**. The OS-keyed variant is gone and no new one appeared.
+- All seven utilities compiled in the bundle, each referencing the prefix-free source property, so the
+  `@theme inline` self-reference trap was avoided:
+
+```
+bg-btn-action{background-color:var(--btn-action)}
+bg-btn-danger{background-color:var(--btn-danger)}
+bg-btn-selected\/10{background-color:color-mix(in oklab, var(--btn-selected) 10%, transparent)}
+border-btn-selected{border-color:var(--btn-selected)}
+text-btn-action-text{color:var(--btn-action-text)}
+text-btn-danger-text{color:var(--btn-danger-text)}
+text-btn-selected-text{color:var(--btn-selected-text)}
+```
+
+Gunnar has since adjusted the token values by hand — which is the point of the contract, and took a
+one-line edit in one file.
+
+### Separate defect found while assessing the page, and fixed
+
+`app/jobrun.py:45` writes `detail["error"] = {"type": ..., "message": ...}` on a failed run — a nested
+object. `summariseDetail` called `String(value)` on it, so a failure rendered as
+**`"[object Object] error"`** on the ops page: the least useful possible output in the one situation
+the card exists for. Undetected because the database holds no failure rows.
+
+Fixed in `lib/opsFormat.ts`, generically rather than by special-casing the key:
+
+- a nested object renders its values joined by `": "` → `RuntimeError: connection refused`
+- a `true` boolean renders as the bare key (`briefing`, not `true briefing`); a `false` one is skipped
+
+Verified against all four real detail shapes plus the no-briefing case.

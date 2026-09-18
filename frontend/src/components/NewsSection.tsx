@@ -250,7 +250,7 @@ export function NewsSection(): JSX.Element | null {
         </div>
       )}
       {listArticles.length > 0 && (
-        <div className={`flex flex-col divide-y divide-brand-border ${cards.length > 0 ? 'mt-6' : ''}`}>
+        <div className={`flex flex-col border-b border-brand-border ${cards.length > 0 ? 'mt-6' : ''}`}>
           {visibleRows.map((article) => (
             <ArticleRow key={article.id} article={article} now={now} />
           ))}
@@ -269,7 +269,7 @@ export function NewsSection(): JSX.Element | null {
             <div className="group min-h-[2rem]">
               <div className="grid grid-rows-[0fr] group-hover:grid-rows-[1fr] group-focus-within:grid-rows-[1fr] transition-[grid-template-rows] duration-200 ease-in-out motion-reduce:transition-none">
                 <div className="min-h-0 overflow-hidden">
-                  <div className="flex flex-col divide-y divide-brand-border">
+                  <div className="flex flex-col">
                     {overflowRows.map((article) => (
                       <ArticleRow key={article.id} article={article} now={now} />
                     ))}

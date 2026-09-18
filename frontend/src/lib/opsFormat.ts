@@ -29,6 +29,24 @@ export function summariseDetail(detail: Record<string, unknown> | null): string 
       continue
     }
 
+    // A nested object — jobrun.py writes detail["error"] = {type, message} on a failed run.
+    // String() on that yields "[object Object]", which is the least useful thing this card
+    // could say in the one situation it exists for. Render the values instead: the error case
+    // becomes "RuntimeError: connection refused", and it stays generic over the keys.
+    if (typeof value === 'object') {
+      const inner = Object.values(value as Record<string, unknown>).map(String).filter(Boolean)
+      if (inner.length === 0) continue
+      parts.push(inner.join(': '))
+      continue
+    }
+
+    // A true flag reads better as the bare noun — "briefing", not "true briefing". A false one
+    // says nothing worth a slot.
+    if (typeof value === 'boolean') {
+      if (value) parts.push(key)
+      continue
+    }
+
     parts.push(`${String(value)} ${key}`)
   }
 
