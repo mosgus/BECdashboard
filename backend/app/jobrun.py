@@ -24,9 +24,17 @@ logger = logging.getLogger(__name__)
 JOB_RETENTION_DAYS = 30
 
 
+def _clock_at_exit(now: datetime | None) -> datetime:
+    return now if now is not None else datetime.now(timezone.utc)
+
+
 @contextmanager
-def record_run(job_name: str, now_utc: datetime) -> Iterator[dict]:
+def record_run(job_name: str, started_at: datetime, *, now: datetime | None = None) -> Iterator[dict]:
     """Record one job run. Yields a mutable detail dict the caller fills in.
+
+    `now` exists so tests can pin the clock. When None — every production call site — it is read
+    at exit exactly as before, so runtime behaviour is unchanged. Retention is measured against
+    the same value used for finished_at, never against a second reading of the clock.
 
     On clean exit: status is "partial" when detail["errors"] is truthy — some tickers or feeds
     failed but the run otherwise completed — otherwise "success". On an exception, status is
@@ -43,15 +51,17 @@ def record_run(job_name: str, now_utc: datetime) -> Iterator[dict]:
     except Exception as exc:
         duration_ms = round((time.monotonic() - start) * 1000)
         detail["error"] = {"type": type(exc).__name__, "message": str(exc)[:500]}
-        _record(job_name, now_utc, duration_ms, "failure", detail)
+        finished_at = _clock_at_exit(now)
+        _record(job_name, started_at, finished_at, duration_ms, "failure", detail)
         raise
     else:
         duration_ms = round((time.monotonic() - start) * 1000)
         status = "partial" if detail.get("errors") else "success"
-        _record(job_name, now_utc, duration_ms, status, detail)
+        finished_at = _clock_at_exit(now)
+        _record(job_name, started_at, finished_at, duration_ms, status, detail)
 
 
-def _record(job_name: str, started_at: datetime, duration_ms: int, status: str, detail: dict) -> None:
+def _record(job_name: str, started_at: datetime, finished_at: datetime, duration_ms: int, status: str, detail: dict) -> None:
     """Recording must never break the job it is recording — a job_runs write failing is worth
     a log line, not a second failure stacked on top of (or masking a clean exit from) the
     refresh it was trying to describe."""
@@ -60,7 +70,7 @@ def _record(job_name: str, started_at: datetime, duration_ms: int, status: str, 
             row = JobRun(
                 job_name=job_name,
                 started_at=started_at,
-                finished_at=datetime.now(timezone.utc),
+                finished_at=finished_at,
                 status=status,
                 duration_ms=duration_ms,
                 detail=detail,
@@ -68,16 +78,16 @@ def _record(job_name: str, started_at: datetime, duration_ms: int, status: str, 
             db.add(row)
             db.flush()
             new_id = row.id
-        _prune_old_runs(keep_id=new_id)
+        _prune_old_runs(keep_id=new_id, now=finished_at)
     except Exception:
         logger.exception("app.jobrun: failed to record job run for %s", job_name)
 
 
-def _prune_old_runs(keep_id: int) -> None:
+def _prune_old_runs(keep_id: int, now: datetime) -> None:
     """By age, never a wipe, and excludes the row just inserted — the same shape as
     app/briefing.py's _prune_old_summaries. Without the exclusion, a job whose caller-supplied
     started_at is itself older than JOB_RETENTION_DAYS (a backfill, a slow-clock test, a
     replayed run) would have its own just-written row deleted in the same breath."""
-    cutoff = datetime.now(timezone.utc) - timedelta(days=JOB_RETENTION_DAYS)
+    cutoff = now - timedelta(days=JOB_RETENTION_DAYS)
     with session() as db:
         db.execute(delete(JobRun).where(JobRun.started_at <= cutoff, JobRun.id != keep_id))

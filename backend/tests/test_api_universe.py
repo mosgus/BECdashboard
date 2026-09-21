@@ -34,8 +34,8 @@ def quotes_market_closed_by_default(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def no_strip_background_tasks(monkeypatch):
-    """GET /universe/strip schedules both run_auto_refresh_if_due and run_news_refresh_if_due
-    via BackgroundTasks (contract 0037 added the second) — TestClient runs background tasks
+    """GET /universe/strip schedules auto-refresh, news refresh, and quote refresh via
+    BackgroundTasks — TestClient runs background tasks
     synchronously after the response body is built, which would otherwise make every /strip
     test in this file exercise a real ticker sweep against (unpatched) app.universe.refresh
     *and* a real news refresh across all of MARKET_NEWS_TICKERS. Neutered here, for every test
@@ -46,6 +46,7 @@ def no_strip_background_tasks(monkeypatch):
     locally with a spy; monkeypatch layers the two so the local one wins for that test."""
     monkeypatch.setattr("app.routers.universe.run_auto_refresh_if_due", lambda *a, **k: None)
     monkeypatch.setattr("app.routers.universe.run_news_refresh_if_due", lambda *a, **k: None)
+    monkeypatch.setattr("app.routers.universe.refresh_quotes_if_stale", lambda *a, **k: None)
 
 
 @pytest.fixture
@@ -294,7 +295,7 @@ def test_get_strip_resolves_to_strip_handler_not_the_ticker_catchall(db_mode, cl
     response = client.get("/universe/strip")
     assert response.status_code == 200
     body = response.json()
-    assert set(body.keys()) == {"groups", "as_of"}
+    assert set(body.keys()) == {"groups", "as_of", "quotes_stale"}
 
 
 def test_get_strip_returns_expected_shape_for_a_universe_member(db_mode, client, monkeypatch):
@@ -318,16 +319,22 @@ def test_get_strip_degraded_mode_returns_503(client):
     assert client.get("/universe/strip").status_code == 503
 
 
-def test_get_strip_schedules_auto_refresh_background_task(db_mode, client, monkeypatch):
-    calls = []
+def test_get_strip_schedules_three_background_tasks(db_mode, client, monkeypatch):
+    auto_refresh_calls = []
+    news_refresh_calls = []
+    quote_refresh_calls = []
     monkeypatch.setattr(
         "app.routers.universe.run_auto_refresh_if_due",
-        lambda now_utc, now_et: calls.append((now_utc, now_et)),
+        lambda now_utc, now_et: auto_refresh_calls.append((now_utc, now_et)),
     )
+    monkeypatch.setattr("app.routers.universe.run_news_refresh_if_due", lambda now_utc, now_et: news_refresh_calls.append((now_utc, now_et)))
+    monkeypatch.setattr("app.routers.universe.refresh_quotes_if_stale", lambda tickers: quote_refresh_calls.append(tickers))
 
     response = client.get("/universe/strip")
     assert response.status_code == 200
-    assert len(calls) == 1
+    assert len(auto_refresh_calls) == 1
+    assert len(news_refresh_calls) == 1
+    assert quote_refresh_calls == [[]]
 
 
 # --- POST /universe/quotes/refresh: route ordering, shape, 503 -----------------------------

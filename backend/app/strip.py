@@ -101,8 +101,8 @@ def _quote_is_fresh(fetched_at: datetime | None, now_utc: datetime, now_et: date
 def build_strip_response(now_utc: datetime, now_et: datetime) -> dict:
     """The impure composition: reads active tickers, their fundamentals (for grouping), their
     stored bars, and their stored quotes — a bounded, non-per-ticker set of queries — and
-    assembles the strip response. Never fetches from yfinance; quote refresh stays owned by
-    universe.list_all()."""
+    assembles the strip response. Never fetches from yfinance; the router schedules quote refresh
+    after this stored-data response has been returned."""
     with session() as db:
         tickers = (
             db.execute(
@@ -115,7 +115,7 @@ def build_strip_response(now_utc: datetime, now_et: datetime) -> dict:
         )
 
         if not tickers:
-            return {"groups": [], "as_of": None}
+            return {"groups": [], "as_of": None, "quotes_stale": False}
 
         fundamentals_by_ticker = {
             row.ticker: row
@@ -150,6 +150,8 @@ def build_strip_response(now_utc: datetime, now_et: datetime) -> dict:
 
     year = now_et.year
     live_fetched_at: datetime | None = None
+    market_open = is_market_open(now_et)
+    quotes_stale = False
 
     groups: dict[str, dict[str, list]] = {}
     for ticker in tickers:
@@ -177,6 +179,8 @@ def build_strip_response(now_utc: datetime, now_et: datetime) -> dict:
             reference = last_close
             live_fetched_at = quote["fetched_at"]
         else:
+            if market_open:
+                quotes_stale = True
             price = last_close
             reference = prior_close
 
@@ -211,4 +215,4 @@ def build_strip_response(now_utc: datetime, now_et: datetime) -> dict:
         {"label": label, **groups[label]} for label in _GROUP_ORDER if groups.get(label, {}).get("today")
     ]
 
-    return {"groups": ordered_groups, "as_of": live_fetched_at}
+    return {"groups": ordered_groups, "as_of": live_fetched_at, "quotes_stale": quotes_stale}

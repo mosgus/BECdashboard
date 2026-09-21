@@ -59,11 +59,21 @@ export function TickerStrip(): JSX.Element | null {
 
   useEffect(() => {
     let cancelled = false
+    let refetchTimer: ReturnType<typeof setTimeout> | null = null
 
     getStrip()
       .then((response) => {
         if (cancelled) return
         setQuotes(response.groups.flatMap((group) => group.today))
+        if (response.quotes_stale) {
+          refetchTimer = setTimeout(() => {
+            getStrip()
+              .then((refreshed) => {
+                if (!cancelled) setQuotes(refreshed.groups.flatMap((group) => group.today))
+              })
+              .catch(() => {})
+          }, 5000)
+        }
       })
       .catch(() => {
         if (!cancelled) setFailed(true)
@@ -71,6 +81,7 @@ export function TickerStrip(): JSX.Element | null {
 
     return () => {
       cancelled = true
+      if (refetchTimer !== null) clearTimeout(refetchTimer)
     }
   }, [])
 

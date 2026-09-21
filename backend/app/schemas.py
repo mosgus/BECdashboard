@@ -89,6 +89,7 @@ class StripGroup(BaseModel):
 class StripResponse(BaseModel):
     groups: list[StripGroup]
     as_of: datetime | None
+    quotes_stale: bool
 
 
 class NewsArticleOut(BaseModel):

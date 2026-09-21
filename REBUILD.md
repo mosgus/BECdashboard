@@ -184,9 +184,10 @@ refreshes hang off it — it is the only reliable signal that a person is presen
   `/universe` returns 404, because that path exists only in the client-side router.
   **Render does not honour `frontend/public/_redirects`** — verified 2026-09-13 against the live
   site: `/universe` returned 404 while `/_redirects` itself returned **200**, i.e. Render publishes
-  it as an ordinary static asset rather than interpreting it. That file is Cloudflare's format and
-  is now dead weight; the dashboard rule is the only thing that works here. Leave the file or delete
-  it, but do not read its presence as evidence that routing is handled.
+  it as an ordinary static asset rather than interpreting it. That file is Cloudflare's format; it
+  has since been **deleted** (confirmed 2026-09-21 — `frontend/public/` holds only `logo-nav.png`).
+  The dashboard rule is the only thing that works here. If the file ever reappears, do not read its
+  presence as evidence that routing is handled.
 - **Deploy order is forced**: backend first (to have a URL) → frontend (bakes that URL in) →
   backend redeploy with `CORS_ORIGINS` pointing at the frontend. There is no way to shortcut it.
 - **Measured 2026-09-13: a cold start takes ~43 seconds.** `GET /health` on a sleeping free-tier
@@ -854,6 +855,24 @@ Two occurrences, 2026-09-15, same root:
 - The same contract earlier introduced a live network call inside `list_all`, guarded only by a
   fixture patching the wrong namespace.
 
+**A third occurrence, 2026-09-22, and this one was a time bomb rather than a coin flip.**
+`test_jobrun.py::test_prune_keeps_rows_within_retention` began failing every run. `jobrun.py:81`
+computed its retention cutoff from `datetime.now(timezone.utc)` while the test pinned its fixture at
+`2026-09-18`; once the real date drifted more than a day past that, a row the test placed inside the
+30-day window fell outside it and was pruned. **It armed itself on 2026-09-19.**
+
+- **Half-pinned is worse than unpinned.** `started_at` came from the fixture and `finished_at` from
+  the wall clock, so the test read as deterministic and was not. An unpinned test fails immediately;
+  this one waited a day and then failed forever.
+- **`jobrun.py` was the last module reading the clock internally.** `freshness.py`, `schedule.py`,
+  `quotes.py` and every `frontend/src/lib/` function already take `now` as an argument. One holdout
+  was enough to break the suite.
+- It also read the clock **twice** in one function — once for `finished_at`, once for the cutoff — a
+  second skew source nobody had hit. Contract 0074 collapses both to one injected value.
+- **Found by a criterion, not by a person.** Contract 0073 required the *full* backend suite to exit
+  0 despite being a strip contract, per the rule below. That is the second time that rule has caught
+  a defect nobody was looking for.
+
 Rules: **patch every module that imported the name**, not just the module that defines it. And any
 test touching market state, freshness, or quotes must pin time explicitly — a suite whose result
 depends on when it runs is not a suite. The pure/impure split in `freshness.py` and `quotes.py`
@@ -910,6 +929,35 @@ did the session go." A strip of twenty zeros every evening is not a ticker strip
 cross-checking the two after hours will find them different; that is correct, and it is the one
 thing about this feature worth understanding rather than just checking. The 5D/30D/YTD windows are
 computed and typed but not yet rendered.
+
+**The strip's accuracy was a side effect of somebody opening `/universe`.** Found 2026-09-22, after
+Gunnar reported the strip showing `^GSPC 7,650.23 +0.16%` against the Universe table's
+`7,764.70 +1.49%`. **Not** the deliberate 0028 disagreement — both read `ticker_quotes` through the
+identical `QUOTE_TTL_MINUTES` gate. They disagreed about the *moment*.
+
+`get_strip` refreshed nothing, and `refresh_quotes_if_stale` had exactly two callers: `list_all()`
+(`GET /universe`) and the window-claimed sweep, a no-op between 09:30 / 12:00 / 16:00 ET. So on a
+launch-page-only visit the stored quote went stale, `_quote_is_fresh` returned False, and the strip
+fell back to the previous session's move — for hours. Visiting `/universe` silently fixed it, which is
+why it looked consistently rather than randomly wrong.
+
+Compounding it: `TickerStrip` is `useEffect(…, [])` *and* lives in `App.tsx` outside `<Routes>`, so it
+mounts once and never refetches. It rendered a snapshot taken before any refresh it might have
+triggered. Contract 0073 schedules the quote refresh from the strip endpoint and refetches **once**
+after 5s when the response reports `quotes_stale`.
+
+Two fixes rejected, both worth remembering:
+
+- *"Point the strip at the Universe's values."* It already reads the same table with the same gate.
+  When two views disagree and share a source, suspect timing before data.
+- *"Await the fetch before rendering."* `/universe/strip` fires on **every** page load and is the
+  app's only reliable visit signal. Awaiting yfinance there puts network latency on every page's
+  critical path, on top of a ~43s cold start. Fire-and-forget is the whole reason that endpoint is
+  fast.
+
+**A docstring that contradicts the code is worse than no docstring.** `get_strip` said quote refresh
+*"stays owned by `list_all()`"* — accurate when written, and the thing that made this bug read as
+intentional for longer than it should have.
 
 **The ticker strip is one unlabelled row in the app chrome, not three labelled rows on `/`.**
 Rebuilt 2026-09-15, contract 0029. Rendered in `App.tsx` between `<Header/>` and `<Routes>` — so it

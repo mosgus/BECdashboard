@@ -170,8 +170,10 @@ def test_resolve_display_name_falls_back_to_ticker_when_both_names_are_none():
 
 
 def test_empty_universe_returns_empty_groups(db_mode):
-    result = build_strip_response(datetime.now(timezone.utc), datetime.now(ET))
-    assert result == {"groups": [], "as_of": None}
+    now_utc = datetime(2026, 9, 22, 14, 0, tzinfo=timezone.utc)
+    now_et = datetime(2026, 9, 22, 10, 0, tzinfo=ET)
+    result = build_strip_response(now_utc, now_et)
+    assert result == {"groups": [], "as_of": None, "quotes_stale": False}
 
 
 def test_groups_derive_from_quote_type_and_are_ordered(db_mode, monkeypatch):
@@ -281,6 +283,7 @@ def test_day_change_market_open_with_fresh_quote_uses_current_price(db_mode, mon
     assert today["change"] == pytest.approx(5.0)
     assert today["pct"] == pytest.approx(5.0 / 110.0 * 100)
     assert result["as_of"] == now
+    assert result["quotes_stale"] is False
 
 
 def test_day_change_market_open_but_quote_stale_falls_back_to_last_close(db_mode, monkeypatch):
@@ -298,6 +301,20 @@ def test_day_change_market_open_but_quote_stale_falls_back_to_last_close(db_mode
     assert today["price"] == 110.0
     assert today["change"] == 10.0
     assert result["as_of"] is None
+    assert result["quotes_stale"] is True
+
+
+def test_quotes_stale_is_false_after_hours_even_with_an_ancient_quote(db_mode, monkeypatch):
+    monkeypatch.setattr("app.strip.is_market_open", lambda now_et: False)
+    _add_ticker("AAPL", quote_type="EQUITY")
+    _add_bars("AAPL", [(100.0, 100.0), (110.0, 110.0)])
+    now_utc = datetime(2026, 9, 22, 21, 0, tzinfo=timezone.utc)
+    now_et = datetime(2026, 9, 22, 17, 0, tzinfo=ET)
+    _add_quote("AAPL", 115.0, now_utc - timedelta(days=1))
+
+    result = build_strip_response(now_utc, now_et)
+
+    assert result["quotes_stale"] is False
 
 
 def test_day_change_single_bar_yields_null_change_but_keeps_price(db_mode, monkeypatch):

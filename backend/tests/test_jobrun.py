@@ -48,7 +48,7 @@ def _now() -> datetime:
 
 def test_clean_exit_with_no_errors_records_success(db_mode):
     now = _now()
-    with record_run("universe_refresh", now) as detail:
+    with record_run("universe_refresh", now, now=now) as detail:
         detail["tickers"] = 3
 
     runs = _all_runs()
@@ -64,7 +64,7 @@ def test_clean_exit_with_no_errors_records_success(db_mode):
 
 def test_truthy_errors_records_partial(db_mode):
     now = _now()
-    with record_run("universe_refresh", now) as detail:
+    with record_run("universe_refresh", now, now=now) as detail:
         detail["errors"] = ["AAPL"]
 
     runs = _all_runs()
@@ -75,7 +75,7 @@ def test_empty_errors_list_still_records_success(db_mode):
     """An empty list is falsy — a run that walked every ticker without incident must not be
     downgraded to partial just because an `errors` key exists."""
     now = _now()
-    with record_run("universe_refresh", now) as detail:
+    with record_run("universe_refresh", now, now=now) as detail:
         detail["errors"] = []
 
     runs = _all_runs()
@@ -85,7 +85,7 @@ def test_empty_errors_list_still_records_success(db_mode):
 def test_exception_records_failure_with_type_and_message_and_reraises(db_mode):
     now = _now()
     with pytest.raises(RuntimeError, match="boom"):
-        with record_run("news_refresh", now) as detail:
+        with record_run("news_refresh", now, now=now) as detail:
             detail["feeds"] = 7
             raise RuntimeError("boom")
 
@@ -102,7 +102,7 @@ def test_exception_message_is_truncated_to_500_characters(db_mode):
     now = _now()
     long_message = "x" * 1000
     with pytest.raises(RuntimeError):
-        with record_run("news_refresh", now):
+        with record_run("news_refresh", now, now=now):
             raise RuntimeError(long_message)
 
     runs = _all_runs()
@@ -117,7 +117,8 @@ def test_duration_ms_is_non_negative_even_if_wall_clock_is_far_in_the_past(db_mo
     real wall clock — duration_ms must come from time.monotonic(), not from subtracting
     started_at from datetime.now(), or a now_utc far in the past would produce an enormous or
     even negative-looking duration."""
-    with record_run("universe_refresh", datetime(2000, 1, 1, tzinfo=timezone.utc)):
+    now = _now()
+    with record_run("universe_refresh", datetime(2000, 1, 1, tzinfo=timezone.utc), now=now):
         pass
 
     runs = _all_runs()
@@ -138,7 +139,8 @@ def test_a_failing_insert_does_not_propagate_and_the_body_still_completes(db_mod
     monkeypatch.setattr("app.jobrun.session", _raise_session)
 
     body_completed = False
-    with record_run("universe_refresh", _now()) as detail:
+    now = _now()
+    with record_run("universe_refresh", now, now=now) as detail:
         detail["tickers"] = 1
         body_completed = True
 
@@ -156,7 +158,8 @@ def test_a_failing_insert_does_not_mask_the_original_exception(db_mode, monkeypa
     monkeypatch.setattr("app.jobrun.session", _raise_session)
 
     with pytest.raises(RuntimeError, match="original failure"):
-        with record_run("universe_refresh", _now()):
+        now = _now()
+        with record_run("universe_refresh", now, now=now):
             raise RuntimeError("original failure")
 
     assert _all_runs() == []
@@ -179,7 +182,7 @@ def test_prune_removes_rows_older_than_retention_and_keeps_the_new_one(db_mode):
             )
         )
 
-    with record_run("universe_refresh", now):
+    with record_run("universe_refresh", now, now=now):
         pass
 
     runs = _all_runs()
@@ -201,7 +204,7 @@ def test_prune_keeps_rows_within_retention(db_mode):
             )
         )
 
-    with record_run("universe_refresh", now):
+    with record_run("universe_refresh", now, now=now):
         pass
 
     assert len(_all_runs()) == 2

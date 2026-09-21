@@ -12,7 +12,7 @@ from app.cache import get_cached, store_quotes
 from app.db import is_enabled
 from app.export import build_universe_zip, history_to_csv
 from app.news import run_news_refresh_if_due
-from app.quotes import fetch_quotes
+from app.quotes import fetch_quotes, refresh_quotes_if_stale
 from app.schemas import (
     AddTickerRequest,
     DeleteResult,
@@ -39,6 +39,15 @@ from app.universe import (
 router = APIRouter(prefix="/universe", tags=["universe"])
 
 _DATABASE_NOT_CONFIGURED = "Database not configured"
+
+
+def _refresh_strip_quotes() -> None:
+    """Refresh the active strip set after its stored-data response has been sent.
+
+    The strip keeps its locally-derived ticker list inside build_strip_response, so this
+    zero-argument background wrapper obtains the active set independently. The quote refresher
+    owns the only staleness claim and lock; this wrapper deliberately adds neither."""
+    refresh_quotes_if_stale(active_universe_tickers())
 
 
 def _require_database() -> None:
@@ -96,12 +105,12 @@ def download_universe_zip() -> Response:
 @router.get("/strip", response_model=StripResponse)
 def get_strip(background_tasks: BackgroundTasks) -> dict:
     """Price, day change, and 5D/30D/YTD returns for the launch page, computed entirely from
-    stored data. Never fetches from yfinance for the response itself; quote refresh for the
-    response stays owned by list_all(). Declared above /{ticker}: a single-segment path here
-    would otherwise be swallowed by that route and resolve as an unknown ticker instead.
+    stored data. Never fetches from yfinance for the response itself; quote refresh is scheduled
+    separately after the response. Declared above /{ticker}: a single-segment path here would
+    otherwise be swallowed by that route and resolve as an unknown ticker instead.
 
-    Also schedules run_auto_refresh_if_due (contract 0036) and run_news_refresh_if_due
-    (contract 0037) as two separate background tasks — TickerStrip lives in App.tsx outside
+    Also schedules run_auto_refresh_if_due (contract 0036), run_news_refresh_if_due (contract
+    0037), and quote refresh (contract 0073) as separate background tasks — TickerStrip lives in App.tsx outside
     <Routes>, so this fires on every page load, making it the one endpoint that reliably means
     "a user visited the site" (including for someone who only opens /universe, which GET
     /news could never see). Two tasks rather than one wrapper so a failing universe sweep
@@ -112,6 +121,7 @@ def get_strip(background_tasks: BackgroundTasks) -> dict:
     now_et = datetime.now(ZoneInfo("America/New_York"))
     background_tasks.add_task(run_auto_refresh_if_due, now_utc, now_et)
     background_tasks.add_task(run_news_refresh_if_due, now_utc, now_et)
+    background_tasks.add_task(_refresh_strip_quotes)
     return build_strip_response(now_utc, now_et)
 
 

@@ -26,4 +26,22 @@ export const PRESETS: readonly Preset[] = [
       '',
     ].join('\n'),
   },
+  {
+    id: 'bec-2026-09-21',
+    name: 'BEC Portfolio',
+    description: 'Blue Eagle Capital allocation with 38% cash.',
+    csv: [
+      'ticker,weight_pct,shares',
+      'VEA,2.87,',
+      'SETM,4.03,',
+      'XLK,4.39,',
+      'CEG,5.65,',
+      'GLD,6.21,',
+      'XLP,6.29,',
+      'XLV,9.28,',
+      'MS,23.26,',
+      'CASH,38.02,',
+      '',
+    ].join('\n'),
+  },
 ]

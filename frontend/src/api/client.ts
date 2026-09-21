@@ -82,6 +82,7 @@ export interface StripGroup {
 export interface StripResponse {
   groups: StripGroup[]
   as_of: string | null
+  quotes_stale: boolean
 }
 
 export interface NewsArticle {
