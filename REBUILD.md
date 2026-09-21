@@ -1634,12 +1634,58 @@ never written. Not yet built.
 - **Universe filtering is built (contract 0015) but holds nothing back.** Client-side search plus six filters in a dialog. Still open, and deliberately not built: **sorting** (the list is ticker-ordered), **persisting filter state in the URL** — `/universe?sector=Technology` would be shareable and survive a reload now that the router exists — and **negative P/E**, where a "max 25" filter silently includes an unprofitable company at −40. None are present in the current nine tickers.
 - ~~**Ticker validation source.**~~ **Resolved 2026-09-13 by the curated universe.** Two separate checks now exist and neither needs an SEC symbol file. (1) Adding to the universe: yfinance is the authority — a bad symbol returns `{'trailingPegRatio': None}` without raising, so validity is "does `.info` contain a required key." (2) Portfolio entry, later: validate against **the universe itself**, which is a served list the app already owns. This is strictly simpler than the served-symbol-list plan recorded under "Ticker validation" in Decided, which that entry should be read as superseded by.
 - ~~**Persistent price-cache table.**~~ **Resolved 2026-09-13 — it is being built.** See "First feature: a curated, shared, server-persisted Universe" in Decided. The deferral reasoning ("not before an initial deployment exists") was overtaken by the decision to share a universe across users, which requires persistence by definition.
-- **Whether `Research` and `/ops` survive as real features.** Two of the launch page's four nav destinations still contradict "Explicitly cut from the old app" below: `/research/*` includes decision memos and stress pages; `/ops` was backed by `job_runs`, `audit_log` and `email_config`, and `core/ops/data_status.py` reports on a database this rebuild does not have. The nav labels are settled; **what they eventually point to is not.** Either the cut list gets revised or the labels do. Do not resolve this by building either page. (`Universe` is resolved — see "First feature" above. `Portfolios` was never in doubt.)
+- ~~**Whether `Research` and `/ops` survive as real features.**~~ **Resolved 2026-09-22: both
+  survive, and the order is Portfolios → Ops → Research.** Gunnar's call. All four nav destinations
+  are now real features rather than labels awaiting a decision, which removes the contradiction with
+  the cut list below — see the corrections recorded there.
+  - **Research is deliberately last and is not to be started early.** Not because it is least
+    valuable, but because it is the only one whose shape depends on the other two: research output is
+    about portfolios, and anything operational about it shows up on Ops. Building it first would mean
+    guessing at both.
+  - **"Fully done" means Gunnar is satisfied and cannot think of further features** — his
+    definition, 2026-09-22, given when asked. It is a judgement call, not a checklist, and it is
+    deliberately his to make. **Ops is already close**, subject to revision as Portfolios and Research
+    grow and change what operational visibility is worth having.
+  - The consequence to stay aware of: the gate to Research is a feeling rather than a list, so it can
+    recede. That is an accepted property of this project, not a defect — but if Portfolios work starts
+    looking unbounded, the fix is to ask for the list, not to start Research early.
+
+**Portfolio analysis lives at `/portfolios/:id/<tab>`, portfolio-scoped.** Decided 2026-09-22,
+contract 0075, matching `main:frontend/app/portfolios/[id]/`. Five tabs: Holdings (default), Backtest,
+Outlook, Monitor, Risk & Perf — **not** the reference's set, which has `rebalance` and `targets` and
+no backtest.
+
+- **The id is in the URL because selection is not durable anywhere else.** `PortfoliosPage` holds
+  `selectedId` in React state, which a reload destroys, so `/portfolios/holdings` would have no way to
+  know what it was analysing. This is the same reasoning as the 2026-09-13 routing decision — real
+  URLs that survive a reload — applied one level down.
+- **An unknown id renders a not-found card rather than redirecting.** Portfolios are `localStorage`
+  -only, so a link opened in a different browser legitimately misses; a silent bounce to the list
+  would read as the app having forgotten the portfolio. The copy says where portfolios live.
+- The shell ships with **five deliberately empty pages**. A placeholder that quietly grows a feature
+  is worse than an empty one, because the next contract has to argue with it.
 - ~~**Routing.**~~ **Decided 2026-09-13: real URLs via `react-router-dom`.** Reverses contract 0002's "no router — there is one page," deliberately rather than by drift. `/universe` is a real address that can be linked, bookmarked, and reloaded; the alternative — the header nav swapping views inside one page with the URL never changing — breaks the browser back button and makes every future page a special case. The cost is one dependency and a route tree, both of which `REBUILD.md` had deferred precisely until a second page existed. It now does. The header nav items stop being inert `<span>`s and become real links when the frontend contract lands; until then they stay as built.
 
 ## Explicitly cut from the old app
 
-Prophet forecasting; login/identity system (`X-Actor-Name`); watchlists; alerts; decision memos; audit log; job-run tracking; the full relational Postgres/Supabase schema and Alembic migrations; server-side multi-user portfolio storage.
+Prophet forecasting; login/identity system (`X-Actor-Name`); watchlists; alerts; audit log; the full
+relational Postgres/Supabase schema and Alembic migrations; server-side multi-user portfolio storage.
+
+**Two corrections, 2026-09-22.** This list had gone stale in a way that made the `Research` / `/ops`
+open question look like a contradiction when it was really a bookkeeping failure:
+
+- **`job-run tracking` was removed from the cut list — it was rebuilt.** `models.JobRun` exists,
+  `jobrun.record_run` writes one row per sweep that actually ran, and `JobRunsCard` renders the
+  history on `/ops`. It was cut under "no auth, no multi-user concerns" (contract-era reasoning about
+  *audit*), then reintroduced for a different purpose: knowing whether the scheduled refreshes are
+  firing. Same table name, different justification.
+- **`decision memos` was removed as a *blanket* cut.** It was listed as a Research feature at a time
+  when Research itself was expected to go. Research now survives, so what it contains is an open
+  design question rather than a settled cut. Nothing about memos is decided either way.
+
+The general failure worth naming: **a cut list is a claim about the present, not a record of a past
+decision.** This one kept asserting that something the app demonstrably does was cut, which is how a
+resolved question sat in "Open questions" for nine days looking unresolvable.
 
 ## Dev workflow
 

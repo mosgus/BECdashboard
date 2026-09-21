@@ -25,6 +25,11 @@ off a single attribute.
 Not built: optimization, risk, forecasting, and the `Research` nav destination. The four entry cards
 on `/` describe those and are deliberately inert.
 
+**Order of work, decided 2026-09-22: Portfolios → Ops → Research.** All four nav destinations are
+real features; none is a placeholder. Research is last on purpose — it is the only one whose shape
+depends on the other two, since research output is about portfolios and anything operational about it
+surfaces on Ops.
+
 ## Architecture
 
 **Backend — Python 3.13, FastAPI, Postgres on Render.** Layered by domain concept, not by page:

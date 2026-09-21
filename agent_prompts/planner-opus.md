@@ -78,7 +78,13 @@ Run this check over every criterion you write, out loud, before issuing the cont
    implementation failed with `expected -245n to be 0n`. The codebase's own tolerance is `±0.01`,
    used by both `parsePortfolioCsv` and `isValidCurrentPortfolio` — match it. Better still, assert
    the *property that matters* (`canCreate === true`) rather than a numeric identity.
-6. **Could this criterion fail on correct work?** That is strictly worse than having no criterion —
+6. **If a criterion pins a count, does the rest of the suite survive that count changing?** Contract
+   0070 pinned `PRESETS.length === 1` as a tripwire *expecting* Gunnar to add presets — and its
+   sibling tests hardcoded the first preset's ticker set, so the suite broke the instant he did. A
+   tripwire whose neighbours cannot survive it firing is three failures, not one signal. When a
+   criterion says "this number changes when the user changes it", require the other tests to derive
+   from the data rather than restate it.
+7. **Could this criterion fail on correct work?** That is strictly worse than having no criterion —
    it trains coders to argue with criteria. Worse, it invites a coder to change correct data to
    satisfy a wrong assertion.
 

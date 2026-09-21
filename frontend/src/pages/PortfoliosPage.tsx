@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { JSX } from 'react'
+import { Link } from 'react-router-dom'
 import { getUniverse } from '../api/client'
 import type { UniverseEntry } from '../api/client'
 import { AddPositionForm } from '../components/AddPositionForm'
@@ -241,6 +242,14 @@ export function PortfoliosPage(): JSX.Element {
                           />
                         </Tooltip>
                         <div className="flex items-center gap-2">
+                          <Tooltip label="Open analysis and optimization tools for this portfolio">
+                            <Link
+                              to={`/portfolios/${current.id}/holdings`}
+                              className="text-xs font-medium px-2.5 py-1.5 rounded-[var(--radius-btn)] border border-brand-border text-[var(--color-muted)] hover:bg-brand-positive hover:text-background whitespace-nowrap"
+                            >
+                              ⌕ Analysis
+                            </Link>
+                          </Tooltip>
                           <Tooltip label="Download this portfolio as a CSV you can re-import on another device">
                             <button
                               type="button"
