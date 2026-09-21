@@ -7,6 +7,7 @@ import { summariseDraft, toFieldText } from '../lib/portfolio'
 import type { DraftRow, EntryMode, Portfolio, Position } from '../lib/portfolio'
 import { parsePortfolioCsv, portfolioNameFromFilename as nameFromFilename } from '../lib/portfolioCsv'
 import type { DraftSeed, DroppedRow } from '../lib/portfolioCsv'
+import { PRESETS } from '../lib/presets'
 import { Tooltip } from './Tooltip'
 
 interface NewPortfolioDialogProps {
@@ -73,6 +74,22 @@ export function NewPortfolioDialog({ universe, onCancel, onCreate }: NewPortfoli
     } finally {
       input.value = ''
     }
+  }
+
+  function handlePresetSelection(event: ChangeEvent<HTMLSelectElement>): void {
+    const preset = PRESETS.find((candidate) => candidate.id === event.target.value)
+    if (preset === undefined) return
+
+    const result = parsePortfolioCsv(preset.csv, new Set(universe.map((entry) => entry.ticker)))
+    setImportError(null)
+    setDroppedRows([])
+    event.target.value = ''
+    if (!result.ok) {
+      setImportError(`Preset "${preset.name}" could not be loaded: ${result.error}`)
+      return
+    }
+    applySeed({ ...result.seed, name: preset.name })
+    setDroppedRows(result.dropped)
   }
 
   function availableTickersFor(rowId: string): UniverseEntry[] {
@@ -150,12 +167,27 @@ export function NewPortfolioDialog({ universe, onCancel, onCreate }: NewPortfoli
 
         <div className="flex flex-col gap-4">
           {pristine ? (
-            <Tooltip label="Fill this form from a CSV — you still review and create the portfolio yourself">
-              <label className="self-start text-sm font-medium px-3 py-1.5 rounded-[var(--radius-btn)] border border-brand-border text-[var(--color-muted)] hover:bg-brand-border hover:text-foreground cursor-pointer">
-                Import CSV
-                <input type="file" accept=".csv,text/csv" onChange={handleImport} className="sr-only" />
-              </label>
-            </Tooltip>
+            <div className="flex flex-wrap items-center gap-2">
+              <Tooltip label="Fill this form from a CSV — you still review and create the portfolio yourself">
+                <label className="text-sm font-medium px-3 py-1.5 rounded-[var(--radius-btn)] border border-brand-border text-[var(--color-muted)] hover:bg-brand-border hover:text-foreground cursor-pointer">
+                  Import CSV
+                  <input type="file" accept=".csv,text/csv" onChange={handleImport} className="sr-only" />
+                </label>
+              </Tooltip>
+              <Tooltip label="Fill this form from a saved allocation — you still review and create the portfolio yourself">
+                <select
+                  defaultValue=""
+                  onChange={handlePresetSelection}
+                  className={`${FIELD} w-80 max-w-full`}
+                  aria-label="Select a preset portfolio"
+                >
+                  <option value="" disabled>Select a preset</option>
+                  {PRESETS.map((preset) => (
+                    <option key={preset.id} value={preset.id}>{preset.name} — {preset.description}</option>
+                  ))}
+                </select>
+              </Tooltip>
+            </div>
           ) : (
             <p className="text-xs text-[var(--color-muted)]">Reopen this dialog to import a CSV.</p>
           )}

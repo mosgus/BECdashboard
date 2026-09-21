@@ -65,6 +65,13 @@ export function isLegacyPortfolio(value: StoredPortfolio): value is LegacyPortfo
   return 'cash' in value
 }
 
+function normaliseStoredPortfolio(value: unknown): unknown {
+  if (typeof value !== 'object' || value === null) return value
+  const candidate = value as Record<string, unknown>
+  if (typeof candidate.cashWeight !== 'number' || !(candidate.cashWeight < 0 && candidate.cashWeight > -0.01)) return value
+  return { ...candidate, cashWeight: 0 }
+}
+
 /** Read both schemas without discarding valid legacy data. Browser storage is user-editable and
  * may be unavailable, so every access remains guarded. */
 export function listPortfolios(): StoredPortfolio[] {
@@ -73,7 +80,9 @@ export function listPortfolios(): StoredPortfolio[] {
     if (raw === null) return []
     const parsed: unknown = JSON.parse(raw)
     if (!Array.isArray(parsed)) return []
-    return parsed.filter((value): value is StoredPortfolio => isValidCurrentPortfolio(value) || isValidLegacyPortfolio(value))
+    return parsed
+      .map(normaliseStoredPortfolio)
+      .filter((value): value is StoredPortfolio => isValidCurrentPortfolio(value) || isValidLegacyPortfolio(value))
   } catch {
     return []
   }

@@ -52,9 +52,13 @@ terms of the working tree's *global* state is therefore unsatisfiable through no
 
 Run this check over every criterion you write, out loud, before issuing the contract:
 
-1. **Does it reference `git diff`, `git status`, or a whole file's tracked state?** If yes, scope it
-   to the paths this contract owns, or replace it with "the coder states whether it edited the file."
-   `git diff <file>` prints *another contract's* uncommitted changes and says nothing about this one.
+1. **Never use git to assert that a line exists. Use `grep`.** `git diff <file>` answers "has this
+   changed since HEAD" — a different question that silently changes meaning the moment Gunnar stages
+   or commits anything, which he does on his own schedule. It has now produced four false failures
+   (0062 twice, 0063, 0069) on work that was entirely correct, and 0069 was written *after* this
+   checklist existed. If a contract protects a line, the criterion is
+   `grep -n "<the line>" <file>`, which is true regardless of git state. If a criterion needs the set
+   of changed files, ask the coder to state which files it edited.
 2. **Does a `grep -c` count lines where I mean elements?** A JSX component contributes an opening and
    a closing line. `grep -c "<Tooltip"` counts elements; `grep -c "Tooltip"` counts roughly double.
 3. **Does the pattern match the construct the code actually uses**, rather than a keyword that
@@ -67,12 +71,37 @@ Run this check over every criterion you write, out loud, before issuing the cont
    know the criterion cannot fail on the thing that matters. Either find a check that can, or add a
    *structural* one: a count that must be zero, a selector that must appear, a class that must not
    exist anywhere.
-5. **Could this criterion fail on correct work?** That is strictly worse than having no criterion —
-   it trains coders to argue with criteria.
+5. **Does a numeric criterion say "exactly" about a computed quantity?** Weights, percentages and
+   anything derived from division do not land on round numbers. Contract 0070 required a preset's
+   weights to "sum to exactly 100"; they sum to `100.00000000000001` in float64 and `100 - 1.42e-14`
+   in exact decimal, so the criterion was unsatisfiable in every arithmetic and the coder's BigInt
+   implementation failed with `expected -245n to be 0n`. The codebase's own tolerance is `±0.01`,
+   used by both `parsePortfolioCsv` and `isValidCurrentPortfolio` — match it. Better still, assert
+   the *property that matters* (`canCreate === true`) rather than a numeric identity.
+6. **Could this criterion fail on correct work?** That is strictly worse than having no criterion —
+   it trains coders to argue with criteria. Worse, it invites a coder to change correct data to
+   satisfy a wrong assertion.
 
 This exists because the same mistake shipped **three times in one feature** (contracts 0062 twice,
 0063 once), after `REBUILD.md` had already recorded the lesson from contract 0033. Writing a lesson
 down did not prevent the repeat; a check performed while drafting is the thing that does.
+
+### Revising a live contract
+
+A coder session that has already executed a contract holds the **old text in its context** and may
+re-run without re-reading the file. Contract 0070 was corrected on disk and the next run still
+reported `BLOCKED` citing the superseded wording.
+
+So when you revise a contract that has already been dispatched:
+
+1. Put a `> ## ⚠ REVISED <date> — re-read this file before executing` block at the very top, above
+   everything, saying what changed and what must **not** be changed in response.
+2. Reset `Status:` to `open`.
+3. Tell Gunnar in chat to run it in a **fresh coder session**, not the one that reported.
+
+The banner matters most when the correction is "the contract was wrong, the code was right" — that is
+exactly when a coder working from memory will re-do the same wrong thing, or worse, fix the data to
+match the bad criterion.
 
 ## Orient yourself first
 

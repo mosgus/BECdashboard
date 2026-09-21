@@ -257,6 +257,19 @@ export button, 0063 the import UI.
     cannot round-trip, because no filename can hold it.
   - Rejected at the same time: a `portfolio_name` column filled on the `CASH` row. Excel-safe and
     lossless, but it puts metadata in a data column, and Gunnar preferred the plainer file.
+- **Presets are canonical CSV text parsed by `parsePortfolioCsv`, not a second format.** Contract
+  0070, 2026-09-21. Authoring a preset is "export a portfolio, paste the file", and the preset
+  inherits weight validation, the 100% invariant, off-universe dropping with its report, and exact
+  numeric round-tripping — all for free. A JSON preset format would need every one of those rebuilt,
+  and a preset that cannot pass the parser is a preset that would have produced an invalid portfolio.
+  `applySeed` is the single entry point, shared with CSV import.
+- **A preset never carries share counts.** A preset is an *allocation*; share counts are metadata
+  about one person's specific position. Shipping someone else's shares asserts a portfolio value the
+  user does not have and that nothing in the app reconciles. Weights carry the whole meaning. The
+  `shares` column stays present and empty so the text is still canonical CSV.
+- **Coding agents never author an allocation.** Preset content comes from Gunnar. Contract 0070 pins
+  `PRESETS.length` in a test specifically so a later agent cannot helpfully add a 60/40 or a
+  conservative/balanced/aggressive ladder nobody asked for.
 - **A test fixture must live under `frontend/src/` — inline, or in `__fixtures__/`. Never point a test
   at a path a user owns.** Contract 0067 pinned the legacy-format test to
   `reference files/portfolios/gunnport-2026-09-21.csv`. Gunnar renamed his portfolio and re-exported,
@@ -342,6 +355,40 @@ Resolved by contract 0064, with two decisions Gunnar made on 2026-09-21:
   the derived weight then goes through the same one funding rule. `V` exists only when **every**
   position carries a share count and a usable price; otherwise the shares input derives nothing and
   says why. Nothing about `V` is stored — `REBUILD.md`'s "no required notional value" stands.
+
+**A 1.4e-14 float residue in cash silently deleted a portfolio.** Found 2026-09-21 in Gunnar's real
+`Gunnar Preset` export, which carried `CASH,-1.4210854715202004e-14`. `isValidCurrentPortfolio`
+rejects `cashWeight < 0` and `listPortfolios` **filters out** what fails it, so the record stayed in
+`localStorage` while the app stopped listing it. Measured: `listPortfolios()` returned **0**. No error
+anywhere. Contract 0071.
+
+- **The cause was three implementations of one formula.** `100 - Σweights` was computed inline in
+  `addPositionDiluting` (clamped, because 0064's implementer hit this), `removePositionToCash`
+  (unclamped) and `PortfoliosPage.handleCashTextChange` (unclamped). Rescaling six weights and
+  re-summing lands ~1e-14 either side of 100. The missing clamp was the symptom; **the divergence was
+  the defect**, and the fix is one exported `cashFromPositions` helper that all three call.
+- **Tolerate the residue on the *component*, not just the total.** The validator accepted a total
+  within `±0.01` of 100 while demanding `cashWeight >= 0` exactly — a residue too small to matter for
+  the whole was fatal for the part. Any invariant checked on a sum needs the same tolerance on the
+  terms.
+- **Repair on read; never rewrite during a read.** Records written by the bug already existed, so
+  tightening the writer alone would have left them invisible permanently. `listPortfolios` normalises
+  a `(-0.01, 0)` cash weight to `0` before validating, and does **not** write back — a read that
+  silently mutates storage is a worse property than a stale record. `isValidCurrentPortfolio` keeps
+  its strict rule.
+- **A noise epsilon and a display tolerance are different numbers.** The first draft of 0071 snapped
+  residue below the project's `±0.01`. That is wrong: `cashFromPositions` also serves
+  `handleCashTextChange`, where the user *types* a cash percentage — so a typed `0.005` would have
+  been silently snapped to `0` by the helper meant to protect it. `WEIGHT_EPSILON = 1e-9` sits about
+  five orders above float64 noise on values near 100 (~1.4e-14) and seven below anything a person
+  would type. **Never reuse a display tolerance as an equality threshold.**
+- **Snap both signs.** Rescaling lands either side of 100 depending on rounding — the stored record
+  held `-1.42e-14` while the same arithmetic targeting cash `0` produces `+1.42e-14`. Handling one
+  sign leaves `String(cashWeight)` exporting `CASH,1.4210854715202004e-14` into a user-facing CSV, and
+  guarantees the unhandled sign becomes the next bug.
+- Lesson beyond this bug: **a derived quantity that is validated must be produced by exactly one
+  function.** Two call sites computing the same number will eventually disagree about its edge cases,
+  and the one that disagrees is the one nobody tested.
 
 **The dilution scale factor turns out to be the old-book-over-new-book ratio, exactly.** Found during
 the 0064 audit, and stronger than the contract claimed. With cash at 0, `W = sp / (V + sp)` and

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { UniverseEntry } from '../api/client'
-import { addPositionDiluting, impliedPortfolioValue, weightFromShares } from './portfolio'
+import { addPositionDiluting, cashFromPositions, impliedPortfolioValue, summariseDraft, weightFromShares } from './portfolio'
 import type { Portfolio } from './portfolio'
 
 function portfolio(cashWeight: number, positions: Portfolio['positions']): Portfolio {
@@ -15,6 +15,39 @@ function entry(price: number | null): UniverseEntry {
     bar_count: 0, first_bar: null, last_bar: null, fetched_at: null, added_at: '',
   }
 }
+
+describe('cashFromPositions', () => {
+  it('snaps float residues on either side of 100 to exactly zero', () => {
+    expect(cashFromPositions([{ ticker: 'AAPL', weight: 100.00000000000001 }])).toBe(0)
+    expect(cashFromPositions([{ ticker: 'AAPL', weight: 99.99999999999999 }])).toBe(0)
+  })
+
+  it('rejects genuinely over-allocated positions and preserves ordinary cash', () => {
+    expect(cashFromPositions([{ ticker: 'AAPL', weight: 150 }])).toBeNull()
+    expect(cashFromPositions([{ ticker: 'AAPL', weight: 60 }])).toBe(40)
+  })
+
+  it('preserves a user-entered cash allocation above the noise threshold', () => {
+    expect(cashFromPositions([{ ticker: 'AAPL', weight: 99.995 }])).toBeCloseTo(0.005, 12)
+  })
+
+  it('avoids the preset rescaling residue that previously deleted the saved portfolio', () => {
+    const weights = [
+      73.40490607218531,
+      10.481994524396962,
+      10.4075329437956,
+      3.1979752499318987,
+      2.2013242930879917,
+      0.30626691660223515,
+    ]
+    const assetWeight = weights.reduce((sum, weight) => sum + weight, 0)
+    const positions = weights.map((weight, index) => ({ ticker: String(index), weight: (weight / assetWeight) * 100 }))
+    const rawCash = 100 - positions.reduce((sum, position) => sum + position.weight, 0)
+
+    expect(rawCash).toBeGreaterThan(0)
+    expect(cashFromPositions(positions)).toBe(0)
+  })
+})
 
 describe('addPositionDiluting', () => {
   it('dilutes Gunnar’s fully invested portfolio while preserving its relative weights', () => {
@@ -83,5 +116,50 @@ describe('shares-derived allocation', () => {
       expect(weightFromShares(1, value, 1)).toBeNull()
       expect(weightFromShares(1, 1, value)).toBeNull()
     }
+  })
+})
+
+describe('summariseDraft universe membership', () => {
+  const validUniverse = new Map([['AAPL', entry(10)]])
+
+  it('rejects an off-universe ticker in weight mode', () => {
+    const summary = summariseDraft(
+      { name: 'Draft', mode: 'weight', cash: '0', rows: [{ id: '1', ticker: 'ZZZZ', shares: '', weight: '100' }] },
+      validUniverse,
+    )
+    expect(summary.canCreate).toBe(false)
+    expect(summary.problem).toBe('Every asset must be a ticker in your Universe')
+  })
+
+  it('does not report a ticker problem when the Universe is unavailable', () => {
+    const summary = summariseDraft(
+      { name: 'Draft', mode: 'weight', cash: '0', rows: [{ id: '1', ticker: 'ZZZZ', shares: '', weight: '100' }] },
+      new Map(),
+    )
+    expect(summary.problem).toBeNull()
+  })
+
+  it('keeps the empty-ticker message ahead of universe validation', () => {
+    const summary = summariseDraft(
+      { name: 'Draft', mode: 'weight', cash: '0', rows: [{ id: '1', ticker: '', shares: '', weight: '100' }] },
+      validUniverse,
+    )
+    expect(summary.problem).toBe('Choose a ticker for every asset')
+  })
+
+  it('accepts a fully valid weight-mode draft', () => {
+    const summary = summariseDraft(
+      { name: 'Draft', mode: 'weight', cash: '0', rows: [{ id: '1', ticker: 'AAPL', shares: '', weight: '100' }] },
+      validUniverse,
+    )
+    expect(summary.canCreate).toBe(true)
+  })
+
+  it('keeps shares mode price validation unchanged', () => {
+    const summary = summariseDraft(
+      { name: 'Draft', mode: 'shares', cash: '0', rows: [{ id: '1', ticker: 'ZZZZ', shares: '1', weight: '' }] },
+      validUniverse,
+    )
+    expect(summary.problem).toBe('Every asset needs a usable current price')
   })
 })

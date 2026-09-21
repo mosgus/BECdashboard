@@ -58,6 +58,25 @@ function isFiniteNonNegative(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0
 }
 
+/** Residue below this is float noise, not an allocation. Symmetric. */
+export const WEIGHT_EPSILON = 1e-9
+
+/** Cash as the remainder of an allocation: `100 - Σweights`, with float residue inside the
+ * project's noise epsilon snapped to exactly 0.
+ *
+ * Rescaling or re-summing weights lands a few 1e-14 either side of 100. Both signs are float
+ * noise, and a negative one would make portfolio storage reject the record.
+ *
+ * Returns null when the remainder is genuinely out of range, which stays a caller error. */
+export function cashFromPositions(positions: Position[]): number | null {
+  const total = positions.reduce((sum, position) => sum + position.weight, 0)
+  const cash = 100 - total
+  if (!Number.isFinite(cash)) return null
+  if (Math.abs(cash) < WEIGHT_EPSILON) return 0
+  if (cash < 0) return null
+  return cash
+}
+
 /** Convert the deployed shares-and-cash shape into the allocation model without mutating it.
  * A missing or unusable price makes the conversion unsafe, so null preserves the old record. */
 export function migrateLegacyPortfolio(
@@ -236,9 +255,8 @@ export function addPositionDiluting(portfolio: Portfolio, position: Position): P
     ...portfolio.positions.map((existing) => ({ ...existing, weight: existing.weight * scale })),
     position,
   ]
-  let cashWeight = 100 - positions.reduce((sum, next) => sum + next.weight, 0)
-  if (cashWeight < 0 && cashWeight > -0.01) cashWeight = 0
-  if (!Number.isFinite(cashWeight) || cashWeight < 0) return null
+  const cashWeight = cashFromPositions(positions)
+  if (cashWeight === null) return null
 
   const total = cashWeight + positions.reduce((sum, next) => sum + next.weight, 0)
   if (Math.abs(total - 100) > 0.01) return null
@@ -259,8 +277,8 @@ export function removePositionToCash(portfolio: Portfolio, ticker: string): Port
   if (index === -1) return null
 
   const positions = portfolio.positions.filter((_, positionIndex) => positionIndex !== index)
-  const cashWeight = 100 - positions.reduce((sum, position) => sum + position.weight, 0)
-  if (!Number.isFinite(cashWeight) || cashWeight < 0) return null
+  const cashWeight = cashFromPositions(positions)
+  if (cashWeight === null) return null
 
   return {
     id: portfolio.id,
@@ -327,7 +345,7 @@ export function summariseDraft(
   byTicker: Map<string, UniverseEntry>,
 ): DraftSummary {
   if (draft.mode === 'weight') {
-    const cashWeight = parseFiniteNonNegative(draft.cash)
+    const cashWeight = draft.cash.trim() === '' ? 0 : parseFiniteNonNegative(draft.cash)
     const rows = draft.rows.map((row) => ({
       id: row.id,
       ticker: row.ticker,
@@ -340,6 +358,7 @@ export function summariseDraft(
     let problem: string | null = null
     if (draft.name.trim() === '') problem = 'Give the portfolio a name'
     else if (draft.rows.some((row) => row.ticker === '')) problem = 'Choose a ticker for every asset'
+    else if (byTicker.size > 0 && draft.rows.some((row) => row.ticker !== '' && !byTicker.has(row.ticker))) problem = 'Every asset must be a ticker in your Universe'
     else if (cashWeight === null) problem = 'Cash must be a valid percentage'
     else if (draft.rows.some((row) => parseFinitePositive(row.weight) === null)) problem = 'Every asset needs a strictly-positive weight'
     else if (Math.abs(allocatedPercent - 100) > 0.01) problem = 'Weights must add up to 100%'

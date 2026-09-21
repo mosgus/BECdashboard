@@ -1,6 +1,6 @@
 # Contract 0069 — The composer rejects off-universe tickers, like the editor already does
 
-**Status:** open <!-- open | in-progress | reported | accepted | rejected | abandoned -->
+**Status:** accepted <!-- open | in-progress | reported | accepted | rejected | abandoned -->
 **Assigned to:** haiku <!-- haiku | sonnet -->
 **Author:** planner (opus)
 
