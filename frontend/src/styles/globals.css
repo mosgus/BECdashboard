@@ -116,3 +116,20 @@ body {
 h1, h2, h3, h4, h5, h6 {
   font-family: var(--font-heading);
 }
+
+/* Number steppers render inside the field's right edge and truncate placeholder text — "Weight %"
+   shows as "Weight…". Opt-in rather than an element selector, because Shares keeps its steppers:
+   share counts are usually integers and stepping by 1 is useful there, while weights and cash
+   percentages are typed values like 12.5. Gunnar's call, 2026-09-21.
+   Both rules are required — WebKit needs the pseudo-elements, Firefox needs appearance — so
+   verifying in one browser proves nothing about the other. */
+input.no-spinners {
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+
+input.no-spinners::-webkit-outer-spin-button,
+input.no-spinners::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}

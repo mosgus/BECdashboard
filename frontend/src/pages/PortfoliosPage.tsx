@@ -6,8 +6,10 @@ import { AddPositionForm } from '../components/AddPositionForm'
 import { NewPortfolioDialog } from '../components/NewPortfolioDialog'
 import { PositionsTable } from '../components/PositionsTable'
 import { Tooltip } from '../components/Tooltip'
-import { addPositionUsingCash, migrateLegacyPortfolio, removePositionToCash, valuePortfolio } from '../lib/portfolio'
+import { addPositionDiluting, migrateLegacyPortfolio, removePositionToCash, valuePortfolio } from '../lib/portfolio'
 import type { Portfolio, Position, StoredPortfolio } from '../lib/portfolio'
+import { downloadTextFile } from '../lib/download'
+import { portfolioCsvFilename, serializePortfolioCsv } from '../lib/portfolioCsv'
 import { deletePortfolio, isLegacyPortfolio, listPortfolios, replacePortfolios, savePortfolio } from '../lib/portfolioStore'
 
 const CARD = 'bg-brand-surface border border-brand-border rounded-[var(--radius-card)] p-5'
@@ -133,7 +135,7 @@ export function PortfoliosPage(): JSX.Element {
 
   function handleAddPosition(position: Position): void {
     if (current === null) return
-    const next = addPositionUsingCash(current, position)
+    const next = addPositionDiluting(current, position)
     if (next !== null) persist(next)
   }
 
@@ -234,15 +236,30 @@ export function PortfoliosPage(): JSX.Element {
                             className="text-lg font-semibold bg-transparent border-b border-transparent hover:border-brand-border focus:border-brand-primary focus:outline-none text-foreground min-w-0"
                           />
                         </Tooltip>
-                        <Tooltip label="Permanently delete this portfolio — it is stored only in this browser">
-                          <button
-                            type="button"
-                            onClick={() => setConfirmDeleteOpen(true)}
-                            className="text-xs font-medium px-2.5 py-1.5 rounded-[var(--radius-btn)] border border-brand-border text-[var(--color-muted)] hover:bg-btn-danger hover:text-btn-danger-text whitespace-nowrap"
-                          >
-                            Delete portfolio
-                          </button>
-                        </Tooltip>
+                        <div className="flex items-center gap-2">
+                          <Tooltip label="Download this portfolio as a CSV you can re-import on another device">
+                            <button
+                              type="button"
+                              onClick={() => downloadTextFile(
+                                portfolioCsvFilename(current, new Date()),
+                                serializePortfolioCsv(current),
+                                'text/csv;charset=utf-8',
+                              )}
+                              className="text-xs font-medium px-2.5 py-1.5 rounded-[var(--radius-btn)] border border-brand-border text-[var(--color-muted)] hover:bg-brand-border hover:text-foreground whitespace-nowrap"
+                            >
+                              Export CSV
+                            </button>
+                          </Tooltip>
+                          <Tooltip label="Permanently delete this portfolio — it is stored only in this browser">
+                            <button
+                              type="button"
+                              onClick={() => setConfirmDeleteOpen(true)}
+                              className="text-xs font-medium px-2.5 py-1.5 rounded-[var(--radius-btn)] border border-brand-border text-[var(--color-muted)] hover:bg-btn-danger hover:text-btn-danger-text whitespace-nowrap"
+                            >
+                              Delete portfolio
+                            </button>
+                          </Tooltip>
+                        </div>
                       </div>
 
                       <div className="flex flex-wrap items-center gap-2 mb-4">
@@ -256,7 +273,7 @@ export function PortfoliosPage(): JSX.Element {
                             step="any"
                             value={cashText}
                             onChange={(event) => handleCashTextChange(event.target.value)}
-                            className="text-sm px-3 py-1.5 w-32 rounded-[var(--radius-btn)] border border-brand-border bg-brand-surface text-foreground"
+                            className="text-sm px-3 py-1.5 w-32 rounded-[var(--radius-btn)] border border-brand-border bg-brand-surface text-foreground no-spinners"
                           />
                         </Tooltip>
                         <span className="text-sm text-[var(--color-muted)]">%</span>
@@ -266,8 +283,7 @@ export function PortfoliosPage(): JSX.Element {
                       {universeState.status === 'ready' && (
                         <AddPositionForm
                           universe={universeState.entries}
-                          existing={current.positions}
-                          cashWeight={current.cashWeight}
+                          portfolio={current}
                           onAdd={handleAddPosition}
                         />
                       )}

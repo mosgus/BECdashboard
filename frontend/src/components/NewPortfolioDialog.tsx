@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react'
-import type { JSX } from 'react'
+import type { ChangeEvent, JSX } from 'react'
 import { Link } from 'react-router-dom'
 import type { UniverseEntry } from '../api/client'
 import { formatPercent } from '../lib/format'
 import { summariseDraft, toFieldText } from '../lib/portfolio'
 import type { DraftRow, EntryMode, Portfolio, Position } from '../lib/portfolio'
+import { parsePortfolioCsv, portfolioNameFromFilename as nameFromFilename } from '../lib/portfolioCsv'
+import type { DraftSeed, DroppedRow } from '../lib/portfolioCsv'
 import { Tooltip } from './Tooltip'
 
 interface NewPortfolioDialogProps {
@@ -25,6 +27,8 @@ export function NewPortfolioDialog({ universe, onCancel, onCreate }: NewPortfoli
   const [mode, setMode] = useState<EntryMode>('weight')
   const [cashText, setCashText] = useState('')
   const [rows, setRows] = useState<DraftRow[]>([])
+  const [importError, setImportError] = useState<string | null>(null)
+  const [droppedRows, setDroppedRows] = useState<DroppedRow[]>([])
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent): void {
@@ -36,6 +40,40 @@ export function NewPortfolioDialog({ universe, onCancel, onCreate }: NewPortfoli
 
   const byTicker = new Map(universe.map((entry) => [entry.ticker, entry]))
   const summary = summariseDraft({ name, mode, cash: cashText, rows }, byTicker)
+  const pristine = name.trim() === '' && cashText === '' && rows.length === 0
+  const tickerOnlyDrop = mode === 'weight' && droppedRows.every((row) => row.weightPct === null)
+
+  /** Apply a parsed CSV (or a future catalog selection) to the dialog's draft state. The only path
+   *  by which a DraftSeed becomes an editable draft. */
+  function applySeed(seed: DraftSeed): void {
+    setName(seed.name)
+    setMode(seed.mode)
+    setCashText(seed.cash)
+    setRows(seed.rows.map((row) => ({ ...row, id: crypto.randomUUID() })))
+  }
+
+  async function handleImport(event: ChangeEvent<HTMLInputElement>): Promise<void> {
+    const input = event.target
+    const file = input.files?.[0]
+    if (file === undefined) return
+
+    try {
+      const result = parsePortfolioCsv(await file.text(), new Set(universe.map((entry) => entry.ticker)))
+      setImportError(null)
+      setDroppedRows([])
+      if (!result.ok) {
+        setImportError(`${result.error}${result.line === null ? '' : ` (line ${result.line})`}`)
+        return
+      }
+      applySeed({ ...result.seed, name: result.seed.name || nameFromFilename(file.name) })
+      setDroppedRows(result.dropped)
+    } catch {
+      setImportError('Could not read the selected CSV file.')
+      setDroppedRows([])
+    } finally {
+      input.value = ''
+    }
+  }
 
   function availableTickersFor(rowId: string): UniverseEntry[] {
     const chosenElsewhere = new Set(rows.filter((row) => row.id !== rowId && row.ticker !== '').map((row) => row.ticker))
@@ -111,6 +149,33 @@ export function NewPortfolioDialog({ universe, onCancel, onCreate }: NewPortfoli
         </h2>
 
         <div className="flex flex-col gap-4">
+          {pristine ? (
+            <Tooltip label="Fill this form from a CSV — you still review and create the portfolio yourself">
+              <label className="self-start text-sm font-medium px-3 py-1.5 rounded-[var(--radius-btn)] border border-brand-border text-[var(--color-muted)] hover:bg-brand-border hover:text-foreground cursor-pointer">
+                Import CSV
+                <input type="file" accept=".csv,text/csv" onChange={handleImport} className="sr-only" />
+              </label>
+            </Tooltip>
+          ) : (
+            <p className="text-xs text-[var(--color-muted)]">Reopen this dialog to import a CSV.</p>
+          )}
+
+          {importError !== null && <p className="text-xs text-brand-negative">{importError}</p>}
+
+          {droppedRows.length > 0 && (
+            <div className="text-xs text-[var(--color-muted)]">
+              <p>
+                Skipped {droppedRows.length} {droppedRows.length === 1 ? 'ticker' : 'tickers'} not in your Universe:{' '}
+                {droppedRows.map((row) => row.weightPct === null ? row.ticker : `${row.ticker} (${formatPercent(row.weightPct)})`).join(', ')}.
+              </p>
+              {tickerOnlyDrop ? (
+                <p>The rest were equal-weighted.</p>
+              ) : mode === 'weight' ? (
+                <p>Their {formatPercent(droppedRows.reduce((sum, row) => sum + (row.weightPct ?? 0), 0))} was added to cash.</p>
+              ) : null}
+            </div>
+          )}
+
           <Tooltip label="Name this portfolio">
             <input
               type="text"
@@ -158,7 +223,7 @@ export function NewPortfolioDialog({ universe, onCancel, onCreate }: NewPortfoli
                   value={cashText}
                   onChange={(event) => setCashText(event.target.value)}
                   placeholder="Cash %"
-                  className={`${FIELD} w-24`}
+                  className={`${FIELD} w-24 no-spinners`}
                 />
               </Tooltip>
             ) : (
@@ -171,7 +236,7 @@ export function NewPortfolioDialog({ universe, onCancel, onCreate }: NewPortfoli
                   value={cashText}
                   onChange={(event) => setCashText(event.target.value)}
                   placeholder="Cash $"
-                  className={`${FIELD} w-32`}
+                  className={`${FIELD} w-32 no-spinners`}
                 />
               </Tooltip>
             )}
@@ -212,7 +277,7 @@ export function NewPortfolioDialog({ universe, onCancel, onCreate }: NewPortfoli
                         value={row.weight}
                         onChange={(event) => updateRow(row.id, 'weight', event.target.value)}
                         placeholder="Weight %"
-                        className={`${FIELD} w-24`}
+                        className={`${FIELD} w-24 no-spinners`}
                       />
                     </Tooltip>
                   ) : (

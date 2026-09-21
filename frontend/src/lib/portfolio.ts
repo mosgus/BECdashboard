@@ -185,15 +185,63 @@ function isValidCurrentPortfolio(value: unknown): value is Portfolio {
   return Math.abs(total - 100) <= 0.01
 }
 
-/** Append an allocation using only available cash and preserve the 100% invariant exactly. */
-export function addPositionUsingCash(portfolio: Portfolio, position: Position): Portfolio | null {
+/** Derive total value from a fully specified shares portfolio without making it allocation truth. */
+export function impliedPortfolioValue(
+  portfolio: Portfolio,
+  byTicker: Map<string, UniverseEntry>,
+): number | null {
+  if (!isValidCurrentPortfolio(portfolio) || portfolio.positions.length === 0) return null
+
+  const positionPercent = 100 - portfolio.cashWeight
+  if (!(positionPercent > 0) || !Number.isFinite(positionPercent)) return null
+
+  let marketValue = 0
+  for (const position of portfolio.positions) {
+    if (!isFinitePositive(position.shares)) return null
+    const price = positionPrice(byTicker.get(position.ticker))
+    if (!isFinitePositive(price)) return null
+    const value = position.shares * price
+    if (!isFinitePositive(value)) return null
+    marketValue += value
+  }
+  if (!isFinitePositive(marketValue)) return null
+
+  const impliedValue = marketValue / (positionPercent / 100)
+  return isFinitePositive(impliedValue) ? impliedValue : null
+}
+
+/** Calculate a newly purchased holding's allocation after it expands the implied portfolio. */
+export function weightFromShares(shares: number, price: number, impliedValue: number): number | null {
+  if (!isFinitePositive(shares) || !isFinitePositive(price) || !isFinitePositive(impliedValue)) return null
+  const value = shares * price
+  const total = impliedValue + value
+  if (!isFinitePositive(value) || !isFinitePositive(total)) return null
+  const weight = (value / total) * 100
+  return isFinitePositive(weight) && weight < 100 ? weight : null
+}
+
+/** Add an allocation from cash first, diluting existing positions only for an uncovered shortfall. */
+export function addPositionDiluting(portfolio: Portfolio, position: Position): Portfolio | null {
   if (!isValidCurrentPortfolio(portfolio) || !isValidCurrentPosition(position)) return null
   if (portfolio.positions.some((existing) => existing.ticker === position.ticker)) return null
-  if (position.weight > portfolio.cashWeight) return null
+  if (position.weight >= 100) return null
 
-  const positions = [...portfolio.positions, position]
-  const cashWeight = 100 - positions.reduce((sum, next) => sum + next.weight, 0)
+  const positionTotal = portfolio.positions.reduce((sum, existing) => sum + existing.weight, 0)
+  const fromCash = Math.min(position.weight, portfolio.cashWeight)
+  const shortfall = position.weight - fromCash
+  if (shortfall > 0 && (!(positionTotal > 0) || positionTotal - shortfall <= 0)) return null
+
+  const scale = shortfall > 0 ? (positionTotal - shortfall) / positionTotal : 1
+  const positions = [
+    ...portfolio.positions.map((existing) => ({ ...existing, weight: existing.weight * scale })),
+    position,
+  ]
+  let cashWeight = 100 - positions.reduce((sum, next) => sum + next.weight, 0)
+  if (cashWeight < 0 && cashWeight > -0.01) cashWeight = 0
   if (!Number.isFinite(cashWeight) || cashWeight < 0) return null
+
+  const total = cashWeight + positions.reduce((sum, next) => sum + next.weight, 0)
+  if (Math.abs(total - 100) > 0.01) return null
 
   return {
     id: portfolio.id,

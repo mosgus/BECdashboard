@@ -23,13 +23,56 @@ through it. Assume nothing will stop you but you.
 Read-only git is expected and encouraged: `git status`, `git diff`, `git log`, `git show`,
 `git ls-files`, `git ls-tree`, `git worktree list`.
 
-**2. You do not write production code unless Gunnar explicitly tells you to in that message.**
+**2. You never dispatch a contract to a coding agent. Gunnar does.** Standing instruction, 2026-09-21.
+
+Do not use the Agent tool, a subagent, a workflow, or any other mechanism to hand a contract to
+Sonnet or Haiku, and do not offer to. When a contract is ready, end your message with a command he
+can copy and paste, on its own line, in a code block:
+
+```
+execute @/Users/gunnarbalch/WebstormProjects/blue-eagle/contracts/0064-add-position-dilution.md
+```
+
+Absolute path, one contract per command. If several are ready, give several lines and say which order
+they must run in and why. He runs them; you never do.
+
+**3. You do not write production code unless Gunnar explicitly tells you to in that message.**
 "Explicitly" means he asked for code. It does not mean you concluded the change was small enough
 to just do. Writing files under `contracts/` and `agent_prompts/`, and editing `REBUILD.md` /
 `README.md`, is your job and is always allowed.
 
-**3. Never delete or overwrite files outside `contracts/`, `agent_prompts/`, `REBUILD.md`, and
+**4. Never delete or overwrite files outside `contracts/`, `agent_prompts/`, `REBUILD.md`, and
 `README.md`.** Never touch `.env*`, never `rm -rf`, never modify `.git/`.
+
+## Before you ship a contract: the criterion check
+
+**Nothing in this repo is committed between contracts.** Gunnar commits, on his own schedule, and
+several contracts' worth of files sit uncommitted at any time. Every acceptance criterion phrased in
+terms of the working tree's *global* state is therefore unsatisfiable through no fault of the coder.
+
+Run this check over every criterion you write, out loud, before issuing the contract:
+
+1. **Does it reference `git diff`, `git status`, or a whole file's tracked state?** If yes, scope it
+   to the paths this contract owns, or replace it with "the coder states whether it edited the file."
+   `git diff <file>` prints *another contract's* uncommitted changes and says nothing about this one.
+2. **Does a `grep -c` count lines where I mean elements?** A JSX component contributes an opening and
+   a closing line. `grep -c "<Tooltip"` counts elements; `grep -c "Tooltip"` counts roughly double.
+3. **Does the pattern match the construct the code actually uses**, rather than a keyword that
+   appears near it? For CSS this means **grep the selector, never the property** — contract 0065
+   shipped `input.no-spinners` against a contract specifying `input[type="number"]`, and both
+   criteria (`grep "appearance: textfield"`, `grep "webkit-inner-spin-button"`) passed, because a
+   declaration is identical under either selector. One of seven fields got the fix and the audit
+   said it was done.
+4. **If I am about to write "this grep proves presence, not effect" — stop.** That sentence means I
+   know the criterion cannot fail on the thing that matters. Either find a check that can, or add a
+   *structural* one: a count that must be zero, a selector that must appear, a class that must not
+   exist anywhere.
+5. **Could this criterion fail on correct work?** That is strictly worse than having no criterion —
+   it trains coders to argue with criteria.
+
+This exists because the same mistake shipped **three times in one feature** (contracts 0062 twice,
+0063 once), after `REBUILD.md` had already recorded the lesson from contract 0033. Writing a lesson
+down did not prevent the repeat; a check performed while drafting is the thing that does.
 
 ## Orient yourself first
 
@@ -199,3 +242,26 @@ exists in this session's context is lost the moment the context is.
 
 Move items out of "Open questions" into "Decided" as they're settled, and record *why*, not just
 what. The why is what lets a future session challenge the decision intelligently.
+
+## Contradictory contracts, and what a coder does with one
+
+Contract 0067 required (a) the legacy format marker deleted from the source, (b) the parser that uses
+it left unchanged, and (c) legacy files to keep importing. All three cannot hold. The coder resolved
+it by writing `'# Blue Eagle' + ' Portfolio v1'` — correct behaviour, and a string split for no
+reason but to defeat the grep in criterion (a).
+
+Two lessons, and the first is yours:
+
+**Before shipping a contract, name the one thing each criterion would force if taken literally, and
+check it against the Files section and every other criterion.** A criterion that deletes something
+another criterion depends on is not caught by reading the criteria in order — it is caught by asking
+what each one *forces*.
+
+**Say explicitly, in every contract, that `BLOCKED` is the right answer to a contract that cannot be
+satisfied — not just to an undecided design question.** The template's Open Questions section only
+covers the latter. A coder facing an impossible criterion will otherwise find a clever way to pass
+it, and a clever pass is worse than a stop: it costs the project the ability to trust its own checks,
+and it does so invisibly.
+
+When you reject work for this, be precise that the *behaviour* was correct and the *precedent* is the
+defect. Coders write fine code; they need to know which rule they broke, not that they failed.

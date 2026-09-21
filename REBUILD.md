@@ -229,6 +229,164 @@ refreshes hang off it — it is the only reliable signal that a person is presen
 - The default entry flow is by weight: ticker + weight (and optional cash percentage), with no total portfolio value and no price requirement. A shares entry flow remains available for users who know their holdings; it derives and saves the initial weights from the entered shares and current prices. The flows must not be mixed during one initialization: shares plus a separately-entered target weight has no unambiguous meaning without a portfolio-value convention.
 - A future optional notional value may support dollar display or an implementation worksheet, but it is neither a required input nor the source of allocation truth.
 
+**Portfolio CSV: one canonical format we own, parsed client-side. Contracts 0061–0063, 2026-09-18.**
+Portfolios are `localStorage`-only, so CSV is the entire backup and cross-device story. Three
+contracts: 0061 the pure parser/serializer plus the repo's first frontend test harness, 0062 the
+export button, 0063 the import UI.
+
+- **`main:backend/routers/_portfolio_helpers.py` is deliberately not ported.** It sniffs four formats
+  (Bloomberg holdings, time-series `AAPL_Weight` columns, headerless, simple) and decides whether
+  `0.25` means 25% or 0.25% **by magnitude**. That is a guess no file can support. Our format
+  declares its units: `weight_pct` is always percent, a file of `0.25`s parses to 0.25% each and
+  lands ~99% in cash, and the user sees that on the draft. Visible and wrong beats silently
+  normalized.
+- **Superseded 2026-09-21 (contract 0067): the `# Blue Eagle Portfolio v1` / `# name:` preamble is
+  dropped.** Exports are now a plain header-plus-rows CSV and the name lives in the **filename**.
+  Two reasons. The version marker had exactly one consumer — deciding whether to read line 2 as the
+  name — for a format that never had a second version. And the preamble made the file non-portable
+  through a spreadsheet: saved from Excel, those lines return **quoted** (`"# Blue Eagle Portfolio
+  v1"`), which starts with `"` not `#`, so comment-skipping misses them and the file stops parsing.
+  - **`parsePortfolioCsv` was deliberately not changed.** It still skips leading `#` lines and reads
+    `# name:`, so every previously-exported file keeps importing. Only the writer moved. A test
+    parses Gunnar's real legacy file from `reference files/` to keep that guarantee honest.
+  - **The name round-trips because `portfolioCsvFilename` stopped lowercasing.** It had been doing
+    `name.toLowerCase()` and hyphenating everything non-alphanumeric — harmless while the name also
+    lived inside the file, silently lossy once the filename became the only carrier. It now replaces
+    only characters a filesystem rejects (`/ \ : * ? " < > |` and control characters), so `GunnPort`
+    survives as `GunnPort`. **Residual and inherent:** a name containing one of those characters
+    cannot round-trip, because no filename can hold it.
+  - Rejected at the same time: a `portfolio_name` column filled on the `CASH` row. Excel-safe and
+    lossless, but it puts metadata in a data column, and Gunnar preferred the plainer file.
+- **A test fixture must live under `frontend/src/` — inline, or in `__fixtures__/`. Never point a test
+  at a path a user owns.** Contract 0067 pinned the legacy-format test to
+  `reference files/portfolios/gunnport-2026-09-21.csv`. Gunnar renamed his portfolio and re-exported,
+  the file's name changed, and the test failed `ENOENT` — correctly reported `BLOCKED`, since that
+  directory is read-only by policy and no coder may recreate a file in it. The legacy format is frozen
+  history; it belongs inlined in the test. Repaired by 0068.
+- **Numbers serialize with `String(value)`, never `toFixed`.** JS emits the shortest round-trippable
+  form, so a hand-typed `25` stays `25` while `100/3` prints long. `toFixed(4)` would break exact
+  round-tripping, which is the one property the format exists to have.
+- **Cash is stated-or-derived, never recomputed over a stated value.** A `CASH` row is used as
+  written; only its absence derives `100 - Σ`. Recomputation is not bit-identical for irrational
+  weights, and the round-trip has to be exact. A stated cash row that does not total 100 ± 0.01 is a
+  malformed file, not a remainder case, and is rejected.
+- **Off-universe tickers are dropped and reported** (Gunnar's call, 2026-09-18, over seeding them as
+  unresolvable rows). The orphaned allocation is then handled **asymmetrically, on purpose**: a
+  *weighted* file sends the dropped weight to cash, because the file asserted an allocation and
+  spreading it across survivors would be exactly the normalization being avoided; a *ticker-only*
+  file equal-weights over the **survivors** with 0% cash, because there was no allocation to
+  preserve. Anyone reading only one branch will think the other is a bug.
+- **Validate the whole file before dropping any row**, or a duplicate ticker among off-universe rows
+  goes unreported.
+- **The import seam is `DraftSeed`** — `{name, mode, cash, rows}`, exactly `summariseDraft`'s input
+  minus React keys. A future preset catalog returns a `DraftSeed` and nothing else changes. That is
+  the only accommodation made for presets; no preset content exists or should be invented.
+- **Import seeds a draft, never creates or overwrites.** Importing the same file twice mints two
+  portfolios, because the format carries no `id`.
+- **`vitest` is added as a dev dependency for `src/lib/` only** — `environment: 'node'`, no DOM, no
+  component tests. `REBUILD.md`'s "UI unit tests are skipped deliberately" rationale is *"high effort,
+  low value while the layout is still moving"*, which does not reach a CSV parser doing weight
+  arithmetic, duplicate detection and RFC 4180 quoting. That is the "math or data transformation"
+  case the backend standard already requires tests for, and it was the only part of the frontend
+  where a wrong answer looks entirely plausible.
+- Accepted limit: `CASH` is a reserved ticker and Pathward Financial genuinely trades as `CASH`. It
+  is not in the Universe and the Universe is the gate, so the collision is unreachable today.
+
+**Correction to the drop rule, 2026-09-18 (0061 audit).** The entry above said a dropped row's weight
+goes to cash for "modes 1 and 2." Mode 2 is the shares-only file, which states no percentages — there
+is nothing to transfer. It applies to **mode 1 only**. The implementation was right; the contract text
+was wrong, and the coder caught it.
+
+**A contract that adds or removes a dependency must list the lockfile.** Found 2026-09-18: contract
+0061's file list named `package.json` but not `package-lock.json`, so the implementer installed
+`vitest`, then restored the lockfile because editing an unlisted file is a `BLOCKED` condition. It
+followed the rule exactly and disclosed the consequence — and the result was a tree that passed every
+acceptance criterion and **could not be installed**: `npm ci` exits non-zero with
+`Missing: vitest@4.1.11 from lock file`. A manifest and its lockfile are one edit. Repaired by 0063.
+
+**`grep -c "Tooltip"` counts lines, not elements — fourth recorded grep-as-verification failure.** A
+`<Tooltip>` wrapper contributes an opening and a closing line, so a criterion demanding the count move
+by one can never pass. It made contract 0062 report `BLOCKED` on correct work. Use `grep -c "<Tooltip"`.
+Earlier instances: the `prefers-reduced-motion` fallback (twice, shipped broken behind a passing
+keyword grep) and contract 0031's `Query.delete()` pattern against a SQLAlchemy 2.0 codebase.
+
+**An empty result is two different conditions and they need different answers.** Found 2026-09-18 by
+probe, not by the test suite: exporting a 100%-cash portfolio — a state `PortfoliosPage` explicitly
+supports — produces a file with a `CASH` row and no positions, and re-importing it was rejected with
+*"No portfolio tickers are in the current universe."* The round trip was broken for a reachable state,
+and the message blamed the Universe for a file that named no tickers to check against it. `surviving.length === 0`
+conflated *"every position was dropped"* with *"there were never any positions."* Split on
+`positions.length`, measured before the drop filter. Repaired by 0063.
+
+**A fully-invested portfolio sealed itself: no position could ever be added.** Found 2026-09-21 on
+Gunnar's real portfolio, built by entering share counts — which sets cash to 0% because no cash
+dollars were entered. `AddPositionForm.tsx:50` gated on `weightNumber > cashWeight` and
+`addPositionUsingCash` refused the same condition, so any weight above 0 failed the first test and a
+weight of exactly 0 failed `weightNumber <= 0`. **No typed value could enable the button.** The CSV
+export of that portfolio was flawless and round-tripped byte-identically; the data was never the
+problem.
+
+Resolved by contract 0064, with two decisions Gunnar made on 2026-09-21:
+
+- **Funding is cash first, then pro-rata dilution of existing positions for the shortfall.** Where
+  cash covers the add, *no existing weight moves* — today's guarantee, kept exactly. Dilution engages
+  only when it must, so `addPositionDiluting` strictly supersedes `addPositionUsingCash` rather than
+  sitting beside it. Rejected: a user-facing "fund from cash / dilute" toggle, as a decision the user
+  should not have to make on every add.
+- **Rewriting a weight on a deliberate user action is allowed; recomputing one from a quote is not.**
+  Dilution changes saved weights, which reads like a contradiction of the position model until you
+  see which half it touches. What the model forbids is *silent* recomputation as prices move — that
+  is what makes a model portfolio reproducible. An explicit add is not that.
+- **A share count is a weight calculator, not a second allocation input.** `weightFromShares` derives
+  `(s × p) / (V + s × p) × 100` against an implied portfolio value `V = M / ((100 − C) / 100)`, and
+  the derived weight then goes through the same one funding rule. `V` exists only when **every**
+  position carries a share count and a usable price; otherwise the shares input derives nothing and
+  says why. Nothing about `V` is stored — `REBUILD.md`'s "no required notional value" stands.
+
+**The dilution scale factor turns out to be the old-book-over-new-book ratio, exactly.** Found during
+the 0064 audit, and stronger than the contract claimed. With cash at 0, `W = sp / (V + sp)` and
+`scale = (100 − W) / 100 = V / (V + sp)`. So a shares-driven add into a fully-invested portfolio
+leaves every existing position's `shares × price` at precisely its new weight — shares and weights
+stay coherent with no special-casing, and the "one funding rule" claim holds by construction rather
+than by approximation.
+
+**Where it does not hold:** when cash is above 0 it absorbs part of the add, `scale ≠ V / (V + sp)`,
+and stored share counts drift out of agreement with stored weights. Defensible — shares are metadata,
+not truth — but a second shares-driven add after a cash-funded one computes `V` from share counts
+that no longer reconcile. Bounded, known, not currently worth a fix.
+
+**`type="number"` steppers truncate their own placeholder, and the fix is selective, not app-wide.**
+The spin buttons render *inside* the field's right edge, so `Weight %` displays as `Weight…`.
+
+- **An opt-in `.no-spinners` class, not `input[type="number"]`.** Gunnar's call, 2026-09-21,
+  reversing this file's earlier app-wide entry. **`Shares` keeps its steppers** — share counts are
+  usually integers and stepping by 1 is genuinely useful there — while weights and cash percentages
+  are typed values like `12.5` where the stepper only eats the placeholder. The earlier "every number
+  input here is a free-form quantity" argument was wrong about `Shares` specifically.
+- The cost of opt-in, accepted knowingly: a number input added later silently gets steppers back
+  unless someone remembers the class. That is the trade for keeping `Shares` steppable.
+- **Both halves of the CSS rule are required** — WebKit needs
+  `::-webkit-inner-spin-button { -webkit-appearance: none }`, Firefox needs `appearance: textfield` —
+  so testing one browser proves nothing about the other. `type="number"` is kept for the numeric
+  keyboard and input filtering; switching to `type="text"` would lose both.
+- **Grep the selector, never the declaration.** Contract 0065 shipped `input.no-spinners` against a
+  contract specifying `input[type="number"]`, and both acceptance criteria — `grep "appearance:
+  textfield"` and `grep "webkit-inner-spin-button"` — passed, because a declaration reads identically
+  under either selector. One of seven fields got the fix and the audit called it done. Fifth recorded
+  instance of grep-as-verification failing, and the second in the expensive direction.
+
+**A portfolio CSV round-tripped byte-identically on first real use.** `gunnport-2026-09-21.csv`:
+weights summing to exactly `100`, a fractional share count (`2.08`) preserved, `canCreate: true`, no
+drops. The `String()`-over-`toFixed` decision is what bought that, and it was worth the ugly output on
+irrational weights.
+
+**A round-trip fixture can collapse into the easy case without anyone noticing.** Contract 0061's
+criterion 2 used three positions of `100 / 3` to force a non-representable cash value. It does not:
+`3 * (100 / 3) === 100` exactly in float64, so cash was `0` and the awkward path never ran. The
+*weights* were genuinely irrational and did round-trip strictly, so the criterion still proved the
+thing that mattered — `String` over `toFixed` — but by luck rather than by design. **When a fixture
+exists to be awkward, assert that it actually is** before relying on it.
+
 **API shape: cheap per-ticker validation, one heavy analyze call.**
 - `GET /tickers/{symbol}` — called as the user types. Returns validity plus the company name, so typos surface inline instead of after submitting the whole form.
 - `POST /portfolio/analyze` — takes the finished position list, does prices, shares, weights and metrics in one round trip, returns the computed portfolio.

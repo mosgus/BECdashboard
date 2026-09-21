@@ -2,19 +2,21 @@ import { useState } from 'react'
 import type { JSX } from 'react'
 import { Link } from 'react-router-dom'
 import type { UniverseEntry } from '../api/client'
-import type { Position } from '../lib/portfolio'
+import { formatPercent } from '../lib/format'
+import { impliedPortfolioValue, positionPrice, weightFromShares } from '../lib/portfolio'
+import type { Portfolio, Position } from '../lib/portfolio'
 import { Tooltip } from './Tooltip'
 
 interface AddPositionFormProps {
   universe: UniverseEntry[]
-  existing: Position[]
-  cashWeight: number
+  portfolio: Portfolio
   onAdd: (position: Position) => void
 }
 
 const FIELD = 'text-sm px-3 py-2 rounded-[var(--radius-btn)] border border-brand-border bg-brand-surface text-foreground'
+const FIELD_READONLY = 'text-sm px-3 py-2 rounded-[var(--radius-btn)] border border-brand-border bg-brand-border/40 text-[var(--color-muted)] cursor-not-allowed'
 
-export function AddPositionForm({ universe, existing, cashWeight, onAdd }: AddPositionFormProps): JSX.Element {
+export function AddPositionForm({ universe, portfolio, onAdd }: AddPositionFormProps): JSX.Element {
   const [ticker, setTicker] = useState('')
   const [weight, setWeight] = useState('')
   const [shares, setShares] = useState('')
@@ -27,7 +29,7 @@ export function AddPositionForm({ universe, existing, cashWeight, onAdd }: AddPo
     )
   }
 
-  const heldTickers = new Set(existing.map((position) => position.ticker))
+  const heldTickers = new Set(portfolio.positions.map((position) => position.ticker))
   const available = universe.filter((entry) => !heldTickers.has(entry.ticker))
 
   if (available.length === 0) {
@@ -38,20 +40,28 @@ export function AddPositionForm({ universe, existing, cashWeight, onAdd }: AddPo
     )
   }
 
+  const byTicker = new Map(universe.map((entry) => [entry.ticker, entry]))
+  const impliedValue = impliedPortfolioValue(portfolio, byTicker)
   const weightNumber = Number(weight)
   const sharesNumber = Number(shares)
   const sharesValid = shares.trim() === '' || (Number.isFinite(sharesNumber) && sharesNumber > 0)
+  const selectedPrice = positionPrice(byTicker.get(ticker))
+  const hasUsableSelectedPrice = selectedPrice !== null && Number.isFinite(selectedPrice) && selectedPrice > 0
+  const derivedWeight = weight.trim() === '' && shares.trim() !== '' && impliedValue !== null && hasUsableSelectedPrice
+    ? weightFromShares(sharesNumber, selectedPrice, impliedValue)
+    : null
+  const effectiveWeight = weight.trim() === '' ? derivedWeight : weightNumber
+  const showingDerivedWeight = weight.trim() === '' && shares.trim() !== ''
   const disabled =
     ticker === '' ||
-    weight.trim() === '' ||
-    !Number.isFinite(weightNumber) ||
-    weightNumber <= 0 ||
-    weightNumber > cashWeight ||
+    !available.some((entry) => entry.ticker === ticker) ||
+    !(effectiveWeight !== null && Number.isFinite(effectiveWeight) && effectiveWeight > 0 && effectiveWeight < 100) ||
     !sharesValid
 
   function handleAdd(): void {
     if (disabled) return
-    const position: Position = { ticker, weight: weightNumber }
+    if (effectiveWeight === null) return
+    const position: Position = { ticker, weight: effectiveWeight }
     if (shares.trim() !== '') position.shares = sharesNumber
     onAdd(position)
     setTicker('')
@@ -88,10 +98,10 @@ export function AddPositionForm({ universe, existing, cashWeight, onAdd }: AddPo
           value={weight}
           onChange={(event) => setWeight(event.target.value)}
           placeholder="Weight %"
-          className={`${FIELD} w-24`}
+          className={`${FIELD} w-24 no-spinners`}
         />
       </Tooltip>
-      <Tooltip label="Optional share count for reference; it does not change the saved allocation.">
+      <Tooltip label="Number of shares to add — sets this position's weight when the weight field is empty">
         <input
           type="number"
           inputMode="decimal"
@@ -103,7 +113,18 @@ export function AddPositionForm({ universe, existing, cashWeight, onAdd }: AddPo
           className={`${FIELD} w-28`}
         />
       </Tooltip>
-      <Tooltip label="Add this allocation using available cash weight.">
+      {showingDerivedWeight && (
+        <Tooltip label="Weight derived from the share count and current prices">
+          <input
+            type="text"
+            readOnly
+            aria-label="Derived weight"
+            value={formatPercent(derivedWeight)}
+            className={`${FIELD_READONLY} w-24`}
+          />
+        </Tooltip>
+      )}
+      <Tooltip label="Add this allocation, scaling existing positions if there is not enough cash">
         <button
           type="button"
           disabled={disabled}
@@ -113,6 +134,21 @@ export function AddPositionForm({ universe, existing, cashWeight, onAdd }: AddPo
           Add
         </button>
       </Tooltip>
+      {showingDerivedWeight && impliedValue === null && (
+        <p className="basis-full text-xs text-[var(--color-muted)]">
+          Add by shares needs a share count and a price on every existing position.
+        </p>
+      )}
+      {showingDerivedWeight && impliedValue !== null && !hasUsableSelectedPrice && (
+        <p className="basis-full text-xs text-[var(--color-muted)]">
+          Add by shares needs a usable current price for the selected ticker.
+        </p>
+      )}
+      {effectiveWeight !== null && Number.isFinite(effectiveWeight) && effectiveWeight > portfolio.cashWeight && (
+        <p className="basis-full text-xs text-[var(--color-muted)]">
+          Funding {formatPercent(effectiveWeight)} will scale existing positions to make room.
+        </p>
+      )}
     </div>
   )
 }
