@@ -6,7 +6,7 @@ import { AddPositionForm } from '../components/AddPositionForm'
 import { NewPortfolioDialog } from '../components/NewPortfolioDialog'
 import { PositionsTable } from '../components/PositionsTable'
 import { Tooltip } from '../components/Tooltip'
-import { addPositionDiluting, cashFromPositions, migrateLegacyPortfolio, removePositionToCash, valuePortfolio } from '../lib/portfolio'
+import { addPositionDiluting, migrateLegacyPortfolio, removePositionToCash, valuePortfolio } from '../lib/portfolio'
 import type { Portfolio, Position, StoredPortfolio } from '../lib/portfolio'
 import { downloadTextFile } from '../lib/download'
 import { portfolioCsvFilename, serializePortfolioCsv } from '../lib/portfolioCsv'
@@ -128,13 +128,13 @@ export function PortfoliosPage(): JSX.Element {
       ...position,
       weight: (position.weight / assetWeight) * targetAssetWeight,
     }))
-    const cashWeight = cashFromPositions(positions)
-    if (cashWeight === null) {
+    const total = parsed + positions.reduce((sum, position) => sum + position.weight, 0)
+    if (!Number.isFinite(total) || Math.abs(total - 100) > 0.01) {
       setCashProblem('The saved asset weights cannot be rescaled.')
       return
     }
     setCashProblem(null)
-    persist({ ...current, cashWeight, positions })
+    persist({ ...current, cashWeight: parsed, positions })
   }
 
   function handleAddPosition(position: Position): void {

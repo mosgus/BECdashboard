@@ -1,3 +1,4 @@
+import { WEIGHT_EPSILON } from './portfolio'
 import type { LegacyPortfolio, Portfolio, Position, StoredPortfolio } from './portfolio'
 
 export const PORTFOLIO_STORAGE_KEY = 'bec-portfolios'
@@ -68,7 +69,7 @@ export function isLegacyPortfolio(value: StoredPortfolio): value is LegacyPortfo
 function normaliseStoredPortfolio(value: unknown): unknown {
   if (typeof value !== 'object' || value === null) return value
   const candidate = value as Record<string, unknown>
-  if (typeof candidate.cashWeight !== 'number' || !(candidate.cashWeight < 0 && candidate.cashWeight > -0.01)) return value
+  if (typeof candidate.cashWeight !== 'number' || !(candidate.cashWeight < 0 && candidate.cashWeight > -WEIGHT_EPSILON)) return value
   return { ...candidate, cashWeight: 0 }
 }
 

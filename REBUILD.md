@@ -376,6 +376,18 @@ anywhere. Contract 0071.
   a `(-0.01, 0)` cash weight to `0` before validating, and does **not** write back — a read that
   silently mutates storage is a worse property than a stale record. `isValidCurrentPortfolio` keeps
   its strict rule.
+- **"Cash is stated-or-derived, never recomputed over a stated value" applies to the editor too, not
+  just the CSV parser.** Found 2026-09-21: typing `5` in the Cash field stored `5.000000000000014`.
+  `handleCashTextChange` rescaled the positions to fill `100 - 5` and then **discarded the typed
+  value**, recomputing cash from the rescaled weights. `cashFromPositions` snaps only within `1e-9` of
+  *zero*, so a residue near 5 passed through. The rule already existed for the file format and was
+  violated in the UI; contract 0072 stores `parsed` and lets the positions absorb the residue, where
+  it is unavoidable anyway.
+- **Every cash edit drifts all position weights by an ulp or two**, because the rescale is not
+  lossless. Measured across two of Gunnar's exports: `VOO 10.4075329437956 → 10.407532943795601`,
+  `PBR ...8987 → ...8996`. **This is inherent and accepted** — the alternative is not rescaling. It
+  also explains an earlier unexplained finding: three positions that had scaled by *different*
+  factors, which pure dilution cannot produce. A cash edit did it, not a bug in dilution.
 - **A noise epsilon and a display tolerance are different numbers.** The first draft of 0071 snapped
   residue below the project's `±0.01`. That is wrong: `cashFromPositions` also serves
   `handleCashTextChange`, where the user *types* a cash percentage — so a typed `0.005` would have

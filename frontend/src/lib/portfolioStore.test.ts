@@ -31,8 +31,8 @@ describe('listPortfolios', () => {
     expect(storage.setItem).not.toHaveBeenCalled()
   })
 
-  it('continues to reject genuinely negative cash', () => {
-    stubStorage([storedPortfolio(-5)])
+  it('rejects a negative value outside the float-noise window', () => {
+    stubStorage([storedPortfolio(-0.005)])
 
     expect(listPortfolios()).toEqual([])
   })

@@ -136,9 +136,8 @@ export function migrateLegacyPortfolio(
     shares: position.shares,
     weight: (position.value / totalValue) * 100,
   }))
-  const cashWeight = 100 - positions.reduce((sum, position) => sum + position.weight, 0)
-
-  if (!Number.isFinite(cashWeight) || cashWeight < 0) return null
+  const cashWeight = cashFromPositions(positions)
+  if (cashWeight === null) return null
 
   return {
     id: legacy.id,

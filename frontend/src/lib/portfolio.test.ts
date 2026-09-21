@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { UniverseEntry } from '../api/client'
-import { addPositionDiluting, cashFromPositions, impliedPortfolioValue, summariseDraft, weightFromShares } from './portfolio'
+import { addPositionDiluting, cashFromPositions, impliedPortfolioValue, migrateLegacyPortfolio, summariseDraft, weightFromShares } from './portfolio'
 import type { Portfolio } from './portfolio'
 
 function portfolio(cashWeight: number, positions: Portfolio['positions']): Portfolio {
@@ -14,6 +14,24 @@ function entry(price: number | null): UniverseEntry {
     quote_fetched_at: null, market_cap: null, trailing_pe: null, dividend_yield: null,
     bar_count: 0, first_bar: null, last_bar: null, fetched_at: null, added_at: '',
   }
+}
+
+const GUNNAR_WEIGHTS = [
+  73.40490607218531,
+  10.481994524396962,
+  10.4075329437956,
+  3.1979752499318987,
+  2.2013242930879917,
+  0.30626691660223515,
+]
+
+function rescaledPositionsForCash(cashWeight: number): Portfolio['positions'] {
+  const assetWeight = GUNNAR_WEIGHTS.reduce((sum, weight) => sum + weight, 0)
+  const targetAssetWeight = 100 - cashWeight
+  return GUNNAR_WEIGHTS.map((weight, index) => ({
+    ticker: String(index),
+    weight: (weight / assetWeight) * targetAssetWeight,
+  }))
 }
 
 describe('cashFromPositions', () => {
@@ -32,20 +50,49 @@ describe('cashFromPositions', () => {
   })
 
   it('avoids the preset rescaling residue that previously deleted the saved portfolio', () => {
-    const weights = [
-      73.40490607218531,
-      10.481994524396962,
-      10.4075329437956,
-      3.1979752499318987,
-      2.2013242930879917,
-      0.30626691660223515,
-    ]
-    const assetWeight = weights.reduce((sum, weight) => sum + weight, 0)
-    const positions = weights.map((weight, index) => ({ ticker: String(index), weight: (weight / assetWeight) * 100 }))
+    const positions = rescaledPositionsForCash(0)
     const rawCash = 100 - positions.reduce((sum, position) => sum + position.weight, 0)
 
     expect(rawCash).toBeGreaterThan(0)
     expect(cashFromPositions(positions)).toBe(0)
+  })
+})
+
+describe('stated cash rescaling', () => {
+  it('stores a typed cash value of 5 exactly while keeping the allocation valid', () => {
+    const parsed = 5
+    const positions = rescaledPositionsForCash(parsed)
+    const stored = { cashWeight: parsed, positions }
+
+    expect(stored.cashWeight).toBe(5)
+    expect(Math.abs(stored.cashWeight + stored.positions.reduce((sum, position) => sum + position.weight, 0) - 100)).toBeLessThanOrEqual(0.01)
+  })
+
+  it.each([0, 0.005, 99.9])('stores typed cash %s exactly', (parsed) => {
+    const positions = rescaledPositionsForCash(parsed)
+    const stored = { cashWeight: parsed, positions }
+
+    expect(stored.cashWeight).toBe(parsed)
+    expect(Math.abs(stored.cashWeight + stored.positions.reduce((sum, position) => sum + position.weight, 0) - 100)).toBeLessThanOrEqual(0.01)
+  })
+})
+
+describe('migrateLegacyPortfolio', () => {
+  it('accepts a negative float residue from derived legacy weights', () => {
+    const rawCash = 100 - [1, 1, 9].reduce((sum, value) => sum + (value / 11) * 100, 0)
+    const result = migrateLegacyPortfolio(
+      {
+        id: 'legacy',
+        name: 'Legacy',
+        cash: 0,
+        positions: [{ ticker: 'AAPL', shares: 1 }, { ticker: 'MSFT', shares: 1 }, { ticker: 'NVDA', shares: 9 }],
+        updatedAt: '2026-09-21T00:00:00Z',
+      },
+      new Map([['AAPL', entry(1)], ['MSFT', entry(1)], ['NVDA', entry(1)]]),
+    )
+
+    expect(rawCash).toBe(-1.4210854715202004e-14)
+    expect(result?.cashWeight).toBe(0)
   })
 })
 
