@@ -233,30 +233,33 @@ def get_signals(tickers: str = "") -> dict:
     for ticker in requested:
         prices = adjusted_prices.get(ticker, [])
         if not prices:
-            response.append({"ticker": ticker, "signals": [], "atr_pct": None})
+            response.append({"ticker": ticker, "signals": [], "atr": None, "atr_pct": None})
             continue
 
         price_series = pd.Series(
             [price for _, price in prices], index=pd.to_datetime([bar_date for bar_date, _ in prices])
         )
+        atr = None
         atr_pct = None
         ohlc = adjusted_ohlc.get(ticker, [])
         if ohlc:
             ohlc_index = pd.to_datetime([bar_date for bar_date, *_ in ohlc])
-            atr = compute_atr(
+            computed_atr = compute_atr(
                 pd.Series([high for _, high, _, _ in ohlc], index=ohlc_index),
                 pd.Series([low for _, _, low, _ in ohlc], index=ohlc_index),
                 pd.Series([close for _, _, _, close in ohlc], index=ohlc_index),
             )
-            latest_atr = atr.iloc[-1]
+            latest_atr = computed_atr.iloc[-1]
             latest_price = price_series.iloc[-1]
             if pd.notna(latest_atr) and latest_price != 0:
-                atr_pct = float(latest_atr / latest_price * 100.0)
+                atr = float(latest_atr)
+                atr_pct = float(atr / latest_price * 100.0)
 
         response.append(
             {
                 "ticker": ticker,
                 "signals": compute_all_signals(price_series),
+                "atr": atr,
                 "atr_pct": atr_pct,
             }
         )

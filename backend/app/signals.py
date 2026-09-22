@@ -17,12 +17,19 @@ def _as_date(value: object) -> date:
     raise TypeError(f"Signal index must contain dates, not {type(value).__name__}")
 
 
-def _signal(signal: str, label: str, state: str | None, last_trigger_date: date | None) -> dict:
+def _signal(
+    signal: str,
+    label: str,
+    state: str | None,
+    last_trigger_date: date | None,
+    value: float | None = None,
+) -> dict:
     return {
         "signal": signal,
         "label": label,
         "state": state,
         "last_trigger_date": last_trigger_date,
+        "value": value,
     }
 
 
@@ -69,12 +76,12 @@ def signal_rsi_threshold(prices: pd.Series, overbought: int = 70, oversold: int 
         state = "OVERSOLD"
         active = rsi <= oversold
     else:
-        return _signal("rsi_threshold", label, "NEUTRAL", None)
+        return _signal("rsi_threshold", label, "NEUTRAL", None, round(latest, 2))
 
     first_active = len(active) - 1
     while first_active > 0 and bool(active.iloc[first_active - 1]):
         first_active -= 1
-    return _signal("rsi_threshold", label, state, _as_date(active.index[first_active]))
+    return _signal("rsi_threshold", label, state, _as_date(active.index[first_active]), round(latest, 2))
 
 
 def signal_macd_cross(prices: pd.Series) -> dict:
@@ -97,7 +104,7 @@ def signal_macd_cross(prices: pd.Series) -> dict:
 
     latest = float(valid.iloc[-1])
     state = "BULLISH" if latest > 0 else "BEARISH" if latest < 0 else "NEUTRAL"
-    return _signal("macd_cross", label, state, last_trigger_date)
+    return _signal("macd_cross", label, state, last_trigger_date, round(latest, 4))
 
 
 def compute_all_signals(prices: pd.Series) -> list[dict]:

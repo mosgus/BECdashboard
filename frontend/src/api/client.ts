@@ -103,11 +103,17 @@ export interface SignalOut {
   label: string
   state: string | null
   last_trigger_date: string | null
+  /** The indicator's current scalar reading where one exists: the RSI for `rsi_threshold`,
+   *  the histogram for `macd_cross`, null for `sma_cross` — a crossover is a relationship
+   *  between two lines, not a single number. Null whenever `state` is null. */
+  value: number | null
 }
 
 export interface TickerSignals {
   ticker: string
   signals: SignalOut[]
+  /** ATR(14) in the ticker's price units. Null together with `atr_pct`. */
+  atr: number | null
   atr_pct: number | null
 }
 

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { JSX } from 'react'
-import { useParams } from 'react-router-dom'
+import { Link, useParams } from 'react-router-dom'
 import { getReturns, getSignals, getUniverse } from '../../api/client'
 import type { TickerReturns, TickerSignals, UniverseEntry } from '../../api/client'
 import { SignalBadge } from '../../components/SignalBadge'
@@ -181,7 +181,13 @@ export function HoldingsPage(): JSX.Element {
 
                 return (
                   <tr key={row.ticker}>
-                    <td className={`${TD} font-mono text-xs font-semibold whitespace-nowrap`}>{row.ticker}</td>
+                    <td className={`${TD} font-mono text-xs font-semibold whitespace-nowrap`}>
+                      <Tooltip label="Open this ticker's detail page">
+                        <Link to={`/ticker/${row.ticker}?from=/portfolios/${current.id}/holdings`} className="hover:text-brand-primary">
+                          {row.ticker}
+                        </Link>
+                      </Tooltip>
+                    </td>
                     <td
                       className={`${TD} max-w-[14rem] overflow-hidden text-ellipsis whitespace-nowrap`}
                       title={row.name ?? undefined}

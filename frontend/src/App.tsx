@@ -10,6 +10,7 @@ import { RiskPage } from './pages/analysis/RiskPage'
 import { LaunchPage } from './pages/LaunchPage'
 import { OpsPage } from './pages/OpsPage'
 import { PortfoliosPage } from './pages/PortfoliosPage'
+import { TickerPage } from './pages/TickerPage'
 import { UniversePage } from './pages/UniversePage'
 
 export default function App() {
@@ -20,6 +21,7 @@ export default function App() {
       <Routes>
         <Route path="/" element={<LaunchPage />} />
         <Route path="/universe" element={<UniversePage />} />
+        <Route path="/ticker/:symbol" element={<TickerPage />} />
         <Route path="/ops" element={<OpsPage />} />
         <Route path="/portfolios" element={<PortfoliosPage />} />
         <Route path="/portfolios/:portfolioId" element={<AnalysisLayout />}>

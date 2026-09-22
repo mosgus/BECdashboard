@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { JSX } from 'react'
+import { Link } from 'react-router-dom'
 import { Area, AreaChart, ResponsiveContainer, Tooltip as RechartsTooltip, XAxis, YAxis } from 'recharts'
 import { ApiError, deleteTicker, getHistory } from '../api/client'
 import type { PriceBar, UniverseEntry } from '../api/client'
@@ -326,15 +327,25 @@ export function ChartDialog({ ticker, entry, onClose, onDeleted }: ChartDialogPr
             })}
           </div>
 
-          <Tooltip label={`Permanently delete ${ticker} and all of its stored data`}>
-            <button
-              type="button"
-              onClick={() => setConfirmOpen(true)}
-              className="text-xs font-medium px-2.5 py-1.5 rounded-[var(--radius-btn)] border border-brand-border text-[var(--color-muted)] hover:bg-btn-danger hover:text-btn-danger-text"
-            >
-              Delete ticker
-            </button>
-          </Tooltip>
+          <div className="flex items-center gap-2">
+            <Tooltip label="Open the full detail page for this ticker">
+              <Link
+                to={`/ticker/${ticker}?from=/universe`}
+                className="text-xs font-medium px-2.5 py-1.5 rounded-[var(--radius-btn)] border border-brand-border text-[var(--color-muted)] hover:bg-brand-border hover:text-foreground"
+              >
+                More details
+              </Link>
+            </Tooltip>
+            <Tooltip label={`Permanently delete ${ticker} and all of its stored data`}>
+              <button
+                type="button"
+                onClick={() => setConfirmOpen(true)}
+                className="text-xs font-medium px-2.5 py-1.5 rounded-[var(--radius-btn)] border border-brand-border text-[var(--color-muted)] hover:bg-btn-danger hover:text-btn-danger-text"
+              >
+                Delete ticker
+              </button>
+            </Tooltip>
+          </div>
         </div>
       </div>
 

@@ -830,7 +830,7 @@ def test_get_signals_keeps_no_bar_ticker_and_limits_requested_tickers(db_mode, c
 
     assert response.status_code == 200
     assert response.json() == {
-        "signals": [{"ticker": "NONE", "signals": [], "atr_pct": None}],
+        "signals": [{"ticker": "NONE", "signals": [], "atr": None, "atr_pct": None}],
         "as_of": None,
     }
 
@@ -866,8 +866,10 @@ def test_get_signals_uses_adjusted_close_and_adjusted_high_low(db_mode, client):
     body = response.json()
     by_ticker = {entry["ticker"]: entry for entry in body["signals"]}
     assert by_ticker["SPLIT"]["signals"][0]["state"] != "BEARISH"
+    assert by_ticker["ATRADJ"]["atr"] == pytest.approx(4.0)
     assert by_ticker["ATRADJ"]["atr_pct"] == pytest.approx(8.0)
-    assert by_ticker["NOBARS"] == {"ticker": "NOBARS", "signals": [], "atr_pct": None}
+    assert by_ticker["ATRADJ"]["atr_pct"] == pytest.approx(by_ticker["ATRADJ"]["atr"] / 50.0 * 100.0)
+    assert by_ticker["NOBARS"] == {"ticker": "NOBARS", "signals": [], "atr": None, "atr_pct": None}
     assert body["as_of"] == (start + timedelta(days=79)).isoformat()
 
 

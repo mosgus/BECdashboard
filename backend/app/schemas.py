@@ -110,11 +110,13 @@ class SignalOut(BaseModel):
     label: str
     state: str | None
     last_trigger_date: date | None
+    value: float | None
 
 
 class TickerSignals(BaseModel):
     ticker: str
     signals: list[SignalOut]
+    atr: float | None
     atr_pct: float | None
 
 
