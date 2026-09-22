@@ -132,7 +132,7 @@ export function UniverseTable({ rows, onRowClick }: UniverseTableProps): JSX.Ele
                       : "Last completed session's change — not a live price"
                   }
                 >
-                  <span className={`text-xs ${change.live ? CHANGE_COLOR[change.direction] : 'text-[var(--color-muted)]'}`}>{change.label}</span>
+                  <span className={`text-xs ${CHANGE_COLOR[change.direction]}`}>{change.label}</span>
                 </Tooltip>
               </td>
               <td className={`${TD} ${NOWRAP} text-right tabular-nums hidden lg:table-cell text-[var(--color-muted)]`}>

@@ -27,6 +27,7 @@ export function NewPortfolioDialog({ universe, onCancel, onCreate }: NewPortfoli
   const [name, setName] = useState('')
   const [mode, setMode] = useState<EntryMode>('weight')
   const [cashText, setCashText] = useState('')
+  const [basisDate, setBasisDate] = useState<string | undefined>(undefined)
   const [rows, setRows] = useState<DraftRow[]>([])
   const [importError, setImportError] = useState<string | null>(null)
   const [droppedRows, setDroppedRows] = useState<DroppedRow[]>([])
@@ -50,6 +51,7 @@ export function NewPortfolioDialog({ universe, onCancel, onCreate }: NewPortfoli
     setName(seed.name)
     setMode(seed.mode)
     setCashText(seed.cash)
+    setBasisDate(seed.basisDate)
     setRows(seed.rows.map((row) => ({ ...row, id: crypto.randomUUID() })))
   }
 
@@ -145,6 +147,7 @@ export function NewPortfolioDialog({ universe, onCancel, onCreate }: NewPortfoli
       cashWeight: summary.cashWeight,
       positions,
       updatedAt: new Date().toISOString(),
+      ...(basisDate === undefined ? {} : { basisDate }),
     })
   }
 

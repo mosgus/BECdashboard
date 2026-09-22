@@ -7,7 +7,7 @@ import { AddPositionForm } from '../components/AddPositionForm'
 import { NewPortfolioDialog } from '../components/NewPortfolioDialog'
 import { PositionsTable } from '../components/PositionsTable'
 import { Tooltip } from '../components/Tooltip'
-import { addPositionDiluting, migrateLegacyPortfolio, removePositionToCash, valuePortfolio } from '../lib/portfolio'
+import { addPositionDiluting, isValidBasisDate, migrateLegacyPortfolio, removePositionToCash, valuePortfolio } from '../lib/portfolio'
 import type { Portfolio, Position, StoredPortfolio } from '../lib/portfolio'
 import { downloadTextFile } from '../lib/download'
 import { portfolioCsvFilename, serializePortfolioCsv } from '../lib/portfolioCsv'
@@ -31,6 +31,7 @@ export function PortfoliosPage(): JSX.Element {
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false)
   const [composerOpen, setComposerOpen] = useState(false)
   const [cashText, setCashText] = useState('')
+  const [basisDateText, setBasisDateText] = useState('')
   const [cashProblem, setCashProblem] = useState<string | null>(null)
 
   useEffect(() => {
@@ -69,6 +70,7 @@ export function PortfoliosPage(): JSX.Element {
 
   useEffect(() => {
     setCashText(current === null ? '' : String(current.cashWeight))
+    setBasisDateText(current?.basisDate ?? '')
     setCashProblem(null)
     // The editor owns its text between keystrokes; reseed only when the selected portfolio changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -136,6 +138,17 @@ export function PortfoliosPage(): JSX.Element {
     }
     setCashProblem(null)
     persist({ ...current, cashWeight: parsed, positions })
+  }
+
+  function handleBasisDateChange(value: string): void {
+    setBasisDateText(value)
+    if (current === null) return
+    if (value === '') {
+      const { basisDate: _basisDate, ...withoutBasisDate } = current
+      persist(withoutBasisDate)
+      return
+    }
+    if (isValidBasisDate(value)) persist({ ...current, basisDate: value })
   }
 
   function handleAddPosition(position: Position): void {
@@ -290,6 +303,16 @@ export function PortfoliosPage(): JSX.Element {
                           />
                         </Tooltip>
                         <span className="text-sm text-[var(--color-muted)]">%</span>
+                        <label htmlFor="return-since" className="text-sm text-[var(--color-muted)] ml-2">Return since</label>
+                        <Tooltip label="Return is measured from this date's closing price. Leave empty for none.">
+                          <input
+                            id="return-since"
+                            type="date"
+                            value={basisDateText}
+                            onChange={(event) => handleBasisDateChange(event.target.value)}
+                            className="text-sm px-3 py-1.5 rounded-[var(--radius-btn)] border border-brand-border bg-brand-surface text-foreground"
+                          />
+                        </Tooltip>
                         {cashProblem && <span className="text-sm text-brand-negative">{cashProblem}</span>}
                       </div>
 

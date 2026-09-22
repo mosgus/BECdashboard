@@ -31,6 +31,7 @@ export function HoldingsPage(): JSX.Element {
   const portfolio = listPortfolios().find((candidate) => candidate.id === portfolioId)
   const current = portfolio === undefined || isLegacyPortfolio(portfolio) ? null : portfolio
   const tickerKey = current === null ? null : current.positions.map((position) => position.ticker).join(',')
+  const basisDate = current?.basisDate
   const [universe, setUniverse] = useState<LoadState<UniverseEntry[]>>({ status: 'loading' })
   const [returns, setReturns] = useState<LoadState<TickerReturns[]>>({ status: 'loading' })
 
@@ -47,7 +48,7 @@ export function HoldingsPage(): JSX.Element {
         if (!cancelled) setUniverse({ status: 'error' })
       })
 
-    void getReturns(tickers)
+    void getReturns(tickers, basisDate)
       .then((response) => {
         if (!cancelled) setReturns({ status: 'ready', data: response.returns })
       })
@@ -58,7 +59,7 @@ export function HoldingsPage(): JSX.Element {
     return () => {
       cancelled = true
     }
-  }, [tickerKey])
+  }, [tickerKey, basisDate])
 
   if (current === null) return <></>
 
@@ -97,7 +98,11 @@ export function HoldingsPage(): JSX.Element {
                 </th>
                 <th className={`${TH} text-right`}>Shares</th>
                 <th className={`${TH} text-right`}>Price</th>
-                <th className={`${TH} text-right`}>Day</th>
+                <th className={`${TH} text-right`}>
+                  <Tooltip label="Change from the last close. When the market is closed this is the last completed session's move.">
+                    <span>Day</span>
+                  </Tooltip>
+                </th>
                 {['5D', '30D', 'YTD'].map((label) => (
                   <th key={label} className={`${TH} text-right`}>
                     <Tooltip label="Total return including dividends, from stored price history.">
@@ -105,6 +110,13 @@ export function HoldingsPage(): JSX.Element {
                     </Tooltip>
                   </th>
                 ))}
+                {current.basisDate !== undefined && (
+                  <th className={`${TH} text-right`}>
+                    <Tooltip label="Total return including dividends since the portfolio's basis date.">
+                      <span>Since {current.basisDate}</span>
+                    </Tooltip>
+                  </th>
+                )}
               </tr>
             </thead>
             <tbody>
@@ -134,12 +146,13 @@ export function HoldingsPage(): JSX.Element {
                     <td className={`${TD} text-right tabular-nums whitespace-nowrap`}>
                       {formatPrice(positionPrice(entry))}
                     </td>
-                    <td className={`${TD} text-right tabular-nums whitespace-nowrap ${change.live ? signedColor(change.percent) : MUTED}`}>
+                    <td className={`${TD} text-right tabular-nums whitespace-nowrap ${signedColor(change.percent)}`}>
                       {day}
                     </td>
                     <ReturnCell value={tickerReturns?.five_day ?? null} />
                     <ReturnCell value={tickerReturns?.thirty_day ?? null} />
                     <ReturnCell value={tickerReturns?.ytd ?? null} />
+                    {current.basisDate !== undefined && <ReturnCell value={tickerReturns?.since ?? null} />}
                   </tr>
                 )
               })}
@@ -153,6 +166,7 @@ export function HoldingsPage(): JSX.Element {
                 <td className={`${TD} text-right ${MUTED}`}>—</td>
                 <td className={`${TD} text-right ${MUTED}`}>—</td>
                 <td className={`${TD} text-right ${MUTED}`}>—</td>
+                {current.basisDate !== undefined && <td className={`${TD} text-right ${MUTED}`}>—</td>}
               </tr>
             </tbody>
           </table>

@@ -1673,6 +1673,21 @@ reference's Holdings table has `Cost Basis` and `P&L` columns; ours will not.
   `cost_basis` CSV column. That *is* the right shape **if** the decision ever reverses — model-level
   and round-tripping, not UI-only.
 
+**The Day column is coloured by sign even when the price is not live.** Gunnar's call, 2026-09-22,
+contract 0081. Both tables previously greyed the figure whenever `priceChange` reported
+`live: false` — outside market hours, or on a stale quote — because the number shown is then the
+*last completed session's* move rather than an intraday one.
+
+- **Colour was carrying that distinction, and now the tooltip is the only thing that does.**
+  `UniverseTable`'s two messages (`Change from the last close` / `Last completed session's change —
+  not a live price`) become load-bearing rather than decorative; do not merge or delete them.
+- **`HoldingsPage` had no tooltip at all**, because contract 0078 banned them on data cells. Under the
+  old rule grey still signalled *something*; under the new one Holdings would have had no signal
+  whatsoever. It gains a `Day` **header** tooltip — consistent with 0078's rule that headers stating a
+  convention get one, and cells do not.
+- The general shape, which is the part worth keeping: **when you remove a visual encoding, check what
+  it was encoding.** Grey looked like styling and was carrying data.
+
 **A basis date replaces cost basis: per-portfolio, percentage only.** Gunnar's idea and call,
 2026-09-22, contract 0079. The user names one date; the app reports return since that date's close,
 from stored bars.
