@@ -147,6 +147,25 @@ def _add_signal_bars(
             )
 
 
+def _add_indicator_bars(
+    ticker: str,
+    bars: list[tuple[date, float, float, float, float, int | None]],
+) -> None:
+    with session() as db:
+        for bar_date, high, low, close, adj_close, volume in bars:
+            db.add(
+                PriceBar(
+                    ticker=ticker,
+                    date=bar_date,
+                    high=high,
+                    low=low,
+                    close=close,
+                    adj_close=adj_close,
+                    volume=volume,
+                )
+            )
+
+
 # --- 14. GET /universe returns 200 and a JSON list -----------------------------------------
 
 
@@ -889,6 +908,103 @@ def test_get_signals_atr_pct_normalizes_for_price_level(db_mode, client):
     assert response.status_code == 200
     values = [entry["atr_pct"] for entry in response.json()["signals"]]
     assert values == pytest.approx([2.0, 2.0])
+
+
+# --- GET /universe/{ticker}/indicators: adjusted overlay series ----------------------------
+
+
+def test_get_indicators_returns_requested_parallel_series(db_mode, client):
+    start = date.today() - timedelta(days=30)
+    _add_indicator_bars(
+        "OVERLAY",
+        [
+            (start + timedelta(days=index), 102.0 + index, 98.0 + index, 100.0 + index, 100.0 + index, 100)
+            for index in range(25)
+        ],
+    )
+
+    bollinger = client.get("/universe/OVERLAY/indicators?include=bollinger")
+    combined = client.get("/universe/OVERLAY/indicators?include=bollinger,obv")
+
+    assert bollinger.status_code == 200
+    assert [entry["key"] for entry in bollinger.json()["series"]] == [
+        "bollinger_upper",
+        "bollinger_middle",
+        "bollinger_lower",
+    ]
+    assert [entry["key"] for entry in combined.json()["series"]] == [
+        "bollinger_upper",
+        "bollinger_middle",
+        "bollinger_lower",
+        "obv",
+    ]
+    assert all(len(entry["points"]) == len(combined.json()["dates"]) for entry in combined.json()["series"])
+
+
+def test_get_indicators_ignores_unknown_groups_and_empty_requests_return_nothing(db_mode, client):
+    start = date.today() - timedelta(days=30)
+    _add_indicator_bars(
+        "OVERLAY",
+        [
+            (start + timedelta(days=index), 102.0 + index, 98.0 + index, 100.0 + index, 100.0 + index, 100)
+            for index in range(25)
+        ],
+    )
+
+    unknown = client.get("/universe/OVERLAY/indicators?include=bollinger,nonsense")
+    absent = client.get("/universe/OVERLAY/indicators")
+    empty = client.get("/universe/OVERLAY/indicators?include=")
+
+    assert [entry["key"] for entry in unknown.json()["series"]] == [
+        "bollinger_upper",
+        "bollinger_middle",
+        "bollinger_lower",
+    ]
+    assert absent.json() == {"ticker": "OVERLAY", "dates": [], "series": []}
+    assert empty.json() == {"ticker": "OVERLAY", "dates": [], "series": []}
+
+
+def test_get_indicators_serializes_nan_as_null_and_keeps_no_bar_tickers_empty(db_mode, client):
+    start = date.today() - timedelta(days=25)
+    _add_indicator_bars(
+        "FLAT",
+        [
+            (start + timedelta(days=index), 100.0, 100.0, 100.0, 100.0, 100)
+            for index in range(20)
+        ],
+    )
+
+    response = client.get("/universe/FLAT/indicators?include=stochastic")
+    no_bars = client.get("/universe/ORPHAN/indicators?include=bollinger")
+
+    assert response.status_code == 200
+    assert response.json()["series"][0]["points"][-1] is None
+    assert "NaN" not in response.text
+    assert no_bars.status_code == 200
+    assert no_bars.json() == {"ticker": "ORPHAN", "dates": [], "series": []}
+
+
+def test_get_indicators_uses_adjusted_volume_for_obv_without_network(db_mode, client, monkeypatch):
+    def _raise(*_args, **_kwargs):
+        raise AssertionError("Indicators must not fetch from yfinance")
+
+    monkeypatch.setattr("app.market_data._download_history", _raise)
+    start = date.today() - timedelta(days=3)
+    _add_indicator_bars(
+        "SPLITOBV",
+        [
+            (start, 404.0, 396.0, 400.0, 100.0, 1_000_000),
+            (start + timedelta(days=1), 408.0, 400.0, 404.0, 101.0, 1_000_000),
+            (start + timedelta(days=2), 102.0, 98.0, 100.0, 100.0, 1_000_000),
+        ],
+    )
+
+    response = client.get("/universe/SPLITOBV/indicators?include=obv")
+
+    assert response.status_code == 200
+    adjusted_obv = response.json()["series"][0]["points"][-1]
+    assert adjusted_obv == 3_000_000.0
+    assert adjusted_obv != 0.0
 
 
 # --- conftest.py's block_network fixture (contract 0043) ------------------------------------

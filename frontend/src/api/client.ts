@@ -57,6 +57,18 @@ export interface HistoryResponse {
   bars: PriceBar[]
 }
 
+export interface IndicatorSeries {
+  key: string
+  label: string
+  points: (number | null)[]
+}
+
+export interface IndicatorsResponse {
+  ticker: string
+  dates: string[]
+  series: IndicatorSeries[]
+}
+
 export interface StripQuote {
   ticker: string
   name: string
@@ -272,6 +284,12 @@ export async function refreshQuotes(): Promise<QuoteRefreshResult> {
 
 export async function getHistory(ticker: string): Promise<HistoryResponse> {
   return request<HistoryResponse>(`/universe/${ticker}/history`)
+}
+
+export async function getIndicators(ticker: string, include: string[]): Promise<IndicatorsResponse> {
+  if (include.length === 0) return { ticker, dates: [], series: [] }
+  const query = new URLSearchParams({ include: include.join(',') })
+  return request<IndicatorsResponse>(`/universe/${ticker}/indicators?${query}`)
 }
 
 export async function getStrip(): Promise<StripResponse> {

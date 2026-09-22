@@ -9,6 +9,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, Response
 from sqlalchemy import select
 
 from app.autorefresh import active_universe_tickers, run_auto_refresh_if_due
+from app.bars import adjust_bars
 from app.cache import get_cached, store_quotes
 from app.db import is_enabled, session
 from app.export import build_universe_zip, history_to_csv
@@ -18,6 +19,7 @@ from app.schemas import (
     AddTickerRequest,
     DeleteResult,
     HistoryResponse,
+    IndicatorsResponse,
     QuoteRefreshResult,
     RefreshResult,
     ReturnsResponse,
@@ -29,7 +31,15 @@ from app.schemas import (
 from app.strip import build_strip_response
 from app.returns import base_close_on_or_after, bar_window_start, nth_prior_close, pct_return, ytd_base_close
 from app.models import PriceBar
-from app.indicators import compute_atr
+from app.indicators import (
+    compute_adx,
+    compute_atr,
+    compute_bollinger,
+    compute_donchian,
+    compute_ema,
+    compute_obv,
+    compute_stochastic,
+)
 from app.signals import compute_all_signals
 from app.universe import (
     AlreadyPresent,
@@ -218,16 +228,17 @@ def get_signals(tickers: str = "") -> dict:
         ).all()
 
     adjusted_prices: dict[str, list[tuple[date, float]]] = {}
-    adjusted_ohlc: dict[str, list[tuple[date, float, float, float]]] = {}
+    raw_ohlc: dict[str, list[tuple]] = {}
     as_of = max((bar_date for _, bar_date, *_ in bar_rows), default=None)
     for ticker, bar_date, high, low, close, adj_close in bar_rows:
         if adj_close is not None:
             adjusted_prices.setdefault(ticker, []).append((bar_date, adj_close))
-        if None not in (high, low, close, adj_close) and close != 0:
-            ratio = adj_close / close
-            adjusted_ohlc.setdefault(ticker, []).append(
-                (bar_date, high * ratio, low * ratio, adj_close)
-            )
+        raw_ohlc.setdefault(ticker, []).append((bar_date, high, low, close, adj_close, None))
+
+    adjusted_ohlc = {
+        ticker: [(bar.date, bar.high, bar.low, bar.close) for bar in adjust_bars(rows)]
+        for ticker, rows in raw_ohlc.items()
+    }
 
     response = []
     for ticker in requested:
@@ -339,6 +350,76 @@ def get_history_json(ticker: str) -> dict:
     ]
 
     return {"ticker": ticker.upper(), "bars": bars}
+
+
+@router.get("/{ticker}/indicators", response_model=IndicatorsResponse)
+def get_indicators(ticker: str, include: str = "") -> dict:
+    """Return requested stored-data overlay series on one shared, adjusted date axis."""
+    _require_database()
+    requested = {key.strip() for key in include.split(",") if key.strip()}
+    if not requested:
+        return {"ticker": ticker.upper(), "dates": [], "series": []}
+
+    today = datetime.now(ZoneInfo("America/New_York")).date()
+    with session() as db:
+        bar_rows = db.execute(
+            select(
+                PriceBar.date,
+                PriceBar.high,
+                PriceBar.low,
+                PriceBar.close,
+                PriceBar.adj_close,
+                PriceBar.volume,
+            )
+            .where(
+                PriceBar.ticker == ticker.upper(),
+                PriceBar.date >= today - timedelta(days=SIGNAL_WINDOW_DAYS),
+            )
+            .order_by(PriceBar.date)
+        ).all()
+
+    bars = adjust_bars(bar_rows)
+    if not bars:
+        return {"ticker": ticker.upper(), "dates": [], "series": []}
+
+    dates = [bar.date for bar in bars]
+    high = pd.Series([bar.high for bar in bars])
+    low = pd.Series([bar.low for bar in bars])
+    close = pd.Series([bar.close for bar in bars])
+    volume = pd.Series([bar.volume for bar in bars], dtype="float64")
+    series = []
+
+    def add_series(key: str, label: str, values: pd.Series) -> None:
+        series.append(
+            {
+                "key": key,
+                "label": label,
+                "points": [None if pd.isna(value) else float(value) for value in values],
+            }
+        )
+
+    if "ema" in requested:
+        add_series("ema_fast", "EMA 20", compute_ema(close, 20))
+        add_series("ema_slow", "EMA 50", compute_ema(close, 50))
+    if "bollinger" in requested:
+        upper, middle, lower = compute_bollinger(close)
+        add_series("bollinger_upper", "Bollinger upper (20, 2σ)", upper)
+        add_series("bollinger_middle", "Bollinger middle (20, 2σ)", middle)
+        add_series("bollinger_lower", "Bollinger lower (20, 2σ)", lower)
+    if "donchian" in requested:
+        upper, lower = compute_donchian(high, low)
+        add_series("donchian_upper", "Donchian upper (20)", upper)
+        add_series("donchian_lower", "Donchian lower (20)", lower)
+    if "adx" in requested:
+        add_series("adx", "ADX 14", compute_adx(high, low, close))
+    if "stochastic" in requested:
+        percent_k, percent_d = compute_stochastic(high, low, close)
+        add_series("stochastic_k", "Stochastic %K (14)", percent_k)
+        add_series("stochastic_d", "Stochastic %D (3)", percent_d)
+    if "obv" in requested:
+        add_series("obv", "OBV", compute_obv(close, volume))
+
+    return {"ticker": ticker.upper(), "dates": dates, "series": series}
 
 
 @router.get("/{ticker}/history.csv")

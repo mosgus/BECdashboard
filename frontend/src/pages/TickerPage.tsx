@@ -1,8 +1,8 @@
 import { lazy, Suspense, useEffect, useState } from 'react'
 import type { JSX } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
-import { ApiError, getHistory, getSignals } from '../api/client'
-import type { PriceBar, SignalOut, TickerSignals } from '../api/client'
+import { ApiError, getHistory, getIndicators, getSignals } from '../api/client'
+import type { IndicatorsResponse, PriceBar, SignalOut, TickerSignals } from '../api/client'
 import { SignalBadge } from '../components/SignalBadge'
 import { Tooltip } from '../components/Tooltip'
 import { formatPrice } from '../lib/format'
@@ -18,6 +18,20 @@ const SIGNAL_DESCRIPTIONS: Record<string, string> = {
   sma_cross: 'Bullish when the 20-day SMA crosses above the 50-day SMA. Bearish when it crosses below.',
   rsi_threshold: 'Overbought above 70 (potential pullback), oversold below 30 (potential rebound).',
   macd_cross: 'Bullish when the MACD line crosses above its signal line. Bearish when below.',
+}
+
+const INDICATOR_GROUPS = [
+  { key: 'ema', label: 'EMA 20/50' },
+  { key: 'bollinger', label: 'Bollinger (20, 2σ)' },
+  { key: 'donchian', label: 'Donchian (20)' },
+  { key: 'adx', label: 'ADX 14' },
+  { key: 'stochastic', label: 'Stochastic (14,3)' },
+  { key: 'obv', label: 'OBV' },
+] as const
+
+const INDICATOR_TOOLTIPS: Record<string, string> = {
+  adx: 'Trend strength from 0 to 100. High means a strong trend in either direction, not a bullish one.',
+  obv: 'On-balance volume — cumulative volume added on up days and subtracted on down days.',
 }
 
 function isoToday(): string {
@@ -47,6 +61,9 @@ export function TickerPage(): JSX.Element {
   const [end, setEnd] = useState(isoToday)
   const [history, setHistory] = useState<LoadState<PriceBar[]>>({ status: 'loading' })
   const [signals, setSignals] = useState<LoadState<TickerSignals | null>>({ status: 'loading' })
+  const [enabledIndicators, setEnabledIndicators] = useState<Set<string>>(new Set())
+  const [indicators, setIndicators] = useState<LoadState<IndicatorsResponse>>({ status: 'loading' })
+  const indicatorKey = Array.from(enabledIndicators).sort().join(',')
 
   useEffect(() => {
     if (symbol === '') return
@@ -70,10 +87,18 @@ export function TickerPage(): JSX.Element {
         if (!cancelled) setSignals({ status: 'error', statusCode: error instanceof ApiError ? error.status : null })
       })
 
+    void getIndicators(symbol, indicatorKey === '' ? [] : indicatorKey.split(','))
+      .then((response) => {
+        if (!cancelled) setIndicators({ status: 'ready', data: response })
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) setIndicators({ status: 'error', statusCode: error instanceof ApiError ? error.status : null })
+      })
+
     return () => {
       cancelled = true
     }
-  }, [symbol])
+  }, [symbol, indicatorKey])
 
   const bars = history.status === 'ready' ? history.data : []
   // History is intentionally fetched once: date controls filter this stored response immediately.
@@ -81,12 +106,22 @@ export function TickerPage(): JSX.Element {
   const filteredBars = bars.filter((bar) => bar.date >= start && bar.date <= end)
   const chartBars = filteredBars.filter((bar) => bar.adj_close !== null)
   const signalData = signals.status === 'ready' ? signals.data : null
+  const indicatorData = indicators.status === 'ready' ? indicators.data : undefined
   const unknownTicker =
     ((history.status === 'ready' && bars.length === 0) ||
       (history.status === 'error' && history.statusCode === 404)) &&
     signals.status === 'ready' &&
     (signalData === null || signalData.signals.length === 0)
   const newestBarDate = bars.length > 0 ? bars[bars.length - 1].date : null
+
+  function toggleIndicator(key: string): void {
+    setEnabledIndicators((current) => {
+      const next = new Set(current)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }
 
   return (
     <main className="max-w-[80rem] mx-auto px-4 py-6 space-y-5">
@@ -136,11 +171,32 @@ export function TickerPage(): JSX.Element {
           </section>
 
           <section className="bg-brand-surface border border-brand-border rounded-[var(--radius-card)] p-4">
+            <Tooltip label="Draw this indicator on the chart">
+              <span className="text-xs font-medium text-[var(--color-muted)]">Indicators</span>
+            </Tooltip>
+            <div className="flex flex-wrap gap-x-4 gap-y-2 mt-2">
+              {INDICATOR_GROUPS.map((group) => (
+                <Tooltip key={group.key} label={INDICATOR_TOOLTIPS[group.key] ?? 'Draw this indicator on the chart'}>
+                  <label className="inline-flex items-center gap-2 text-sm cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={enabledIndicators.has(group.key)}
+                      onChange={() => toggleIndicator(group.key)}
+                      className="accent-[var(--color-primary)]"
+                    />
+                    {group.label}
+                  </label>
+                </Tooltip>
+              ))}
+            </div>
+          </section>
+
+          <section className="bg-brand-surface border border-brand-border rounded-[var(--radius-card)] p-4">
             {history.status === 'loading' && <p className="h-[22rem] flex items-center justify-center text-sm text-[var(--color-muted)]">Loading chart…</p>}
             {history.status === 'ready' && chartBars.length === 0 && <p className="h-[22rem] flex items-center justify-center text-sm text-[var(--color-muted)]">No stored data in this date range.</p>}
             {history.status === 'ready' && chartBars.length > 0 && (
               <Suspense fallback={<p className="h-[22rem] flex items-center justify-center text-sm text-[var(--color-muted)]">Loading chart…</p>}>
-                <TickerChart bars={filteredBars} />
+                <TickerChart bars={filteredBars} indicators={indicatorData} />
               </Suspense>
             )}
           </section>

@@ -1472,6 +1472,15 @@ it becomes unverifiable. Both coder role files carry this as a hard rule, the co
 it, and `.claude/settings.json` denies Edit/Write there — though a deny list cannot see a shell
 redirect or `sed -i`, which is why the rule is written down as well as enforced.
 
+**The conflict guard allows exactly one ambient value: the empty string.** Clarified 2026-09-22 after
+two coders in eight contracts read it as a malfunction. `DATABASE_URL=""` imports cleanly — the
+deliberate opt-out every ad-hoc script relies on. `DATABASE_URL="sqlite:////tmp/x.db"` **raises**,
+because the guard rejects any non-empty ambient value differing from `.env`. Both are contract 0041
+behaving as designed, but only the first was ever written down, so an agent wanting a throwaway
+database hits a wall with no stated remedy. **The remedy is the pytest fixtures**, which build an
+isolated SQLite file and strip the variable; both coders found that on their own and both flagged the
+wall. Now in `contracts/TEMPLATE-contract.md`.
+
 **An exported `DATABASE_URL` silently beats `backend/.env`.** Cost a debugging session on
 2026-09-15. `config.py` calls `load_dotenv(path)`, and `load_dotenv` **does not override a variable
 already present in the environment** — so a stale `export DATABASE_URL=...` left in one terminal from

@@ -64,6 +64,18 @@ class HistoryResponse(BaseModel):
     bars: list[PriceBarOut]
 
 
+class IndicatorSeries(BaseModel):
+    key: str
+    label: str
+    points: list[float | None]
+
+
+class IndicatorsResponse(BaseModel):
+    ticker: str
+    dates: list[date]
+    series: list[IndicatorSeries]
+
+
 class StripQuote(BaseModel):
     ticker: str
     name: str

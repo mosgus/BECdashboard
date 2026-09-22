@@ -65,6 +65,13 @@ tempting work that is NOT part of this contract.>
 > `tests/conftest.py` strips the variable for `pytest` only; it does not cover scripts.
 > A command intended to exercise degraded mode will otherwise silently exercise production and
 > report the opposite of what it claims. Found 2026-09-13, during contract 0008.
+>
+> **`DATABASE_URL=""` is the only ambient value that works.** Setting it to a real throwaway URL —
+> `sqlite:////tmp/x.db` — raises at import, because `config.py`'s conflict guard (contract 0041)
+> rejects any *non-empty* ambient value that differs from `.env`. That is by design, not a bug; two
+> contracts have now mistaken it for one. **If you need a real database for a probe, use the pytest
+> fixtures rather than an ad-hoc script** — they build an isolated SQLite file and strip the ambient
+> variable for you.
 
 Run each of these and paste the **complete, verbatim** output into the report — including
 failures. Do not summarize, do not trim, do not clean up.

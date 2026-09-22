@@ -92,7 +92,12 @@ Run this check over every criterion you write, out loud, before issuing the cont
    tripwire whose neighbours cannot survive it firing is three failures, not one signal. When a
    criterion says "this number changes when the user changes it", require the other tests to derive
    from the data rather than restate it.
-7. **Could this criterion fail on correct work?** That is strictly worse than having no criterion —
+7. **Is any fixture described in prose rather than written out?** "Three rising days with volume 100"
+   does not specify the bar count, and OBV's first bar contributes zero — so that phrase means 200 or
+   300 depending on how it is read. Contract 0088 stalled on exactly that. **Write test data as
+   literal values** — `[100.0, 101.0, 102.0, 103.0]` — not as a description of it. Prose about data is
+   not a specification of data.
+8. **Could this criterion fail on correct work?** That is strictly worse than having no criterion —
    it trains coders to argue with criteria. Worse, it invites a coder to change correct data to
    satisfy a wrong assertion.
 
