@@ -98,6 +98,24 @@ export interface ReturnsResponse {
   as_of: string | null
 }
 
+export interface SignalOut {
+  signal: string
+  label: string
+  state: string | null
+  last_trigger_date: string | null
+}
+
+export interface TickerSignals {
+  ticker: string
+  signals: SignalOut[]
+  atr_pct: number | null
+}
+
+export interface SignalsResponse {
+  signals: TickerSignals[]
+  as_of: string | null
+}
+
 export interface NewsArticle {
   id: string
   title: string
@@ -259,6 +277,12 @@ export async function getReturns(tickers: string[], since?: string): Promise<Ret
   const query = new URLSearchParams({ tickers: tickers.join(',') })
   if (typeof since === 'string' && since !== '') query.set('since', since)
   return request<ReturnsResponse>(`/universe/returns?${query}`)
+}
+
+export async function getSignals(tickers: string[]): Promise<SignalsResponse> {
+  if (tickers.length === 0) return { signals: [], as_of: null }
+  const query = new URLSearchParams({ tickers: tickers.join(',') })
+  return request<SignalsResponse>(`/universe/signals?${query}`)
 }
 
 export async function getNews(limit: number, maxPerTicker: number): Promise<NewsResponse> {

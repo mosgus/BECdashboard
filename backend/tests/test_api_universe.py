@@ -128,6 +128,25 @@ def _add_return_bars_on_dates(ticker: str, values: list[tuple[date, float, float
             db.add(PriceBar(ticker=ticker, date=bar_date, close=close, adj_close=adj_close))
 
 
+def _add_signal_bars(
+    ticker: str,
+    bars: list[tuple[date, float, float, float, float]],
+) -> None:
+    """Store (date, high, low, close, adj_close) bars for endpoint signal tests."""
+    with session() as db:
+        for bar_date, high, low, close, adj_close in bars:
+            db.add(
+                PriceBar(
+                    ticker=ticker,
+                    date=bar_date,
+                    high=high,
+                    low=low,
+                    close=close,
+                    adj_close=adj_close,
+                )
+            )
+
+
 # --- 14. GET /universe returns 200 and a JSON list -----------------------------------------
 
 
@@ -794,6 +813,80 @@ def test_get_history_json_never_fetches_from_yfinance(db_mode, client, monkeypat
 
     response = client.get("/universe/AAPL/history")
     assert response.status_code == 200
+
+
+# --- GET /universe/signals: stored adjusted data, batch shape, and route ordering ----------
+
+
+def test_get_signals_resolves_as_its_own_route(db_mode, client):
+    response = client.get("/universe/signals")
+
+    assert response.status_code == 200
+    assert response.json() == {"signals": [], "as_of": None}
+
+
+def test_get_signals_keeps_no_bar_ticker_and_limits_requested_tickers(db_mode, client):
+    response = client.get("/universe/signals?tickers=none, NONE ,")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "signals": [{"ticker": "NONE", "signals": [], "atr_pct": None}],
+        "as_of": None,
+    }
+
+    too_many = ",".join(f"TICKER{number}" for number in range(101))
+    assert client.get(f"/universe/signals?tickers={too_many}").status_code == 400
+
+
+def test_get_signals_uses_adjusted_close_and_adjusted_high_low(db_mode, client):
+    start = date.today() - timedelta(days=100)
+    split_bars = []
+    for index in range(80):
+        raw_close = 400.0 if index < 60 else 100.0
+        split_bars.append(
+            (
+                start + timedelta(days=index),
+                raw_close * 1.02,
+                raw_close * 0.98,
+                raw_close,
+                100.0,
+            )
+        )
+    _add_signal_bars("SPLIT", split_bars)
+
+    adjusted_atr_bars = [
+        (start + timedelta(days=index), 104.0, 96.0, 100.0, 50.0)
+        for index in range(20)
+    ]
+    _add_signal_bars("ATRADJ", adjusted_atr_bars)
+
+    response = client.get("/universe/signals?tickers=SPLIT,ATRADJ,NOBARS")
+
+    assert response.status_code == 200
+    body = response.json()
+    by_ticker = {entry["ticker"]: entry for entry in body["signals"]}
+    assert by_ticker["SPLIT"]["signals"][0]["state"] != "BEARISH"
+    assert by_ticker["ATRADJ"]["atr_pct"] == pytest.approx(8.0)
+    assert by_ticker["NOBARS"] == {"ticker": "NOBARS", "signals": [], "atr_pct": None}
+    assert body["as_of"] == (start + timedelta(days=79)).isoformat()
+
+
+def test_get_signals_atr_pct_normalizes_for_price_level(db_mode, client):
+    start = date.today() - timedelta(days=40)
+    _add_signal_bars(
+        "LOW",
+        [(start + timedelta(days=index), 101.0, 99.0, 100.0, 100.0) for index in range(20)],
+    )
+    _add_signal_bars(
+        "HIGH",
+        [(start + timedelta(days=index), 202.0, 198.0, 200.0, 200.0) for index in range(20)],
+    )
+
+    response = client.get("/universe/signals?tickers=LOW,HIGH")
+
+    assert response.status_code == 200
+    values = [entry["atr_pct"] for entry in response.json()["signals"]]
+    assert values == pytest.approx([2.0, 2.0])
 
 
 # --- conftest.py's block_network fixture (contract 0043) ------------------------------------

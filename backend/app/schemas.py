@@ -105,6 +105,24 @@ class ReturnsResponse(BaseModel):
     as_of: date | None
 
 
+class SignalOut(BaseModel):
+    signal: str
+    label: str
+    state: str | None
+    last_trigger_date: date | None
+
+
+class TickerSignals(BaseModel):
+    ticker: str
+    signals: list[SignalOut]
+    atr_pct: float | None
+
+
+class SignalsResponse(BaseModel):
+    signals: list[TickerSignals]
+    as_of: date | None
+
+
 class NewsArticleOut(BaseModel):
     id: str
     title: str

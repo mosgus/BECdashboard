@@ -1,7 +1,7 @@
 """The four universe HTTP endpoints. Only this module knows about HTTP — the service layer
 in app/universe.py raises domain exceptions and is fully usable without FastAPI."""
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -21,6 +21,7 @@ from app.schemas import (
     QuoteRefreshResult,
     RefreshResult,
     ReturnsResponse,
+    SignalsResponse,
     StripResponse,
     UniverseDetail,
     UniverseEntry,
@@ -28,6 +29,8 @@ from app.schemas import (
 from app.strip import build_strip_response
 from app.returns import base_close_on_or_after, bar_window_start, nth_prior_close, pct_return, ytd_base_close
 from app.models import PriceBar
+from app.indicators import compute_atr
+from app.signals import compute_all_signals
 from app.universe import (
     AlreadyPresent,
     HistoryUnavailable,
@@ -43,6 +46,7 @@ from app.universe import (
 router = APIRouter(prefix="/universe", tags=["universe"])
 
 _DATABASE_NOT_CONFIGURED = "Database not configured"
+SIGNAL_WINDOW_DAYS = 400
 
 
 def _refresh_strip_quotes() -> None:
@@ -185,6 +189,79 @@ def get_returns(tickers: str = "", since: str = "") -> dict:
         )
 
     return {"returns": returns, "as_of": as_of}
+
+
+@router.get("/signals", response_model=SignalsResponse)
+def get_signals(tickers: str = "") -> dict:
+    """Return stored-data technical signals and adjusted ATR percentages by ticker."""
+    _require_database()
+    requested = list(dict.fromkeys(ticker.strip().upper() for ticker in tickers.split(",") if ticker.strip()))
+    if not requested:
+        return {"signals": [], "as_of": None}
+    if len(requested) > 100:
+        raise HTTPException(status_code=400, detail="At most 100 tickers may be requested")
+
+    today = datetime.now(ZoneInfo("America/New_York")).date()
+    window_start = today - timedelta(days=SIGNAL_WINDOW_DAYS)
+    with session() as db:
+        bar_rows = db.execute(
+            select(
+                PriceBar.ticker,
+                PriceBar.date,
+                PriceBar.high,
+                PriceBar.low,
+                PriceBar.close,
+                PriceBar.adj_close,
+            )
+            .where(PriceBar.ticker.in_(requested), PriceBar.date >= window_start)
+            .order_by(PriceBar.ticker, PriceBar.date)
+        ).all()
+
+    adjusted_prices: dict[str, list[tuple[date, float]]] = {}
+    adjusted_ohlc: dict[str, list[tuple[date, float, float, float]]] = {}
+    as_of = max((bar_date for _, bar_date, *_ in bar_rows), default=None)
+    for ticker, bar_date, high, low, close, adj_close in bar_rows:
+        if adj_close is not None:
+            adjusted_prices.setdefault(ticker, []).append((bar_date, adj_close))
+        if None not in (high, low, close, adj_close) and close != 0:
+            ratio = adj_close / close
+            adjusted_ohlc.setdefault(ticker, []).append(
+                (bar_date, high * ratio, low * ratio, adj_close)
+            )
+
+    response = []
+    for ticker in requested:
+        prices = adjusted_prices.get(ticker, [])
+        if not prices:
+            response.append({"ticker": ticker, "signals": [], "atr_pct": None})
+            continue
+
+        price_series = pd.Series(
+            [price for _, price in prices], index=pd.to_datetime([bar_date for bar_date, _ in prices])
+        )
+        atr_pct = None
+        ohlc = adjusted_ohlc.get(ticker, [])
+        if ohlc:
+            ohlc_index = pd.to_datetime([bar_date for bar_date, *_ in ohlc])
+            atr = compute_atr(
+                pd.Series([high for _, high, _, _ in ohlc], index=ohlc_index),
+                pd.Series([low for _, _, low, _ in ohlc], index=ohlc_index),
+                pd.Series([close for _, _, _, close in ohlc], index=ohlc_index),
+            )
+            latest_atr = atr.iloc[-1]
+            latest_price = price_series.iloc[-1]
+            if pd.notna(latest_atr) and latest_price != 0:
+                atr_pct = float(latest_atr / latest_price * 100.0)
+
+        response.append(
+            {
+                "ticker": ticker,
+                "signals": compute_all_signals(price_series),
+                "atr_pct": atr_pct,
+            }
+        )
+
+    return {"signals": response, "as_of": as_of}
 
 
 @router.post("/quotes/refresh", response_model=QuoteRefreshResult)

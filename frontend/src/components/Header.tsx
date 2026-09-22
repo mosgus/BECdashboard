@@ -13,7 +13,7 @@ export function Header(): JSX.Element {
             Blue Eagle Capital
           </span>
           <span className="hidden md:inline text-xs text-[var(--color-muted)] whitespace-nowrap">
-            Portfolio Analytics
+            Portfolio Dashboard
           </span>
         </Link>
         <div className="flex items-center flex-shrink-0">

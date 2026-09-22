@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
 import type { JSX } from 'react'
 import { useParams } from 'react-router-dom'
-import { getReturns, getUniverse } from '../../api/client'
-import type { TickerReturns, UniverseEntry } from '../../api/client'
+import { getReturns, getSignals, getUniverse } from '../../api/client'
+import type { TickerReturns, TickerSignals, UniverseEntry } from '../../api/client'
+import { SignalBadge } from '../../components/SignalBadge'
 import { Tooltip } from '../../components/Tooltip'
 import { priceChange } from '../../lib/change'
 import { formatPercent, formatPrice, formatShares } from '../../lib/format'
@@ -17,6 +18,11 @@ type LoadState<T> =
 const TH = 'text-left font-medium text-[11px] tracking-wide uppercase text-[var(--color-muted)] px-3 py-2 border-b border-brand-border whitespace-nowrap'
 const TD = 'px-3 py-2.5 border-b border-brand-border'
 const MUTED = 'text-[var(--color-muted)]'
+const SIGNAL_OPTIONS = [
+  { value: 'sma_cross', label: 'SMA Cross' },
+  { value: 'rsi_threshold', label: 'RSI' },
+  { value: 'macd_cross', label: 'MACD' },
+] as const
 
 function signedColor(value: number | null): string {
   if (value === null) return MUTED
@@ -34,6 +40,8 @@ export function HoldingsPage(): JSX.Element {
   const basisDate = current?.basisDate
   const [universe, setUniverse] = useState<LoadState<UniverseEntry[]>>({ status: 'loading' })
   const [returns, setReturns] = useState<LoadState<TickerReturns[]>>({ status: 'loading' })
+  const [signals, setSignals] = useState<LoadState<TickerSignals[]>>({ status: 'loading' })
+  const [selectedSignal, setSelectedSignal] = useState<(typeof SIGNAL_OPTIONS)[number]['value']>('sma_cross')
 
   useEffect(() => {
     if (tickerKey === null) return
@@ -56,6 +64,14 @@ export function HoldingsPage(): JSX.Element {
         if (!cancelled) setReturns({ status: 'error' })
       })
 
+    void getSignals(tickers)
+      .then((response) => {
+        if (!cancelled) setSignals({ status: 'ready', data: response.signals })
+      })
+      .catch(() => {
+        if (!cancelled) setSignals({ status: 'error' })
+      })
+
     return () => {
       cancelled = true
     }
@@ -69,6 +85,16 @@ export function HoldingsPage(): JSX.Element {
   const returnsByTicker = new Map(
     returns.status === 'ready' ? returns.data.map((entry) => [entry.ticker, entry]) : [],
   )
+  const signalsByTicker = new Map(
+    signals.status === 'ready' ? signals.data.map((entry) => [entry.ticker, entry]) : [],
+  )
+  const selectedOption = SIGNAL_OPTIONS.find((option) => option.value === selectedSignal) ?? SIGNAL_OPTIONS[0]
+  const selectedSignalLabel =
+    signals.status === 'ready'
+      ? signals.data
+          .flatMap((entry) => entry.signals)
+          .find((signal) => signal.signal === selectedSignal)?.label ?? selectedOption.label
+      : selectedOption.label
   const rows = valuePortfolio(current, universeByTicker).rows
     .slice()
     .sort((left, right) => right.weight - left.weight)
@@ -83,10 +109,27 @@ export function HoldingsPage(): JSX.Element {
       {returns.status === 'error' && (
         <p className="text-sm text-brand-negative mb-3">Returns could not be loaded.</p>
       )}
+      {signals.status === 'error' && (
+        <p className="text-sm text-brand-negative mb-3">Signals could not be loaded.</p>
+      )}
+
+      <div className="flex justify-end mb-3">
+        <Tooltip label="Choose which technical signal the table shows for every holding">
+          <select
+            value={selectedSignal}
+            onChange={(event) => setSelectedSignal(event.target.value as (typeof SIGNAL_OPTIONS)[number]['value'])}
+            className="text-sm px-3 py-2 rounded-[var(--radius-btn)] border border-brand-border bg-brand-surface text-foreground"
+          >
+            {SIGNAL_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+          </select>
+        </Tooltip>
+      </div>
 
       <div className="bg-brand-surface border border-brand-border rounded-[var(--radius-card)]">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[54rem] border-collapse text-sm">
+          <table className="w-full min-w-[60rem] border-collapse text-sm">
             <thead>
               <tr className="bg-brand-surface">
                 <th className={TH}>Ticker</th>
@@ -103,7 +146,7 @@ export function HoldingsPage(): JSX.Element {
                     <span>Day</span>
                   </Tooltip>
                 </th>
-                {['5D', '30D', 'YTD'].map((label) => (
+                {['5D', 'YTD'].map((label) => (
                   <th key={label} className={`${TH} text-right`}>
                     <Tooltip label="Total return including dividends, from stored price history.">
                       <span>{label}</span>
@@ -117,12 +160,18 @@ export function HoldingsPage(): JSX.Element {
                     </Tooltip>
                   </th>
                 )}
+                <th className={TH}>
+                  <Tooltip label="Computed from stored price history. ATR is average true range as a percentage of price — it measures volatility, not direction.">
+                    <span>Signal ({selectedSignalLabel})</span>
+                  </Tooltip>
+                </th>
               </tr>
             </thead>
             <tbody>
               {rows.map((row) => {
                 const entry = universeByTicker.get(row.ticker)
                 const tickerReturns = returnsByTicker.get(row.ticker)
+                const tickerSignals = signalsByTicker.get(row.ticker)
                 const change = priceChange(
                   entry?.current_price ?? null,
                   entry?.last_close ?? null,
@@ -150,9 +199,9 @@ export function HoldingsPage(): JSX.Element {
                       {day}
                     </td>
                     <ReturnCell value={tickerReturns?.five_day ?? null} />
-                    <ReturnCell value={tickerReturns?.thirty_day ?? null} />
                     <ReturnCell value={tickerReturns?.ytd ?? null} />
                     {current.basisDate !== undefined && <ReturnCell value={tickerReturns?.since ?? null} />}
+                    <SignalCell tickerSignals={tickerSignals} selectedSignal={selectedSignal} />
                   </tr>
                 )
               })}
@@ -165,8 +214,8 @@ export function HoldingsPage(): JSX.Element {
                 <td className={`${TD} text-right ${MUTED}`}>—</td>
                 <td className={`${TD} text-right ${MUTED}`}>—</td>
                 <td className={`${TD} text-right ${MUTED}`}>—</td>
-                <td className={`${TD} text-right ${MUTED}`}>—</td>
                 {current.basisDate !== undefined && <td className={`${TD} text-right ${MUTED}`}>—</td>}
+                <td className={`${TD} ${MUTED}`}>—</td>
               </tr>
             </tbody>
           </table>
@@ -180,6 +229,28 @@ function ReturnCell({ value }: { value: number | null }): JSX.Element {
   return (
     <td className={`${TD} text-right tabular-nums whitespace-nowrap ${signedColor(value)}`}>
       {formatPercent(value)}
+    </td>
+  )
+}
+
+function SignalCell({
+  tickerSignals,
+  selectedSignal,
+}: {
+  tickerSignals: TickerSignals | undefined
+  selectedSignal: string
+}): JSX.Element {
+  const signal = tickerSignals?.signals.find((candidate) => candidate.signal === selectedSignal)
+  if (tickerSignals === undefined || signal === undefined) return <td className={`${TD} ${MUTED}`}>—</td>
+
+  return (
+    <td className={`${TD} whitespace-nowrap`}>
+      <div className="flex items-center gap-2">
+        <SignalBadge state={signal.state} />
+        {tickerSignals.atr_pct !== null && (
+          <span className={`text-xs tabular-nums ${MUTED}`}>ATR {formatPercent(tickerSignals.atr_pct)}</span>
+        )}
+      </div>
     </td>
   )
 }

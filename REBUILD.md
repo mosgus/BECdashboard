@@ -1673,6 +1673,75 @@ reference's Holdings table has `Cost Basis` and `P&L` columns; ours will not.
   `cost_basis` CSV column. That *is* the right shape **if** the decision ever reverses — model-level
   and round-tripping, not UI-only.
 
+**Technical signals: SMA cross, RSI, MACD as states; ATR as a number.** Contracts 0082 and 0083,
+2026-09-22. Ported in substance from `main:backend/core/{indicators,signals}.py` with three
+deliberate departures.
+
+- **ATR is not a signal and the reference's own UI lied about it.** `compute_all_signals` returns
+  exactly `sma_cross`, `rsi_threshold`, `macd_cross`; `grep -in "atr" signals.py` finds nothing. The
+  reference frontend nevertheless offers an `ATR` dropdown option filtering on `includes('atr')`,
+  which matches zero results — **selecting it shows an empty cell.** ATR measures magnitude, not
+  direction, so it cannot have a bullish reading. Ours returns `atr_pct` with no state. Gunnar's call.
+- **One query for all tickers, not one per row.** The reference's `SignalCell` runs a `useQuery` per
+  ticker — 20 positions, 20 requests. Fan-out is what got Render's IP rate-limited (contract 0013),
+  and `/universe/returns` already set the bounded-single-query precedent.
+- **Insufficient history gives `state: null`, never `NEUTRAL`.** The reference returns `NEUTRAL` for
+  an empty RSI, conflating *computed-and-neutral* with *could-not-compute*. Different answers deserve
+  different values.
+
+Two data decisions that are easy to get wrong and invisible when you do:
+
+- **Signals compute on `adj_close`, never raw `close`.** A 4:1 split is a 75% single-day drop in raw
+  close, which manufactures a fake bearish SMA crossover and a fake oversold RSI out of a corporate
+  action. Split-restatement is exactly what `adj_close` exists for.
+- **ATR needs high and low, and they must be scaled to match.** `price_bars` stores raw `high`/`low`
+  beside both closes. Mixing raw highs with adjusted closes breaks across any split. Scale per bar by
+  `adj_close / close` before computing true range. And `atr_pct` is a **percentage of price** — raw
+  dollar ATR is not comparable between a $5 stock and a $500 one, which is the whole point of putting
+  it in a column beside other tickers.
+- **`bar_window_start` is the wrong window for signals.** It bounds to ~52 sessions; a 20/50 SMA
+  crossover needs 50 sessions *plus* history before them to detect a cross, so in early January it
+  would silently return `state: null` for everything. Signals use their own `SIGNAL_WINDOW_DAYS = 400`.
+
+**RSI saturates at 100 on a flat series, which is wrong.** Found in the 0082 audit, 2026-09-22:
+`compute_rsi(pd.Series([50.0] * 30))` returns `100.0`, so `signal_rsi_threshold` reports
+`OVERBOUGHT` for a price that has not moved at all. Any ticker with unchanged stored closes across the
+window — illiquid, halted, or a repeated-value data gap — gets a false bullish-caution badge.
+
+The cause: with no down moves `avg_loss` is 0, so `rs` is infinite and `100 − 100/(1 + rs)` saturates.
+That is **correct when `avg_gain > 0`** and wrong when both are 0. Contract 0083 returns `50.0` for
+exactly that per-period condition — not by clamping, and not by adding an epsilon to the divisor,
+which would make a genuinely rising series read 99.9.
+
+**The scope of that fix was wrong on the first attempt, and the correction is the interesting part.**
+0083 originally also demanded that a *rise followed by a flat stretch* read 50, and specified the
+exact condition `avg_gain == 0 and avg_loss == 0`. Those cannot both hold: under EWM smoothing
+`avg_gain` decays toward zero but never reaches it, so the condition is never met mid-series. The
+coder reported `BLOCKED` rather than guessing between "detect flat windows from recent deltas" and
+"change the smoothing."
+
+It was also **wrong on the merits**. Standard RSI — TradingView, StockCharts — *does* return 100 for
+rise-then-flat, because every move in the lookback was upward. Diverging would have made our figures
+disagree with every public chart, which is exactly the comparison 0082's human verification asks for.
+**Only a series that has never moved reads 50**, and a test now pins the rise-then-flat case at 100
+with a comment saying it is deliberate, so nobody "fixes" it later.
+
+The general shape: **before correcting a number, check what the established implementations do.** An
+intuition about what a figure "should" be is not a specification, and a finance indicator that
+disagrees with every charting site is a bug regardless of which is more principled.
+
+**The evidence was in contract 0082's own report and went unnoticed on first read.** Its sample
+response shows `ATRADJ` — a fixture seeded flat at 50 for the ATR test — coming back `OVERBOUGHT`.
+The contract whose Why section warned that *"a wrong RSI looks entirely plausible"* shipped with a
+wrong RSI visible in its own output. **When a report pastes a response body, read the values, not just
+the shape.**
+
+**`DATABASE_URL=""` still works and is still the required prefix.** Contract 0082's report claimed an
+ad-hoc check was *"blocked by the production-connection conflict guard"*; verified in the audit that
+`app.config` imports cleanly under it, exactly as the guard was designed to allow. Correcting the
+record matters more than the incident: that prefix is the only thing keeping throwaway scripts off
+production, and an agent believing it is blocked would stop using it.
+
 **The Day column is coloured by sign even when the price is not live.** Gunnar's call, 2026-09-22,
 contract 0081. Both tables previously greyed the figure whenever `priceChange` reported
 `live: false` — outside market hours, or on a stale quote — because the number shown is then the
