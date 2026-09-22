@@ -37,7 +37,10 @@ from app.indicators import (
     compute_bollinger,
     compute_donchian,
     compute_ema,
+    compute_macd,
     compute_obv,
+    compute_rsi,
+    compute_sma,
     compute_stochastic,
 )
 from app.signals import compute_all_signals
@@ -398,6 +401,9 @@ def get_indicators(ticker: str, include: str = "") -> dict:
             }
         )
 
+    if "sma" in requested:
+        add_series("sma_fast", "SMA 20", compute_sma(close, 20))
+        add_series("sma_slow", "SMA 50", compute_sma(close, 50))
     if "ema" in requested:
         add_series("ema_fast", "EMA 20", compute_ema(close, 20))
         add_series("ema_slow", "EMA 50", compute_ema(close, 50))
@@ -409,7 +415,15 @@ def get_indicators(ticker: str, include: str = "") -> dict:
     if "donchian" in requested:
         upper, lower = compute_donchian(high, low)
         add_series("donchian_upper", "Donchian upper (20)", upper)
+        add_series("donchian_mid", "Donchian mid (20)", (upper + lower) / 2.0)
         add_series("donchian_lower", "Donchian lower (20)", lower)
+    if "rsi" in requested:
+        add_series("rsi", "RSI 14", compute_rsi(close))
+    if "macd" in requested:
+        macd_line, macd_signal, macd_histogram = compute_macd(close)
+        add_series("macd_line", "MACD 12/26/9", macd_line)
+        add_series("macd_signal", "Signal 9", macd_signal)
+        add_series("macd_histogram", "Histogram", macd_histogram)
     if "adx" in requested:
         add_series("adx", "ADX 14", compute_adx(high, low, close))
     if "stochastic" in requested:

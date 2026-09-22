@@ -3,11 +3,15 @@ import type { JSX } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { ApiError, getHistory, getIndicators, getSignals } from '../api/client'
 import type { IndicatorsResponse, PriceBar, SignalOut, TickerSignals } from '../api/client'
+import HelpSidebar from '../components/HelpSidebar'
 import { SignalBadge } from '../components/SignalBadge'
 import { Tooltip } from '../components/Tooltip'
 import { formatPrice } from '../lib/format'
+import { INDICATOR_GROUPS } from '../lib/indicators'
 
 const TickerChart = lazy(() => import('../components/TickerChart'))
+
+const ALWAYS_ON_INDICATORS = ['sma', 'rsi', 'macd'] as const
 
 type LoadState<T> =
   | { status: 'loading' }
@@ -19,15 +23,6 @@ const SIGNAL_DESCRIPTIONS: Record<string, string> = {
   rsi_threshold: 'Overbought above 70 (potential pullback), oversold below 30 (potential rebound).',
   macd_cross: 'Bullish when the MACD line crosses above its signal line. Bearish when below.',
 }
-
-const INDICATOR_GROUPS = [
-  { key: 'ema', label: 'EMA 20/50' },
-  { key: 'bollinger', label: 'Bollinger (20, 2σ)' },
-  { key: 'donchian', label: 'Donchian (20)' },
-  { key: 'adx', label: 'ADX 14' },
-  { key: 'stochastic', label: 'Stochastic (14,3)' },
-  { key: 'obv', label: 'OBV' },
-] as const
 
 const INDICATOR_TOOLTIPS: Record<string, string> = {
   adx: 'Trend strength from 0 to 100. High means a strong trend in either direction, not a bullish one.',
@@ -63,7 +58,7 @@ export function TickerPage(): JSX.Element {
   const [signals, setSignals] = useState<LoadState<TickerSignals | null>>({ status: 'loading' })
   const [enabledIndicators, setEnabledIndicators] = useState<Set<string>>(new Set())
   const [indicators, setIndicators] = useState<LoadState<IndicatorsResponse>>({ status: 'loading' })
-  const indicatorKey = Array.from(enabledIndicators).sort().join(',')
+  const indicatorKey = Array.from(new Set([...ALWAYS_ON_INDICATORS, ...enabledIndicators])).sort().join(',')
 
   useEffect(() => {
     if (symbol === '') return
@@ -87,7 +82,7 @@ export function TickerPage(): JSX.Element {
         if (!cancelled) setSignals({ status: 'error', statusCode: error instanceof ApiError ? error.status : null })
       })
 
-    void getIndicators(symbol, indicatorKey === '' ? [] : indicatorKey.split(','))
+    void getIndicators(symbol, indicatorKey.split(','))
       .then((response) => {
         if (!cancelled) setIndicators({ status: 'ready', data: response })
       })
@@ -129,7 +124,10 @@ export function TickerPage(): JSX.Element {
         <Link to={fromPath} className="text-sm text-[var(--color-muted)] hover:text-foreground">
           ← {backLabel}
         </Link>
-        <h1 className="font-heading font-bold text-3xl text-brand-primary mt-2">{symbol}</h1>
+        <div className="flex items-start justify-between gap-4 mt-2">
+          <h1 className="font-heading font-bold text-3xl text-brand-primary">{symbol}</h1>
+          <HelpSidebar />
+        </div>
         {newestBarDate !== null && <p className="text-sm text-[var(--color-muted)] mt-1">As of {newestBarDate}</p>}
       </div>
 
@@ -196,7 +194,7 @@ export function TickerPage(): JSX.Element {
             {history.status === 'ready' && chartBars.length === 0 && <p className="h-[22rem] flex items-center justify-center text-sm text-[var(--color-muted)]">No stored data in this date range.</p>}
             {history.status === 'ready' && chartBars.length > 0 && (
               <Suspense fallback={<p className="h-[22rem] flex items-center justify-center text-sm text-[var(--color-muted)]">Loading chart…</p>}>
-                <TickerChart bars={filteredBars} indicators={indicatorData} />
+                <TickerChart ticker={symbol} bars={filteredBars} indicators={indicatorData} />
               </Suspense>
             )}
           </section>

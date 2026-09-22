@@ -1830,6 +1830,42 @@ The general failure worth naming: **a cut list is a claim about the present, not
 decision.** This one kept asserting that something the app demonstrably does was cut, which is how a
 resolved question sat in "Open questions" for nine days looking unresolvable.
 
+### Glossary terms deferred, not cut (contract 0094, 2026-09-22)
+
+The reference's `HelpSidebar` glossary is 24 entries. The rebuild's `/ticker` Help drawer ships 14.
+The difference is not a judgement that these terms are bad — it is that **a help panel explaining
+controls that are not on screen is worse than a shorter one.** Each returns when its feature lands:
+
+| deferred term | returns with |
+|---|---|
+| Simulated Analytics | portfolio analytics over held weights |
+| Sharpe Ratio, Max Drawdown, Beta / Alpha | the Risk & Perf tab |
+| Alert Cooldown | alerting, if it is ever rebuilt (currently cut) |
+| Allow Short Positions, Optimize Modes | the optimizer |
+| Validation Suite (7 Tests) | the optimizer's validation pass |
+| Forecast Methods | the Outlook tab |
+| HHI, N_eff, RC, MCTR | portfolio risk decomposition |
+| Market Shock / Vol Shock / Historical Replay | the Monitor tab's scenarios |
+
+Copy them from `git show main:frontend/components/HelpSidebar.tsx` when the time comes; several of
+the definitions there are good and the numbers in them (a 3.64% risk-free rate, a 0.15/0.25 HHI
+banding, ≥ 4/7 to pass validation) are decisions in their own right worth inheriting deliberately
+rather than re-deriving.
+
+**One entry is dropped rather than deferred: "Last Trigger Date."** `TickerSignals` carries `ticker`,
+`signals`, `atr` and `atr_pct` — there is no trigger date in the API and no plan for one, so that
+entry would document a hover that does not exist.
+
+**Three entries have no reference equivalent and are ours**: why a signal cell can be blank (blank is
+insufficient history, *not* NEUTRAL — the `state: null` distinction from contract 0088), split
+adjustment (prices scaled by `adj_close / close` and volume divided by the same ratio), and where the
+data comes from (rewritten for the visit-triggered refresh windows, since the reference's "delayed
+15–20 minutes" is not how this app's freshness rule works).
+
+`INDICATOR_GROUPS` and `GLOSSARY` live together in `frontend/src/lib/indicators.ts` so a test can
+assert every indicator toggle has exactly one glossary entry, in both directions. A seventh indicator
+added without an entry fails the suite instead of silently shipping an incomplete help panel.
+
 ## Dev workflow
 
 - Work happens on the `rebuild` branch. `main` is untouched and holds the old app.

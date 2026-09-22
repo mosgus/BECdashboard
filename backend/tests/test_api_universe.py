@@ -4,10 +4,12 @@ from zoneinfo import ZoneInfo
 
 from fastapi.testclient import TestClient
 
+import pandas as pd
 import pytest
 
 from app.cache import clear, store, store_fundamentals
 from app.db import get_engine, session
+from app.indicators import compute_macd, compute_rsi, compute_sma
 from app.main import app
 from app.models import Base, PriceBar, UniverseTicker
 from tests.test_universe import _fundamentals, _history
@@ -1005,6 +1007,71 @@ def test_get_indicators_uses_adjusted_volume_for_obv_without_network(db_mode, cl
     adjusted_obv = response.json()["series"][0]["points"][-1]
     assert adjusted_obv == 3_000_000.0
     assert adjusted_obv != 0.0
+
+
+def _add_reference_indicator_bars(ticker: str) -> list[float]:
+    start = date.today() - timedelta(days=80)
+    closes = [100.0 + index for index in range(60)]
+    _add_indicator_bars(
+        ticker,
+        [
+            (start + timedelta(days=index), close + 2.0, close - 2.0, close, close, 100)
+            for index, close in enumerate(closes)
+        ],
+    )
+    return closes
+
+
+def test_get_indicators_serves_sma_and_rsi_on_adjusted_closes(db_mode, client):
+    closes = _add_reference_indicator_bars("REFERENCE")
+    sma_response = client.get("/universe/REFERENCE/indicators?include=sma")
+    rsi_response = client.get("/universe/REFERENCE/indicators?include=rsi")
+
+    sma_series = {series["key"]: series["points"] for series in sma_response.json()["series"]}
+    assert list(sma_series) == ["sma_fast", "sma_slow"]
+    assert sma_series["sma_fast"][-1] == compute_sma(pd.Series(closes), 20).iloc[-1]
+    assert [series["key"] for series in rsi_response.json()["series"]] == ["rsi"]
+    assert rsi_response.json()["series"][0]["points"][-1] == compute_rsi(pd.Series(closes)).iloc[-1]
+
+
+def test_get_indicators_serves_macd_line_signal_and_histogram_in_order(db_mode, client):
+    _add_reference_indicator_bars("REFERENCE")
+
+    response = client.get("/universe/REFERENCE/indicators?include=macd")
+
+    assert [series["key"] for series in response.json()["series"]] == [
+        "macd_line",
+        "macd_signal",
+        "macd_histogram",
+    ]
+    line, signal, histogram = [series["points"] for series in response.json()["series"]]
+    for line_value, signal_value, histogram_value in zip(line, signal, histogram, strict=True):
+        if None not in (line_value, signal_value, histogram_value):
+            assert histogram_value == pytest.approx(line_value - signal_value)
+
+
+def test_get_indicators_serves_donchian_mid_and_parallel_reference_series(db_mode, client):
+    _add_reference_indicator_bars("REFERENCE")
+
+    response = client.get("/universe/REFERENCE/indicators?include=sma,rsi,macd,donchian")
+    body = response.json()
+    series = {entry["key"]: entry["points"] for entry in body["series"]}
+
+    assert [entry["key"] for entry in body["series"]] == [
+        "sma_fast",
+        "sma_slow",
+        "donchian_upper",
+        "donchian_mid",
+        "donchian_lower",
+        "rsi",
+        "macd_line",
+        "macd_signal",
+        "macd_histogram",
+    ]
+    assert series["donchian_mid"][-1] == pytest.approx(
+        (series["donchian_upper"][-1] + series["donchian_lower"][-1]) / 2.0
+    )
+    assert all(len(entry["points"]) == len(body["dates"]) for entry in body["series"])
 
 
 # --- conftest.py's block_network fixture (contract 0043) ------------------------------------

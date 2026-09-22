@@ -116,17 +116,27 @@ def test_adx_is_never_infinite_for_a_flat_series():
     assert (np.isfinite(adx) | np.isnan(adx)).all()
 
 
-def test_stochastic_extremes_and_percent_d_sma():
-    rising_high = pd.Series(np.arange(1.0, 21.0))
-    rising_low = rising_high - 1.0
-    rising_k, rising_d = compute_stochastic(rising_high, rising_low, rising_high)
-    falling_high = pd.Series(np.arange(20.0, 0.0, -1.0))
-    falling_low = falling_high - 1.0
-    falling_k, _ = compute_stochastic(falling_high, falling_low, falling_low)
+def test_stochastic_full_k_is_the_sma_of_raw_k_and_d_is_its_sma():
+    high = pd.Series([10.0] * 20)
+    low = pd.Series([5.0] * 20)
+    close = pd.Series([5.0] * 17 + [5.0, 7.5, 10.0])
+    raw_k = 100.0 * (close - low.rolling(14).min()) / (high.rolling(14).max() - low.rolling(14).min())
+    percent_k, percent_d = compute_stochastic(high, low, close)
 
-    assert rising_k.iloc[-1] == 100.0
-    assert falling_k.iloc[-1] == 0.0
-    pd.testing.assert_series_equal(rising_d, compute_sma(rising_k, 3))
+    pd.testing.assert_series_equal(percent_k, compute_sma(raw_k, 3))
+    pd.testing.assert_series_equal(percent_d, compute_sma(percent_k, 3))
+
+
+def test_stochastic_extremes_require_three_consecutive_raw_extremes():
+    high = pd.Series([10.0] * 20)
+    low = pd.Series([5.0] * 20)
+    three_highs, _ = compute_stochastic(high, low, pd.Series([5.0] * 17 + [10.0, 10.0, 10.0]))
+    one_high, _ = compute_stochastic(high, low, pd.Series([5.0] * 19 + [10.0]))
+    three_lows, _ = compute_stochastic(high, low, pd.Series([10.0] * 17 + [5.0, 5.0, 5.0]))
+
+    assert three_highs.iloc[-1] == 100.0
+    assert one_high.iloc[-1] != 100.0
+    assert three_lows.iloc[-1] == 0.0
 
 
 def test_stochastic_is_nan_for_a_zero_range():

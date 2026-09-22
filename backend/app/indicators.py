@@ -154,12 +154,14 @@ def compute_stochastic(
     close: pd.Series,
     k_window: int = 14,
     d_window: int = 3,
+    smooth_k: int = 3,
 ) -> tuple[pd.Series, pd.Series]:
-    """Return stochastic %K and its %D simple moving average."""
+    """Return Full Stochastic %K and %D simple moving averages."""
     lowest_low = low.rolling(k_window).min()
     highest_high = high.rolling(k_window).max()
     price_range = (highest_high - lowest_low).replace(0.0, np.nan)
-    percent_k = 100.0 * (close - lowest_low) / price_range
+    raw_percent_k = 100.0 * (close - lowest_low) / price_range
+    percent_k = compute_sma(raw_percent_k, smooth_k)
     return percent_k, compute_sma(percent_k, d_window)
 
 
