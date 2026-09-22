@@ -1,5 +1,6 @@
 import socket
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 from fastapi.testclient import TestClient
 
@@ -8,7 +9,7 @@ import pytest
 from app.cache import clear, store, store_fundamentals
 from app.db import get_engine, session
 from app.main import app
-from app.models import Base, UniverseTicker
+from app.models import Base, PriceBar, UniverseTicker
 from tests.test_universe import _fundamentals, _history
 
 # Captured at collection time, before any test has run and therefore before conftest.py's
@@ -90,6 +91,41 @@ def _patch_fetches(monkeypatch, fundamentals_overrides=None, has_history=True):
     monkeypatch.setattr("app.universe.fetch_fundamentals", fake_fetch_fundamentals)
     monkeypatch.setattr("app.universe.fetch_history", fake_fetch_history)
     monkeypatch.setattr("app.universe.refresh_ticker", fake_refresh_ticker)
+
+
+def _add_return_bars(ticker: str, values: list[tuple[float, float]]) -> date:
+    start = date(datetime.now(ZoneInfo("America/New_York")).year, 1, 2)
+    with session() as db:
+        for i, (close, adj_close) in enumerate(values):
+            db.add(
+                PriceBar(
+                    ticker=ticker,
+                    date=start + timedelta(days=i),
+                    close=close,
+                    adj_close=adj_close,
+                )
+            )
+    return start + timedelta(days=len(values) - 1)
+
+
+def _add_return_bars_from(ticker: str, start: date, values: list[tuple[float, float]]) -> date:
+    with session() as db:
+        for i, (close, adj_close) in enumerate(values):
+            db.add(
+                PriceBar(
+                    ticker=ticker,
+                    date=start + timedelta(days=i),
+                    close=close,
+                    adj_close=adj_close,
+                )
+            )
+    return start + timedelta(days=len(values) - 1)
+
+
+def _add_return_bars_on_dates(ticker: str, values: list[tuple[date, float, float]]) -> None:
+    with session() as db:
+        for bar_date, close, adj_close in values:
+            db.add(PriceBar(ticker=ticker, date=bar_date, close=close, adj_close=adj_close))
 
 
 # --- 14. GET /universe returns 200 and a JSON list -----------------------------------------
@@ -335,6 +371,146 @@ def test_get_strip_schedules_three_background_tasks(db_mode, client, monkeypatch
     assert len(auto_refresh_calls) == 1
     assert len(news_refresh_calls) == 1
     assert quote_refresh_calls == [[]]
+
+
+# --- GET /universe/returns: stored per-ticker return windows -------------------------------
+
+
+def test_get_returns_resolves_to_returns_handler_not_the_ticker_catchall(db_mode, client):
+    response = client.get("/universe/returns")
+    assert response.status_code == 200
+    assert set(response.json().keys()) == {"returns", "as_of"}
+
+
+def test_get_returns_keeps_missing_tickers_and_request_order(db_mode, client):
+    as_of = _add_return_bars("AAA", [(100.0 + i, 100.0 + i) for i in range(7)])
+
+    response = client.get("/universe/returns?tickers=ORPHAN,AAA,MISSING")
+    assert response.status_code == 200
+    body = response.json()
+    assert [entry["ticker"] for entry in body["returns"]] == ["ORPHAN", "AAA", "MISSING"]
+    assert body["returns"][0] == {"ticker": "ORPHAN", "five_day": None, "thirty_day": None, "ytd": None, "since": None}
+    assert body["returns"][2] == {"ticker": "MISSING", "five_day": None, "thirty_day": None, "ytd": None, "since": None}
+    assert body["as_of"] == as_of.isoformat()
+
+
+@pytest.mark.parametrize("path", ["/universe/returns", "/universe/returns?tickers="])
+def test_get_returns_empty_request_returns_no_tickers(db_mode, client, path):
+    response = client.get(path)
+    assert response.status_code == 200
+    assert response.json() == {"returns": [], "as_of": None}
+
+
+def test_get_returns_rejects_more_than_one_hundred_tickers(db_mode, client):
+    tickers = ",".join(f"T{i}" for i in range(101))
+    response = client.get(f"/universe/returns?tickers={tickers}")
+    assert response.status_code == 400
+
+
+def test_get_returns_uses_stored_adj_close_without_network(db_mode, client):
+    _add_return_bars("ADJ", [(200.0 + i, 100.0 + i) for i in range(31)])
+
+    response = client.get("/universe/returns?tickers=ADJ")
+    assert response.status_code == 200
+    returned = response.json()["returns"][0]
+    assert returned["five_day"] == pytest.approx(4.0)
+    assert returned["five_day"] != pytest.approx((230.0 - 225.0) / 225.0 * 100)
+    assert returned["thirty_day"] == pytest.approx(30.0)
+    assert returned["ytd"] == pytest.approx(30.0)
+
+
+def test_get_returns_deduplicates_preserving_first_seen_order(db_mode, client):
+    _add_return_bars("MU", [(100.0 + i, 100.0 + i) for i in range(7)])
+    _add_return_bars("ORCL", [(200.0 + i, 200.0 + i) for i in range(7)])
+
+    response = client.get("/universe/returns?tickers=MU,ORCL,MU")
+    assert response.status_code == 200
+    assert [entry["ticker"] for entry in response.json()["returns"]] == ["MU", "ORCL"]
+
+
+def test_get_returns_without_since_keeps_existing_windows_and_returns_null_since(db_mode, client):
+    _add_return_bars("AAA", [(100.0 + i, 100.0 + i) for i in range(7)])
+    _add_return_bars("BBB", [(200.0 + i, 200.0 + i) for i in range(7)])
+
+    absent = client.get("/universe/returns?tickers=AAA,BBB")
+    empty = client.get("/universe/returns?tickers=AAA,BBB&since=")
+
+    assert absent.status_code == 200
+    assert empty.status_code == 200
+    absent_returns = absent.json()["returns"]
+    empty_returns = empty.json()["returns"]
+    assert [entry["since"] for entry in absent_returns] == [None, None]
+    assert [{key: value for key, value in entry.items() if key != "since"} for entry in absent_returns] == [
+        {key: value for key, value in entry.items() if key != "since"} for entry in empty_returns
+    ]
+
+
+def test_get_returns_rejects_malformed_since(db_mode, client):
+    response = client.get("/universe/returns?tickers=AAA&since=2026-02-30")
+    assert response.status_code == 400
+    assert "YYYY-MM-DD" in response.json()["detail"]
+
+
+def test_get_returns_since_before_earliest_bar_is_null_without_affecting_other_windows(db_mode, client):
+    _add_return_bars("AAA", [(100.0 + i, 100.0 + i) for i in range(31)])
+
+    response = client.get("/universe/returns?tickers=AAA&since=2000-01-01")
+    assert response.status_code == 200
+    returned = response.json()["returns"][0]
+    assert returned["since"] is None
+    assert returned["five_day"] == pytest.approx(4.0)
+    assert returned["thirty_day"] == pytest.approx(30.0)
+    assert returned["ytd"] == pytest.approx(30.0)
+
+
+def test_get_returns_future_since_is_null_not_an_error(db_mode, client):
+    _add_return_bars("AAA", [(100.0 + i, 100.0 + i) for i in range(7)])
+    future = date(datetime.now(ZoneInfo("America/New_York")).year + 1, 1, 1)
+
+    response = client.get(f"/universe/returns?tickers=AAA&since={future.isoformat()}")
+    assert response.status_code == 200
+    assert response.json()["returns"][0]["since"] is None
+
+
+def test_get_returns_widens_the_window_for_a_prior_year_since(db_mode, client):
+    year = datetime.now(ZoneInfo("America/New_York")).year
+    start = date(year - 1, 12, 30)
+    _add_return_bars_from("AAA", start, [(100.0, 100.0), (105.0, 105.0), (110.0, 110.0), (120.0, 120.0)])
+    _add_return_bars_from("BBB", start, [(200.0, 200.0), (210.0, 210.0), (220.0, 220.0), (240.0, 240.0)])
+    _add_return_bars_from("CCC", start, [(50.0, 50.0), (55.0, 55.0), (60.0, 60.0), (75.0, 75.0)])
+
+    response = client.get(f"/universe/returns?tickers=AAA,BBB,CCC&since={start.isoformat()}")
+    assert response.status_code == 200
+    assert response.json() == {
+        "returns": [
+            {"ticker": "AAA", "five_day": None, "thirty_day": None, "ytd": pytest.approx(9.090909090909092), "since": pytest.approx(20.0)},
+            {"ticker": "BBB", "five_day": None, "thirty_day": None, "ytd": pytest.approx(9.090909090909092), "since": pytest.approx(20.0)},
+            {"ticker": "CCC", "five_day": None, "thirty_day": None, "ytd": pytest.approx(25.0), "since": pytest.approx(50.0)},
+        ],
+        "as_of": (start + timedelta(days=3)).isoformat(),
+    }
+
+
+def test_get_returns_since_uses_adj_close(db_mode, client):
+    start = date(datetime.now(ZoneInfo("America/New_York")).year, 1, 2)
+    _add_return_bars_from("ADJ", start, [(100.0, 50.0), (150.0, 100.0)])
+
+    response = client.get(f"/universe/returns?tickers=ADJ&since={start.isoformat()}")
+    returned = response.json()["returns"][0]
+    assert returned["since"] == pytest.approx(100.0)
+    assert returned["since"] != pytest.approx(50.0)
+
+
+def test_get_returns_since_saturday_uses_the_following_monday(db_mode, client):
+    _add_return_bars_on_dates("AAA", [
+        (date(2026, 1, 2), 100.0, 100.0),
+        (date(2026, 1, 5), 105.0, 105.0),
+        (date(2026, 1, 6), 120.0, 120.0),
+    ])
+
+    response = client.get("/universe/returns?tickers=AAA&since=2026-01-03")
+    assert response.status_code == 200
+    assert response.json()["returns"][0]["since"] == pytest.approx((120.0 - 105.0) / 105.0 * 100)
 
 
 # --- POST /universe/quotes/refresh: route ordering, shape, 503 -----------------------------

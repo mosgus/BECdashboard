@@ -1650,6 +1650,56 @@ never written. Not yet built.
     recede. That is an accepted property of this project, not a defect — but if Portfolios work starts
     looking unbounded, the fix is to ask for the list, not to start Research early.
 
+**No cost basis, no dollar P&L. Holdings shows returns instead.** Decided 2026-09-22, contracts 0077
+and 0078, re-affirming the 2026-09-18 position model rather than reversing it — *"an
+allocation-analysis and optimization tool, not a tax lot, P&L, or brokerage-holdings ledger."* The
+reference's Holdings table has `Cost Basis` and `P&L` columns; ours will not.
+
+- **The deciding argument is that share counts cannot carry dollars here.** Shares are optional
+  metadata and drift from weights on every cash edit (contract 0072). `P&L = (price − cost) × shares`
+  computed from drifting shares yields a figure that *looks* precise and is not — the silent-wrongness
+  class this project keeps getting caught by. A return percentage needs neither a share count nor a
+  purchase price.
+- **One cost-basis number is wrong per lot.** Three purchases at three prices average into something
+  that is never right for tax and cannot answer "which lot would I sell." Doing it properly means tax
+  lots — dates, quantities, prices — which is the ledger the model rules out. If P&L is ever wanted,
+  that is the honest shape, and it is a deliberate expansion rather than a column.
+- **Presets cannot have it.** Both shipped presets are allocations; a P&L column would be permanently
+  blank for every preset-derived portfolio.
+- **It would reopen the importer.** Broker exports carry cost basis, so once the canonical format has
+  the column, reading theirs becomes the obvious next ask — and that is the four-format sniffer
+  deliberately not ported from `main`.
+- Rejected shape, recorded so it is not re-proposed casually: `costBasis?: number` on `Position` plus a
+  `cost_basis` CSV column. That *is* the right shape **if** the decision ever reverses — model-level
+  and round-tripping, not UI-only.
+
+**A basis date replaces cost basis: per-portfolio, percentage only.** Gunnar's idea and call,
+2026-09-22, contract 0079. The user names one date; the app reports return since that date's close,
+from stored bars.
+
+- **It is a custom return window, not a cost basis**, and the naming matters. Same `pct_return` and
+  the same bars as 5D/30D/YTD, with a user-chosen anchor instead of a fixed one — so it costs almost
+  nothing now that `app/returns.py` exists. Calling it "cost basis" would re-invite the P&L question
+  and imply a tax meaning it does not have.
+- **Percentage only, never dollars.** Dollars would drag share counts back in, and those drift from
+  weights on every cash edit.
+- **Known limitation, and it must be labelled in the UI:** it assumes the *current* allocation was
+  held since that date. Add to a position after the date and the figure is a hypothetical — "what if
+  I had held today's allocation since then" — rather than a realised return. That is a useful question
+  and close kin to what the Backtest tab will do, but it is not the same claim as "your return."
+- **Open when 0079 is written: where the date lives in the canonical CSV.** Portfolio-level metadata
+  has no natural home in a flat table — the same problem that sent the portfolio *name* into the
+  filename (contract 0067). A `basis_date` column populated only on the reserved `CASH` row is the
+  leading candidate, since every canonical export has exactly one. Unlike the name, a date cannot be
+  recovered from a filename, so "do not round-trip it" is a real loss rather than a simplification.
+
+**Return math is extracted to `app/returns.py`, tier 0.** `pct_return`, `nth_prior_close`,
+`ytd_base_close` and `bar_window_start` were inside `strip.py`; the Holdings tab is the second
+consumer and Risk & Perf will be the third. **A derived quantity computed in two places eventually
+disagrees in one** — contracts 0071 and 0072 spent two rounds proving that for cash, and copying the
+math rather than moving it would have been the same mistake with a longer fuse. Returns use
+`adj_close`, never `close`.
+
 **Portfolio analysis lives at `/portfolios/:id/<tab>`, portfolio-scoped.** Decided 2026-09-22,
 contract 0075, matching `main:frontend/app/portfolios/[id]/`. Five tabs: Holdings (default), Backtest,
 Outlook, Monitor, Risk & Perf — **not** the reference's set, which has `rebalance` and `targets` and

@@ -1,6 +1,6 @@
 # Contract 0076 — Preset tests derive each preset's ticker set from that preset
 
-**Status:** open <!-- open | in-progress | reported | accepted | rejected | abandoned -->
+**Status:** accepted <!-- open | in-progress | reported | accepted | rejected | abandoned -->
 **Assigned to:** haiku <!-- haiku | sonnet -->
 **Author:** planner (opus)
 

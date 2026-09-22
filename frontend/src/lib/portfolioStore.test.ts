@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Portfolio } from './portfolio'
-import { listPortfolios, PORTFOLIO_STORAGE_KEY } from './portfolioStore'
+import { listPortfolios, PORTFOLIO_STORAGE_KEY, savePortfolio } from './portfolioStore'
 
 function storedPortfolio(cashWeight: number): Portfolio {
   return {
@@ -35,5 +35,26 @@ describe('listPortfolios', () => {
     stubStorage([storedPortfolio(-0.005)])
 
     expect(listPortfolios()).toEqual([])
+  })
+
+  it('persists a valid basis date when saving and reading', () => {
+    let stored = '[]'
+    vi.stubGlobal('localStorage', {
+      getItem: vi.fn(() => stored),
+      setItem: vi.fn((_key: string, value: string) => {
+        stored = value
+      }),
+    })
+
+    savePortfolio({ ...storedPortfolio(0), basisDate: '2026-01-02' })
+    expect(listPortfolios()).toMatchObject([{ basisDate: '2026-01-02' }])
+  })
+
+  it('rejects malformed stored basis dates while accepting portfolios without one', () => {
+    stubStorage([{ ...storedPortfolio(0), basisDate: 'not-a-date' }])
+    expect(listPortfolios()).toEqual([])
+
+    stubStorage([storedPortfolio(0)])
+    expect(listPortfolios()).toEqual([storedPortfolio(0)])
   })
 })

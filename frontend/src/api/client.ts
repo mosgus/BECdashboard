@@ -85,6 +85,18 @@ export interface StripResponse {
   quotes_stale: boolean
 }
 
+export interface TickerReturns {
+  ticker: string
+  five_day: number | null
+  thirty_day: number | null
+  ytd: number | null
+}
+
+export interface ReturnsResponse {
+  returns: TickerReturns[]
+  as_of: string | null
+}
+
 export interface NewsArticle {
   id: string
   title: string
@@ -239,6 +251,12 @@ export async function getHistory(ticker: string): Promise<HistoryResponse> {
 
 export async function getStrip(): Promise<StripResponse> {
   return request<StripResponse>('/universe/strip')
+}
+
+export async function getReturns(tickers: string[]): Promise<ReturnsResponse> {
+  if (tickers.length === 0) return { returns: [], as_of: null }
+  const query = new URLSearchParams({ tickers: tickers.join(',') })
+  return request<ReturnsResponse>(`/universe/returns?${query}`)
 }
 
 export async function getNews(limit: number, maxPerTicker: number): Promise<NewsResponse> {

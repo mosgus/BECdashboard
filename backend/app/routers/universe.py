@@ -1,15 +1,16 @@
 """The four universe HTTP endpoints. Only this module knows about HTTP — the service layer
 in app/universe.py raises domain exceptions and is fully usable without FastAPI."""
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from zoneinfo import ZoneInfo
 
 import pandas as pd
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Response
+from sqlalchemy import select
 
 from app.autorefresh import active_universe_tickers, run_auto_refresh_if_due
 from app.cache import get_cached, store_quotes
-from app.db import is_enabled
+from app.db import is_enabled, session
 from app.export import build_universe_zip, history_to_csv
 from app.news import run_news_refresh_if_due
 from app.quotes import fetch_quotes, refresh_quotes_if_stale
@@ -19,11 +20,14 @@ from app.schemas import (
     HistoryResponse,
     QuoteRefreshResult,
     RefreshResult,
+    ReturnsResponse,
     StripResponse,
     UniverseDetail,
     UniverseEntry,
 )
 from app.strip import build_strip_response
+from app.returns import base_close_on_or_after, bar_window_start, nth_prior_close, pct_return, ytd_base_close
+from app.models import PriceBar
 from app.universe import (
     AlreadyPresent,
     HistoryUnavailable,
@@ -123,6 +127,64 @@ def get_strip(background_tasks: BackgroundTasks) -> dict:
     background_tasks.add_task(run_news_refresh_if_due, now_utc, now_et)
     background_tasks.add_task(_refresh_strip_quotes)
     return build_strip_response(now_utc, now_et)
+
+
+@router.get("/returns", response_model=ReturnsResponse)
+def get_returns(tickers: str = "", since: str = "") -> dict:
+    _require_database()
+    requested = list(dict.fromkeys(ticker.strip().upper() for ticker in tickers.split(",") if ticker.strip()))
+    if not requested:
+        return {"returns": [], "as_of": None}
+    if len(requested) > 100:
+        raise HTTPException(status_code=400, detail="At most 100 tickers may be requested")
+
+    since_date: date | None = None
+    if since:
+        try:
+            since_date = date.fromisoformat(since)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="since must be a date in YYYY-MM-DD form") from exc
+
+    today = datetime.now(ZoneInfo("America/New_York")).date()
+    window_start = bar_window_start(today, today.year)
+    if since_date is not None:
+        window_start = min(window_start, since_date)
+    with session() as db:
+        bar_rows = db.execute(
+            select(PriceBar.ticker, PriceBar.date, PriceBar.adj_close)
+            .where(
+                PriceBar.ticker.in_(requested),
+                PriceBar.date >= window_start,
+            )
+            .order_by(PriceBar.ticker, PriceBar.date)
+        ).all()
+
+    bars_by_ticker: dict[str, list[tuple[date, float]]] = {}
+    as_of = max((bar_date for _, bar_date, _ in bar_rows), default=None)
+    for ticker, bar_date, adj_close in bar_rows:
+        if adj_close is not None:
+            bars_by_ticker.setdefault(ticker, []).append((bar_date, adj_close))
+
+    returns = []
+    for ticker in requested:
+        bars = bars_by_ticker.get(ticker, [])
+        latest = bars[-1][1] if bars else None
+        since_base = (
+            base_close_on_or_after(bars, since_date)
+            if since_date is not None and bars and since_date >= bars[0][0]
+            else None
+        )
+        returns.append(
+            {
+                "ticker": ticker,
+                "five_day": pct_return(latest, nth_prior_close(bars, 5)),
+                "thirty_day": pct_return(latest, nth_prior_close(bars, 30)),
+                "ytd": pct_return(latest, ytd_base_close(bars, today.year)),
+                "since": pct_return(latest, since_base),
+            }
+        )
+
+    return {"returns": returns, "as_of": as_of}
 
 
 @router.post("/quotes/refresh", response_model=QuoteRefreshResult)

@@ -112,3 +112,23 @@ Honest list, all recorded with detail in `REBUILD.md`:
   archived into `contracts/done/`. `agent_prompts/README.md` explains the three-session setup.
 - `REBUILD.md` is the decision log and the continuity mechanism across sessions. A decision that only
   exists in one session's context is lost the moment that context is.
+
+## Troubleshooting
+
+**Port already in use error**
+
+If you get `[Errno 48] Address already in use` when starting the backend or frontend, find and kill the process using that port:
+
+```bash
+# Backend (port 8000)
+kill -9 $(lsof -t -i :8000)
+
+# Frontend (port 5173)
+kill -9 $(lsof -t -i :5173)
+```
+
+To see what's using a port without killing it:
+
+```bash
+lsof -i :8000   # shows the process and PID
+```

@@ -59,6 +59,14 @@ Run this check over every criterion you write, out loud, before issuing the cont
    checklist existed. If a contract protects a line, the criterion is
    `grep -n "<the line>" <file>`, which is true regardless of git state. If a criterion needs the set
    of changed files, ask the coder to state which files it edited.
+
+   **Widened after a ninth instance, 2026-09-22:** this applies to *every* use of git history, not
+   just "does this line exist". Contract 0080 asked for a diff against
+   `git show HEAD:backend/tests/test_returns.py` to prove a refactor was behaviour-preserving — but
+   contract 0077 had *created* that file, and nothing is committed between contracts, so it does not
+   exist at `HEAD`. When proving behaviour preservation, name the **last committed location** of the
+   code (here: the tests still living in `HEAD:test_strip.py`), or have the coder assert it another
+   way entirely.
 2. **Does a `grep -c` count lines where I mean elements?** A JSX component contributes an opening and
    a closing line. `grep -c "<Tooltip"` counts elements; `grep -c "Tooltip"` counts roughly double.
 3. **Does the pattern match the construct the code actually uses**, rather than a keyword that

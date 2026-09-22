@@ -92,6 +92,19 @@ class StripResponse(BaseModel):
     quotes_stale: bool
 
 
+class TickerReturns(BaseModel):
+    ticker: str
+    five_day: float | None
+    thirty_day: float | None
+    ytd: float | None
+    since: float | None
+
+
+class ReturnsResponse(BaseModel):
+    returns: list[TickerReturns]
+    as_of: date | None
+
+
 class NewsArticleOut(BaseModel):
     id: str
     title: str
