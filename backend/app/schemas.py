@@ -124,6 +124,22 @@ class SignalOut(BaseModel):
     value: float | None
 
 
+class PortfolioHolding(BaseModel):
+    ticker: str
+    weight: float
+    first_bar: date
+    last_close: float
+
+
+class PortfolioSeriesResponse(BaseModel):
+    dates: list[date]
+    value: list[float]
+    cash_value: float
+    holdings: list[PortfolioHolding]
+    series: list[IndicatorSeries]
+    signals: list[SignalOut]
+
+
 class TickerSignals(BaseModel):
     ticker: str
     signals: list[SignalOut]

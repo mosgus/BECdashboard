@@ -28,9 +28,9 @@ describe('downsample', () => {
 describe('priceDomain', () => {
   it('extends the lower bound below a bollinger_lower value outside the close range', () => {
     const rows = [
-      { adj_close: 100, bollinger_lower: 80 },
-      { adj_close: 105 },
-      { adj_close: 110 },
+      { value: 100, bollinger_lower: 80 },
+      { value: 105 },
+      { value: 110 },
     ]
 
     const [lower] = priceDomain(rows)
@@ -40,9 +40,9 @@ describe('priceDomain', () => {
 
   it('extends the upper bound above a bollinger_upper value outside the close range', () => {
     const rows = [
-      { adj_close: 100, bollinger_upper: 200 },
-      { adj_close: 105 },
-      { adj_close: 110 },
+      { value: 100, bollinger_upper: 200 },
+      { value: 105 },
+      { value: 110 },
     ]
 
     const [, upper] = priceDomain(rows)
@@ -52,30 +52,30 @@ describe('priceDomain', () => {
 
   it('ignores a key that is null in every row', () => {
     const withKey = [
-      { adj_close: 100, sma_fast: null },
-      { adj_close: 110, sma_fast: null },
+      { value: 100, sma_fast: null },
+      { value: 110, sma_fast: null },
     ]
     const withoutKey = [
-      { adj_close: 100 },
-      { adj_close: 110 },
+      { value: 100 },
+      { value: 110 },
     ]
 
-    expect(priceDomain(withKey)).toEqual(priceDomain(withoutKey, ['adj_close']))
+    expect(priceDomain(withKey)).toEqual(priceDomain(withoutKey, ['value']))
   })
 
   it('ignores a key not included in the keys list even when present in rows', () => {
     const rows = [
-      { adj_close: 100, obv: 5_000_000 },
-      { adj_close: 110, obv: 5_000_000 },
+      { value: 100, obv: 5_000_000 },
+      { value: 110, obv: 5_000_000 },
     ]
 
-    const [, upper] = priceDomain(rows, ['adj_close'])
+    const [, upper] = priceDomain(rows, ['value'])
 
     expect(upper).toBeLessThan(200)
   })
 
   it('returns a non-zero span for a flat series', () => {
-    const rows = [{ adj_close: 100 }, { adj_close: 100 }, { adj_close: 100 }]
+    const rows = [{ value: 100 }, { value: 100 }, { value: 100 }]
 
     const [lower, upper] = priceDomain(rows)
 

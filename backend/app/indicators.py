@@ -4,6 +4,9 @@ import numpy as np
 import pandas as pd
 
 
+CLOSE_ONLY_INDICATORS = ("sma", "ema", "bollinger", "rsi", "macd")
+
+
 def compute_sma(series: pd.Series, window: int) -> pd.Series:
     """Return the simple moving average for ``window`` observations."""
     return series.rolling(window).mean()
@@ -169,3 +172,67 @@ def compute_obv(close: pd.Series, volume: pd.Series) -> pd.Series:
     """Return cumulative on-balance volume."""
     direction = np.sign(close.diff().fillna(0.0))
     return (direction * volume).cumsum()
+
+
+def indicator_series(
+    requested: set[str],
+    close: pd.Series,
+    high: pd.Series | None = None,
+    low: pd.Series | None = None,
+    volume: pd.Series | None = None,
+) -> list[dict]:
+    """Build requested indicator payloads, converting missing values to JSON nulls."""
+    required = {
+        "donchian": (high, low),
+        "adx": (high, low),
+        "stochastic": (high, low),
+        "obv": (volume,),
+    }
+    for key, inputs in required.items():
+        if key in requested and any(value is None for value in inputs):
+            raise ValueError(key)
+
+    series = []
+
+    def add_series(key: str, label: str, values: pd.Series) -> None:
+        series.append(
+            {
+                "key": key,
+                "label": label,
+                "points": [None if pd.isna(value) else float(value) for value in values],
+            }
+        )
+
+    if "sma" in requested:
+        add_series("sma_fast", "SMA 20", compute_sma(close, 20))
+        add_series("sma_slow", "SMA 50", compute_sma(close, 50))
+    if "ema" in requested:
+        add_series("ema_fast", "EMA 20", compute_ema(close, 20))
+        add_series("ema_slow", "EMA 50", compute_ema(close, 50))
+    if "bollinger" in requested:
+        upper, middle, lower = compute_bollinger(close)
+        add_series("bollinger_upper", "Bollinger upper (20, 2σ)", upper)
+        add_series("bollinger_middle", "Bollinger middle (20, 2σ)", middle)
+        add_series("bollinger_lower", "Bollinger lower (20, 2σ)", lower)
+    if "donchian" in requested:
+        upper, lower = compute_donchian(high, low)
+        add_series("donchian_upper", "Donchian upper (20)", upper)
+        add_series("donchian_mid", "Donchian mid (20)", (upper + lower) / 2.0)
+        add_series("donchian_lower", "Donchian lower (20)", lower)
+    if "rsi" in requested:
+        add_series("rsi", "RSI 14", compute_rsi(close))
+    if "macd" in requested:
+        macd_line, macd_signal, macd_histogram = compute_macd(close)
+        add_series("macd_line", "MACD 12/26/9", macd_line)
+        add_series("macd_signal", "Signal 9", macd_signal)
+        add_series("macd_histogram", "Histogram", macd_histogram)
+    if "adx" in requested:
+        add_series("adx", "ADX 14", compute_adx(high, low, close))
+    if "stochastic" in requested:
+        percent_k, percent_d = compute_stochastic(high, low, close)
+        add_series("stochastic_k", "Stochastic %K (14)", percent_k)
+        add_series("stochastic_d", "Stochastic %D (3)", percent_d)
+    if "obv" in requested:
+        add_series("obv", "OBV", compute_obv(close, volume))
+
+    return series

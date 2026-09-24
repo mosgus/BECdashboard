@@ -12,8 +12,20 @@ from app.indicators import (
     compute_rsi,
     compute_sma,
     compute_stochastic,
+    indicator_series,
 )
 from app.signals import signal_rsi_threshold
+
+
+def test_indicator_series_returns_requested_close_only_keys():
+    result = indicator_series({"sma", "rsi"}, pd.Series(range(30)))
+
+    assert [series["key"] for series in result] == ["sma_fast", "sma_slow", "rsi"]
+
+
+def test_indicator_series_requires_ohlc_inputs_for_non_close_indicators():
+    with pytest.raises(ValueError, match="donchian"):
+        indicator_series({"donchian"}, pd.Series(range(30)))
 
 
 def test_sma_known_values():

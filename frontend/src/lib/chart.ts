@@ -7,7 +7,7 @@ export function downsample<T>(rows: T[], maxPoints = MAX_CHART_POINTS): T[] {
 }
 
 export const PRICE_PANEL_KEYS = [
-  'adj_close',
+  'value',
   'sma_fast',
   'sma_slow',
   'ema_fast',

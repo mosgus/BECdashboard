@@ -1,13 +1,21 @@
 import type { JSX } from 'react'
 import { Area, Bar, CartesianGrid, ComposedChart, Legend, Line, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
-import type { IndicatorsResponse, PriceBar } from '../api/client'
+import type { IndicatorsResponse } from '../api/client'
 import { downsample, priceDomain } from '../lib/chart'
 import { formatPrice } from '../lib/format'
 
-interface TickerChartProps {
-  ticker: string
-  bars: PriceBar[]
+export interface SeriesPoint {
+  date: string
+  value: number
+}
+
+interface SeriesChartProps {
+  title: string
+  valueName: string
+  points: SeriesPoint[]
   indicators?: IndicatorsResponse
+  formatValue?: (value: number) => string
+  valueAxisWidth?: number
 }
 
 interface ChartTooltipProps {
@@ -19,7 +27,7 @@ interface ChartTooltipProps {
 
 interface ChartPoint {
   date: string
-  adj_close: number
+  value: number
   [key: string]: string | number | number[] | null
 }
 
@@ -74,8 +82,7 @@ function ChartYAxis({
   )
 }
 
-export default function TickerChart({ ticker, bars, indicators }: TickerChartProps): JSX.Element {
-  const points = bars.filter((bar): bar is PriceBar & { adj_close: number } => bar.adj_close !== null)
+export default function SeriesChart({ title, valueName, points, indicators, formatValue = formatPrice, valueAxisWidth = 56 }: SeriesChartProps): JSX.Element {
   const indicatorDates = indicators?.dates ?? []
   const seriesByKey = new Map<string, Map<string, number | null>>()
   const labelsByKey = new Map<string, string>()
@@ -88,10 +95,10 @@ export default function TickerChart({ ticker, bars, indicators }: TickerChartPro
   }
 
   const seriesName = (key: string): string => labelsByKey.get(key) ?? key
-  const chartData: ChartPoint[] = points.map((bar) => {
-    const point: ChartPoint = { date: bar.date, adj_close: bar.adj_close }
+  const chartData: ChartPoint[] = points.map((seriesPoint) => {
+    const point: ChartPoint = { date: seriesPoint.date, value: seriesPoint.value }
     for (const [key, valuesByDate] of seriesByKey) {
-      point[key] = valuesByDate.get(bar.date) ?? null
+      point[key] = valuesByDate.get(seriesPoint.date) ?? null
     }
     const lower = point.bollinger_lower
     const upper = point.bollinger_upper
@@ -108,19 +115,19 @@ export default function TickerChart({ ticker, bars, indicators }: TickerChartPro
   return (
     <div className="space-y-4">
       <div>
-        <h3 className="mb-2 text-sm font-semibold">{ticker} — Price &amp; Moving Averages</h3>
+        <h3 className="mb-2 text-sm font-semibold">{title}</h3>
         <div className="h-[22rem]">
           <ResponsiveContainer width="100%" height="100%">
             <ComposedChart data={renderedData} margin={{ top: 8, right: 8, bottom: 4, left: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
               <ChartXAxis />
-              <ChartYAxis domain={priceYDomain} />
-              <Tooltip content={<ChartTooltip format={formatPrice} />} />
+              <ChartYAxis domain={priceYDomain} tickFormatter={formatValue} width={valueAxisWidth} />
+              <Tooltip content={<ChartTooltip format={formatValue} />} />
               <Legend />
               <Area
                 type="monotone"
-                dataKey="adj_close"
-                name="Price"
+                dataKey="value"
+                name={valueName}
                 stroke="var(--color-primary)"
                 strokeWidth={1.6}
                 fill="var(--color-primary)"
@@ -167,7 +174,7 @@ export default function TickerChart({ ticker, bars, indicators }: TickerChartPro
               <ComposedChart data={renderedData} margin={{ top: 4, right: 8, bottom: 4, left: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
                 <ChartXAxis />
-                <ChartYAxis domain={['auto', 'auto']} width={56} />
+                <ChartYAxis domain={['auto', 'auto']} width={valueAxisWidth} tickFormatter={formatValue} />
                 <Tooltip content={<ChartTooltip format={(value) => value.toFixed(2)} />} />
                 <ReferenceLine y={0} stroke="var(--color-border)" />
                 {seriesByKey.has('macd_histogram') && <Bar dataKey="macd_histogram" name={seriesName('macd_histogram')} fill="var(--color-muted)" radius={[1, 1, 0, 0]} isAnimationActive={false} />}

@@ -1808,6 +1808,57 @@ disagrees in one** — contracts 0071 and 0072 spent two rounds proving that for
 math rather than moving it would have been the same mistake with a longer fuse. Returns use
 `adj_close`, never `close`.
 
+**The portfolio value line is buy-and-hold, anchored at today, cash included.** Decided 2026-09-24,
+for the Holdings portfolio charts (contracts to follow 0095). Gunnar's calls on no rebalancing and
+cash included; the anchor is the planner's.
+- **No rebalancing, ever, in this series.** Holdings are derived from the declared weights at
+  today's prices (`units = weight × V / price_today`) and then held unchanged backwards through
+  history. The line's right end is exactly the declared portfolio. **This is a deliberate departure
+  from `main`**, which models every curve (`core/portfolio.py: (returns * w).sum(axis=1)`) as
+  constant weights rebalanced daily, and says so in a warning.
+- **Anchor at today, not at the window start.** A start-anchored buy-and-hold line changes shape
+  whenever the start date moves, so every RSI and MACD value would change on zoom. Today-anchoring
+  makes the path independent of the visible window. Rebasing to 100 at the visible start is then a
+  constant multiplier: RSI is unchanged by it, and SMA, EMA, Bollinger and MACD scale linearly.
+- **Cash is included, as a constant dollar amount.** A 30%-cash portfolio really does move about 70%
+  as much. Leaving cash out overstates both return and volatility, and makes the chart describe a
+  different allocation from the one declared. `main` leaves it out (it renormalises weights over the
+  tickers). That is a departure too.
+- **Only close-based indicators apply.** A portfolio has no true daily high, low or volume.
+  Weighted constituent highs always overstate the portfolio's range, because holdings peak at
+  different times. So ATR, Donchian, ADX, Stochastic and OBV are omitted on the portfolio chart
+  rather than approximated.
+- **The seam that keeps Backtest open:** `value_series(units, prices)` is separate from how the
+  units are chosen. Holdings chooses them from today's weights. Backtest will choose them at a start
+  date and re-choose them at rebalance dates. Per-holding value series are returned alongside the
+  total, so contributions sum to the total by construction. `main:core/scenarios.py` gets this wrong:
+  its contributors use buy-and-hold per-asset returns while its equity curve is daily-rebalanced, so
+  the parts do not add up to the whole.
+- Also not to port from `main`: its Sharpe is `CAGR / vol` with `rf = 0`. `main` has **no Backtest
+  tab**. Its "backtest" code is `/portfolios/{id}/analytics` (equity curve vs SPY, feeding the Risk
+  page), `scenarios.py` (historical-window replay) and `walk_forward.py` (optimizer out-of-sample
+  folds, which depends on optimizers not yet rebuilt).
+- **Dollars on the y-axis only when the share counts agree with the weights.** Gunnar approved this
+  rule 2026-09-24. Dollars are used only when every position has a share count and each position's
+  share-implied weight, `shares × last_close / V`, is within **0.5 percentage points** of its declared
+  weight. `V = Σ shares × last_close / ((100 − cash) / 100)`, which is `impliedPortfolioValue`'s formula.
+  In every other case the chart is an index at 100 on the visible start date, with a note saying the
+  share counts don't match the weights. The reason: the line is built from weights. Labelling it in
+  dollars while shares and weights disagree would put a dollar figure on a portfolio nobody holds.
+  **The price source is the last stored close, not the live quote.** The line's right end is a close,
+  so a live-price `V` would put an intraday number on an end-of-day point. For that reason the
+  frontend's check uses the `last_close` the series endpoint returns, not `positionPrice`.
+- **Before a holding's first stored bar, its value is held flat at its first price. The flat stretch is
+  shaded and labelled.** Gunnar approved this 2026-09-24. By default the chart starts at the youngest
+  holding's first bar, so nothing is flat. Any earlier date back to the oldest holding's first bar can
+  be picked. The label reads, for example, "NEWB listed 2023-04-12; flat before then". Rejected: making
+  the youngest holding's start a hard floor, which threw away years of the other holdings' history;
+  and renormalising the weights before a listing, which is a form of rebalancing.
+- **Per-holding value series exist in `app/portfolio_series.py`, but the HTTP response doesn't carry
+  them.** With 30 holdings over six years that is about 50k floats that no current page draws. Backtest
+  can add them to its own response when it needs contributions. The seam is the pure function, not the
+  wire format.
+
 **Portfolio analysis lives at `/portfolios/:id/<tab>`, portfolio-scoped.** Decided 2026-09-22,
 contract 0075, matching `main:frontend/app/portfolios/[id]/`. Five tabs: Holdings (default), Backtest,
 Outlook, Monitor, Risk & Perf — **not** the reference's set, which has `rebalance` and `targets` and

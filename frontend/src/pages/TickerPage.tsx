@@ -9,7 +9,7 @@ import { Tooltip } from '../components/Tooltip'
 import { formatPrice } from '../lib/format'
 import { INDICATOR_GROUPS } from '../lib/indicators'
 
-const TickerChart = lazy(() => import('../components/TickerChart'))
+const SeriesChart = lazy(() => import('../components/SeriesChart'))
 
 const ALWAYS_ON_INDICATORS = ['sma', 'rsi', 'macd'] as const
 
@@ -99,7 +99,7 @@ export function TickerPage(): JSX.Element {
   // History is intentionally fetched once: date controls filter this stored response immediately.
   // Adding server-side start/end parameters later requires a backend contract.
   const filteredBars = bars.filter((bar) => bar.date >= start && bar.date <= end)
-  const chartBars = filteredBars.filter((bar) => bar.adj_close !== null)
+  const chartPoints = filteredBars.flatMap((bar) => (bar.adj_close === null ? [] : [{ date: bar.date, value: bar.adj_close }]))
   const signalData = signals.status === 'ready' ? signals.data : null
   const indicatorData = indicators.status === 'ready' ? indicators.data : undefined
   const unknownTicker =
@@ -191,10 +191,10 @@ export function TickerPage(): JSX.Element {
 
           <section className="bg-brand-surface border border-brand-border rounded-[var(--radius-card)] p-4">
             {history.status === 'loading' && <p className="h-[22rem] flex items-center justify-center text-sm text-[var(--color-muted)]">Loading chart…</p>}
-            {history.status === 'ready' && chartBars.length === 0 && <p className="h-[22rem] flex items-center justify-center text-sm text-[var(--color-muted)]">No stored data in this date range.</p>}
-            {history.status === 'ready' && chartBars.length > 0 && (
+            {history.status === 'ready' && chartPoints.length === 0 && <p className="h-[22rem] flex items-center justify-center text-sm text-[var(--color-muted)]">No stored data in this date range.</p>}
+            {history.status === 'ready' && chartPoints.length > 0 && (
               <Suspense fallback={<p className="h-[22rem] flex items-center justify-center text-sm text-[var(--color-muted)]">Loading chart…</p>}>
-                <TickerChart ticker={symbol} bars={filteredBars} indicators={indicatorData} />
+                <SeriesChart title={`${symbol} — Price & Moving Averages`} valueName="Price" points={chartPoints} indicators={indicatorData} />
               </Suspense>
             )}
           </section>
