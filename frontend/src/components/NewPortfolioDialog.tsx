@@ -124,7 +124,15 @@ export function NewPortfolioDialog({ universe, onCancel, onCreate }: NewPortfoli
   }
 
   function updateRow(id: string, field: 'ticker' | 'shares' | 'weight', value: string): void {
-    setRows((previous) => previous.map((row) => (row.id === id ? { ...row, [field]: value } : row)))
+    setRows((previous) =>
+      previous.map((row) =>
+        row.id === id
+          ? field === 'ticker' && mode === 'weight'
+            ? { ...row, ticker: value, shares: '' }
+            : { ...row, [field]: value }
+          : row,
+      ),
+    )
   }
 
   function handleCreate(): void {
@@ -132,12 +140,11 @@ export function NewPortfolioDialog({ universe, onCancel, onCreate }: NewPortfoli
 
     const positions: Position[] = summary.rows
       .filter((row) => row.ticker !== '' && row.weight !== null)
-      .map((row) => {
-        const source = rows.find((candidate) => candidate.id === row.id)
-        return mode === 'shares' && source?.shares.trim() !== ''
-          ? { ticker: row.ticker, weight: row.weight as number, shares: row.shares as number }
-          : { ticker: row.ticker, weight: row.weight as number }
-      })
+      .map((row) =>
+        row.shares !== null
+          ? { ticker: row.ticker, weight: row.weight as number, shares: row.shares }
+          : { ticker: row.ticker, weight: row.weight as number },
+      )
 
     onCreate({
       id: crypto.randomUUID(),
@@ -356,6 +363,12 @@ export function NewPortfolioDialog({ universe, onCancel, onCreate }: NewPortfoli
                 + Add asset
               </button>
             </Tooltip>
+          )}
+
+          {mode === 'weight' && rows.some((row) => row.ticker !== '' && row.shares.trim() !== '') && (
+            <p className="text-sm text-[var(--color-muted)]">
+              Share counts from the file are saved with these positions. Weights above are what the portfolio uses.
+            </p>
           )}
 
           {mode === 'weight' && summary.remainderPercent !== null && (

@@ -1,6 +1,6 @@
 # Contract 0098 — Portfolio charts on the Holdings tab
 
-**Status:** open
+**Status:** accepted
 **Assigned to:** sonnet
 **Author:** planner (opus)
 **Depends on:** 0096 (`GET /portfolio/series`) and 0097 (`SeriesChart`). Both must be accepted

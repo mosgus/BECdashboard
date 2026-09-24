@@ -210,3 +210,40 @@ describe('summariseDraft universe membership', () => {
     expect(summary.problem).toBe('Every asset needs a usable current price')
   })
 })
+
+describe('summariseDraft weight mode carries imported shares', () => {
+  const byTicker = new Map([['AAPL', entry(10)], ['MSFT', entry(10)]])
+
+  it('populates shares from the row and leaves an empty row null, without affecting canCreate or weights', () => {
+    const summary = summariseDraft(
+      {
+        name: 'Draft', mode: 'weight', cash: '0',
+        rows: [
+          { id: 'a', ticker: 'AAPL', weight: '60', shares: '2' },
+          { id: 'b', ticker: 'MSFT', weight: '40', shares: '' },
+        ],
+      },
+      byTicker,
+    )
+    expect(summary.rows[0].shares).toBe(2)
+    expect(summary.rows[1].shares).toBeNull()
+    expect(summary.canCreate).toBe(true)
+    expect(summary.rows.map((row) => row.weight)).toEqual([60, 40])
+  })
+
+  it('never lets unparseable share text block a weight-mode draft', () => {
+    const summary = summariseDraft(
+      {
+        name: 'Draft', mode: 'weight', cash: '0',
+        rows: [
+          { id: 'a', ticker: 'AAPL', weight: '60', shares: 'abc' },
+          { id: 'b', ticker: 'MSFT', weight: '40', shares: '' },
+        ],
+      },
+      byTicker,
+    )
+    expect(summary.canCreate).toBe(true)
+    expect(summary.rows.map((row) => row.weight)).toEqual([60, 40])
+    expect(summary.rows[0].shares).toBeNull()
+  })
+})

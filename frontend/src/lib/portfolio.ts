@@ -348,7 +348,7 @@ export function summariseDraft(
     const rows = draft.rows.map((row) => ({
       id: row.id,
       ticker: row.ticker,
-      shares: null,
+      shares: parseFinitePositive(row.shares),
       weight: parseFinitePositive(row.weight),
     }))
     const allocatedPercent = (cashWeight ?? 0) + rows.reduce((sum, row) => sum + (row.weight ?? 0), 0)

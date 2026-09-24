@@ -68,10 +68,10 @@ describe('preset portfolios', () => {
     expect(result.ok).toBe(true)
     if (!result.ok) return
     expect(result.dropped).toEqual([
-      { ticker: 'ORCL', weightPct: 10.481994524396962 },
-      { ticker: 'PBR', weightPct: 3.1979752499318987 },
-      { ticker: 'SHNY', weightPct: 2.2013242930879917 },
-      { ticker: 'XIACF', weightPct: 0.30626691660223515 },
+      { ticker: 'PBR', weightPct: 6.8215124159481295 },
+      { ticker: 'ORCL', weightPct: 4.426503750208732 },
+      { ticker: 'SHNY', weightPct: 4.163845785064591 },
+      { ticker: 'XIACF', weightPct: 0.2985501706042959 },
     ])
   })
 

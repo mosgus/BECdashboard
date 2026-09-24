@@ -1,6 +1,16 @@
 import { describe, expect, it } from 'vitest'
+import type { UniverseEntry } from '../api/client'
 import { summariseDraft, type Portfolio } from './portfolio'
 import { parsePortfolioCsv, portfolioCsvFilename, portfolioNameFromFilename, serializePortfolioCsv } from './portfolioCsv'
+
+function entry(ticker: string): UniverseEntry {
+  return {
+    ticker, short_name: null, sector: null, quote_type: null,
+    current_price: null, last_close: null, regular_market_price: null, prior_close: null,
+    quote_fetched_at: null, market_cap: null, trailing_pe: null, dividend_yield: null,
+    bar_count: 0, first_bar: null, last_bar: null, fetched_at: null, added_at: '',
+  }
+}
 
 const universe = new Set(['AAPL', 'MSFT', 'GOOG', 'AMZN'])
 const toDraft = (seed: { name: string; mode: 'shares' | 'weight'; cash: string; rows: Array<{ ticker: string; shares: string; weight: string }> }) => ({
@@ -52,6 +62,10 @@ describe('portfolio CSV serialization', () => {
     expect(result.seed).toMatchObject({
       name: 'Core, Equity', rows: [{ ticker: 'AAPL', shares: '10' }, { ticker: 'MSFT', shares: '' }],
     })
+
+    const byTicker = new Map([['AAPL', entry('AAPL')], ['MSFT', entry('MSFT')]])
+    const summary = summariseDraft(toDraft(result.seed), byTicker)
+    expect(summary.rows.map((row) => row.shares)).toEqual([10, null])
   })
 
   it('round-trips an awkward stated cash value exactly', () => {

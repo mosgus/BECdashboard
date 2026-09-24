@@ -1,7 +1,8 @@
 import type { JSX } from 'react'
-import { Area, Bar, CartesianGrid, ComposedChart, Legend, Line, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
+import { Area, Bar, CartesianGrid, ComposedChart, Legend, Line, ReferenceArea, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import type { IndicatorsResponse } from '../api/client'
-import { downsample, priceDomain } from '../lib/chart'
+import { downsample, priceDomain, snapRange } from '../lib/chart'
+import type { ShadedRange } from '../lib/chart'
 import { formatPrice } from '../lib/format'
 
 export interface SeriesPoint {
@@ -16,6 +17,7 @@ interface SeriesChartProps {
   indicators?: IndicatorsResponse
   formatValue?: (value: number) => string
   valueAxisWidth?: number
+  shaded?: ShadedRange
 }
 
 interface ChartTooltipProps {
@@ -82,7 +84,7 @@ function ChartYAxis({
   )
 }
 
-export default function SeriesChart({ title, valueName, points, indicators, formatValue = formatPrice, valueAxisWidth = 56 }: SeriesChartProps): JSX.Element {
+export default function SeriesChart({ title, valueName, points, indicators, formatValue = formatPrice, valueAxisWidth = 56, shaded }: SeriesChartProps): JSX.Element {
   const indicatorDates = indicators?.dates ?? []
   const seriesByKey = new Map<string, Map<string, number | null>>()
   const labelsByKey = new Map<string, string>()
@@ -107,6 +109,7 @@ export default function SeriesChart({ title, valueName, points, indicators, form
     return point
   })
   const renderedData = downsample(chartData)
+  const shadedRange = shaded === undefined ? null : snapRange(renderedData.map((row) => row.date), shaded.from, shaded.to)
   const priceYDomain = priceDomain(renderedData)
   const showAdxPane = seriesByKey.has('adx')
   const showStochasticPane = seriesByKey.has('stochastic_k')
@@ -120,6 +123,7 @@ export default function SeriesChart({ title, valueName, points, indicators, form
           <ResponsiveContainer width="100%" height="100%">
             <ComposedChart data={renderedData} margin={{ top: 8, right: 8, bottom: 4, left: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
+              {shadedRange !== null && shaded !== undefined && <ReferenceArea x1={shadedRange[0]} x2={shadedRange[1]} fill="var(--color-muted)" fillOpacity={0.12} label={{ value: shaded.label, position: 'insideTopLeft', fontSize: 10, fill: 'var(--color-muted)' }} />}
               <ChartXAxis />
               <ChartYAxis domain={priceYDomain} tickFormatter={formatValue} width={valueAxisWidth} />
               <Tooltip content={<ChartTooltip format={formatValue} />} />

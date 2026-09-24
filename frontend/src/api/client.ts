@@ -69,6 +69,22 @@ export interface IndicatorsResponse {
   series: IndicatorSeries[]
 }
 
+export interface PortfolioHolding {
+  ticker: string
+  weight: number
+  first_bar: string
+  last_close: number
+}
+
+export interface PortfolioSeriesResponse {
+  dates: string[]
+  value: number[]
+  cash_value: number
+  holdings: PortfolioHolding[]
+  series: IndicatorSeries[]
+  signals: SignalOut[]
+}
+
 export interface StripQuote {
   ticker: string
   name: string
@@ -289,6 +305,18 @@ export async function getIndicators(ticker: string, include: string[]): Promise<
   if (include.length === 0) return { ticker, dates: [], series: [] }
   const query = new URLSearchParams({ include: include.join(',') })
   return request<IndicatorsResponse>(`/universe/${ticker}/indicators?${query}`)
+}
+
+export async function getPortfolioSeries(
+  tickers: string[], weights: number[], cash: number, include: string[],
+): Promise<PortfolioSeriesResponse> {
+  const query = new URLSearchParams({
+    tickers: tickers.join(','),
+    weights: weights.map(String).join(','),
+    cash: String(cash),
+    include: include.join(','),
+  })
+  return request<PortfolioSeriesResponse>(`/portfolio/series?${query}`)
 }
 
 export async function getStrip(): Promise<StripResponse> {

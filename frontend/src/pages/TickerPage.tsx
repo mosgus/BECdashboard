@@ -7,7 +7,7 @@ import HelpSidebar from '../components/HelpSidebar'
 import { SignalBadge } from '../components/SignalBadge'
 import { Tooltip } from '../components/Tooltip'
 import { formatPrice } from '../lib/format'
-import { INDICATOR_GROUPS } from '../lib/indicators'
+import { INDICATOR_GROUPS, SIGNAL_DESCRIPTIONS } from '../lib/indicators'
 
 const SeriesChart = lazy(() => import('../components/SeriesChart'))
 
@@ -17,12 +17,6 @@ type LoadState<T> =
   | { status: 'loading' }
   | { status: 'error'; statusCode: number | null }
   | { status: 'ready'; data: T }
-
-const SIGNAL_DESCRIPTIONS: Record<string, string> = {
-  sma_cross: 'Bullish when the 20-day SMA crosses above the 50-day SMA. Bearish when it crosses below.',
-  rsi_threshold: 'Overbought above 70 (potential pullback), oversold below 30 (potential rebound).',
-  macd_cross: 'Bullish when the MACD line crosses above its signal line. Bearish when below.',
-}
 
 const INDICATOR_TOOLTIPS: Record<string, string> = {
   adx: 'Trend strength from 0 to 100. High means a strong trend in either direction, not a bullish one.',

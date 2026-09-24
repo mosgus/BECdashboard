@@ -1,6 +1,6 @@
 # Contract 0096 — Portfolio value series endpoint
 
-**Status:** reported
+**Status:** accepted
 **Assigned to:** sonnet
 **Author:** planner (opus)
 

@@ -7,6 +7,12 @@ export const INDICATOR_GROUPS = [
   { key: 'obv', label: 'OBV' },
 ] as const
 
+export const SIGNAL_DESCRIPTIONS: Record<string, string> = {
+  sma_cross: 'Bullish when the 20-day SMA crosses above the 50-day SMA. Bearish when it crosses below.',
+  rsi_threshold: 'Overbought above 70 (potential pullback), oversold below 30 (potential rebound).',
+  macd_cross: 'Bullish when the MACD line crosses above its signal line. Bearish when below.',
+}
+
 export interface GlossaryEntry {
   term: string
   definition: string

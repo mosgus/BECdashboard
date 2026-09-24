@@ -43,3 +43,16 @@ export function priceDomain(
   const padding = (max - min) * padFraction || 1
   return [min - padding, max + padding]
 }
+
+export interface ShadedRange {
+  from: string
+  to: string
+  label: string
+}
+
+/** Snap a date range onto the dates actually rendered by a categorical chart. */
+export function snapRange(dates: string[], from: string, to: string): [string, string] | null {
+  const x1 = dates.find((date) => date >= from)
+  const x2 = dates.findLast((date) => date <= to)
+  return x1 === undefined || x2 === undefined || x1 > x2 ? null : [x1, x2]
+}

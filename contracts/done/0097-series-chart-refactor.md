@@ -1,6 +1,6 @@
 # Contract 0097 — Generalise TickerChart into SeriesChart
 
-**Status:** reported
+**Status:** accepted
 **Assigned to:** haiku
 **Author:** planner (opus)
 

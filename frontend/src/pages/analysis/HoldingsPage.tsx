@@ -4,6 +4,7 @@ import { Link, useParams } from 'react-router-dom'
 import { getReturns, getSignals, getUniverse } from '../../api/client'
 import type { TickerReturns, TickerSignals, UniverseEntry } from '../../api/client'
 import { SignalBadge } from '../../components/SignalBadge'
+import { PortfolioCharts } from '../../components/PortfolioCharts'
 import { Tooltip } from '../../components/Tooltip'
 import HelpSidebar from '../../components/HelpSidebar'
 import { priceChange } from '../../lib/change'
@@ -219,6 +220,7 @@ export function HoldingsPage(): JSX.Element {
           </table>
         </div>
       </div>
+      <PortfolioCharts portfolio={current} />
     </div>
   )
 }

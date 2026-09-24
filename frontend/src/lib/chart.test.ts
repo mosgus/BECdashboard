@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { downsample, priceDomain } from './chart'
+import { downsample, priceDomain, snapRange } from './chart'
 
 describe('downsample', () => {
   it('returns short input by reference', () => {
@@ -84,5 +84,21 @@ describe('priceDomain', () => {
 
   it('returns [0, 1] for empty input', () => {
     expect(priceDomain([])).toEqual([0, 1])
+  })
+})
+
+describe('snapRange', () => {
+  const dates = ['2024-01-02', '2024-01-05', '2024-01-09']
+
+  it('snaps both edges to rendered dates', () => {
+    expect(snapRange(dates, '2024-01-03', '2024-01-08')).toEqual(['2024-01-05', '2024-01-05'])
+  })
+
+  it('returns null when no rendered date starts the range', () => {
+    expect(snapRange(dates, '2024-01-10', '2024-01-12')).toBeNull()
+  })
+
+  it('returns null when no rendered date ends the range', () => {
+    expect(snapRange(dates, '2024-01-01', '2024-01-01')).toBeNull()
   })
 })

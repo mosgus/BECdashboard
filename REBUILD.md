@@ -292,6 +292,18 @@ export button, 0063 the import UI.
   preserve. Anyone reading only one branch will think the other is a bug.
 - **Validate the whole file before dropping any row**, or a duplicate ticker among off-universe rows
   goes unreported.
+- **A weighted file's share counts are kept on the created positions.** Contract 0099, 2026-09-24,
+  Gunnar's request. Before this contract, the app's own export-then-import round trip lost them. The
+  parser read `shares` into the seed correctly, but `summariseDraft`'s weight branch hardcoded
+  `shares: null`, and `handleCreate` attached shares only in shares mode. The round-trip test
+  stopped at the seed, so nothing failed.
+  Weights are still saved exactly as the file states them. Shares ride along as metadata and never
+  derive, validate or block a weight. This is **not** the forbidden "mixed flow": that rule is
+  about a user typing shares and a separate target weight into the composer, with no convention
+  for which one wins. A file that carries both has an obvious winner, the weights, and it is the
+  format the app itself writes. Disagreement between the two is handled by the existing 0.5-point
+  dollar-display rule. Presets still never carry shares (see the preset rule earlier in this
+  section). A person's own share counts arrive by importing their own file.
 - **The import seam is `DraftSeed`** — `{name, mode, cash, rows}`, exactly `summariseDraft`'s input
   minus React keys. A future preset catalog returns a `DraftSeed` and nothing else changes. That is
   the only accommodation made for presets; no preset content exists or should be invented.
