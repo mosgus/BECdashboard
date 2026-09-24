@@ -5,6 +5,7 @@ import { getReturns, getSignals, getUniverse } from '../../api/client'
 import type { TickerReturns, TickerSignals, UniverseEntry } from '../../api/client'
 import { SignalBadge } from '../../components/SignalBadge'
 import { Tooltip } from '../../components/Tooltip'
+import HelpSidebar from '../../components/HelpSidebar'
 import { priceChange } from '../../lib/change'
 import { formatPercent, formatPrice, formatShares } from '../../lib/format'
 import { positionPrice, valuePortfolio } from '../../lib/portfolio'
@@ -37,7 +38,6 @@ export function HoldingsPage(): JSX.Element {
   const portfolio = listPortfolios().find((candidate) => candidate.id === portfolioId)
   const current = portfolio === undefined || isLegacyPortfolio(portfolio) ? null : portfolio
   const tickerKey = current === null ? null : current.positions.map((position) => position.ticker).join(',')
-  const basisDate = current?.basisDate
   const [universe, setUniverse] = useState<LoadState<UniverseEntry[]>>({ status: 'loading' })
   const [returns, setReturns] = useState<LoadState<TickerReturns[]>>({ status: 'loading' })
   const [signals, setSignals] = useState<LoadState<TickerSignals[]>>({ status: 'loading' })
@@ -56,7 +56,7 @@ export function HoldingsPage(): JSX.Element {
         if (!cancelled) setUniverse({ status: 'error' })
       })
 
-    void getReturns(tickers, basisDate)
+    void getReturns(tickers)
       .then((response) => {
         if (!cancelled) setReturns({ status: 'ready', data: response.returns })
       })
@@ -75,7 +75,7 @@ export function HoldingsPage(): JSX.Element {
     return () => {
       cancelled = true
     }
-  }, [tickerKey, basisDate])
+  }, [tickerKey])
 
   if (current === null) return <></>
 
@@ -113,7 +113,8 @@ export function HoldingsPage(): JSX.Element {
         <p className="text-sm text-brand-negative mb-3">Signals could not be loaded.</p>
       )}
 
-      <div className="flex justify-end mb-3">
+      <div className="flex items-center justify-end gap-2 mb-3">
+        <HelpSidebar />
         <Tooltip label="Choose which technical signal the table shows for every holding">
           <select
             value={selectedSignal}
@@ -153,13 +154,6 @@ export function HoldingsPage(): JSX.Element {
                     </Tooltip>
                   </th>
                 ))}
-                {current.basisDate !== undefined && (
-                  <th className={`${TH} text-right`}>
-                    <Tooltip label="Total return including dividends since the portfolio's basis date.">
-                      <span>Since {current.basisDate}</span>
-                    </Tooltip>
-                  </th>
-                )}
                 <th className={TH}>
                   <Tooltip label="Computed from stored price history. ATR is average true range as a percentage of price — it measures volatility, not direction.">
                     <span>Signal ({selectedSignalLabel})</span>
@@ -206,7 +200,6 @@ export function HoldingsPage(): JSX.Element {
                     </td>
                     <ReturnCell value={tickerReturns?.five_day ?? null} />
                     <ReturnCell value={tickerReturns?.ytd ?? null} />
-                    {current.basisDate !== undefined && <ReturnCell value={tickerReturns?.since ?? null} />}
                     <SignalCell tickerSignals={tickerSignals} selectedSignal={selectedSignal} />
                   </tr>
                 )
@@ -220,7 +213,6 @@ export function HoldingsPage(): JSX.Element {
                 <td className={`${TD} text-right ${MUTED}`}>—</td>
                 <td className={`${TD} text-right ${MUTED}`}>—</td>
                 <td className={`${TD} text-right ${MUTED}`}>—</td>
-                {current.basisDate !== undefined && <td className={`${TD} text-right ${MUTED}`}>—</td>}
                 <td className={`${TD} ${MUTED}`}>—</td>
               </tr>
             </tbody>

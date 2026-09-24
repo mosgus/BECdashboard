@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { UniverseEntry } from '../api/client'
-import { addPositionDiluting, cashFromPositions, impliedPortfolioValue, isValidBasisDate, migrateLegacyPortfolio, summariseDraft, weightFromShares } from './portfolio'
+import { addPositionDiluting, cashFromPositions, impliedPortfolioValue, migrateLegacyPortfolio, summariseDraft, weightFromShares } from './portfolio'
 import type { Portfolio } from './portfolio'
 
 function portfolio(cashWeight: number, positions: Portfolio['positions']): Portfolio {
@@ -55,17 +55,6 @@ describe('cashFromPositions', () => {
 
     expect(rawCash).toBeGreaterThan(0)
     expect(cashFromPositions(positions)).toBe(0)
-  })
-})
-
-describe('isValidBasisDate', () => {
-  it('accepts real ISO calendar dates and rejects malformed dates', () => {
-    expect(isValidBasisDate('2026-01-02')).toBe(true)
-    expect(isValidBasisDate('2028-02-29')).toBe(true)
-
-    for (const value of ['2026-02-30', '2026-13-01', '26-01-02', '2026-1-2', '', 20260102, null]) {
-      expect(isValidBasisDate(value)).toBe(false)
-    }
   })
 })
 

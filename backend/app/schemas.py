@@ -109,7 +109,6 @@ class TickerReturns(BaseModel):
     five_day: float | None
     thirty_day: float | None
     ytd: float | None
-    since: float | None
 
 
 class ReturnsResponse(BaseModel):

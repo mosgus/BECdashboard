@@ -1,4 +1,4 @@
-import { isValidBasisDate, WEIGHT_EPSILON } from './portfolio'
+import { WEIGHT_EPSILON } from './portfolio'
 import type { LegacyPortfolio, Portfolio, Position, StoredPortfolio } from './portfolio'
 
 export const PORTFOLIO_STORAGE_KEY = 'bec-portfolios'
@@ -38,7 +38,6 @@ function isValidCurrentPortfolio(value: unknown): value is Portfolio {
     typeof candidate.name !== 'string' ||
     !isFiniteNumber(candidate.cashWeight) ||
     candidate.cashWeight < 0 ||
-    (candidate.basisDate !== undefined && !isValidBasisDate(candidate.basisDate)) ||
     !Array.isArray(candidate.positions) ||
     !candidate.positions.every(isValidCurrentPosition) ||
     !hasUniqueTickers(candidate.positions as Position[]) ||
@@ -70,8 +69,9 @@ export function isLegacyPortfolio(value: StoredPortfolio): value is LegacyPortfo
 function normaliseStoredPortfolio(value: unknown): unknown {
   if (typeof value !== 'object' || value === null) return value
   const candidate = value as Record<string, unknown>
-  if (typeof candidate.cashWeight !== 'number' || !(candidate.cashWeight < 0 && candidate.cashWeight > -WEIGHT_EPSILON)) return value
-  return { ...candidate, cashWeight: 0 }
+  const { basisDate: _basisDate, ...withoutBasisDate } = candidate
+  if (typeof candidate.cashWeight !== 'number' || !(candidate.cashWeight < 0 && candidate.cashWeight > -WEIGHT_EPSILON)) return withoutBasisDate
+  return { ...withoutBasisDate, cashWeight: 0 }
 }
 
 /** Read both schemas without discarding valid legacy data. Browser storage is user-editable and
@@ -99,7 +99,6 @@ export function savePortfolio(portfolio: Portfolio): void {
       cashWeight: portfolio.cashWeight,
       positions: portfolio.positions,
       updatedAt: new Date().toISOString(),
-      basisDate: portfolio.basisDate,
     }
     const existing = listPortfolios()
     const index = existing.findIndex((candidate) => candidate.id === stamped.id)

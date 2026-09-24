@@ -1,4 +1,3 @@
-import { isValidBasisDate } from './portfolio'
 import type { EntryMode, Portfolio } from './portfolio'
 
 export interface SeedRow {
@@ -12,7 +11,6 @@ export interface DraftSeed {
   mode: EntryMode
   cash: string
   rows: SeedRow[]
-  basisDate?: string
 }
 
 export interface DroppedRow {
@@ -52,13 +50,6 @@ const LEGACY_MARKER = '# Blue Eagle Portfolio v1'
 
 function failure(error: string, line: number | null): CsvImportResult {
   return { ok: false, error, line }
-}
-
-function withBasisDate(
-  seed: Omit<DraftSeed, 'basisDate'>,
-  basisDate: string | undefined,
-): DraftSeed {
-  return basisDate === undefined ? seed : { ...seed, basisDate }
 }
 
 function parseCsv(text: string): ParsedCsv {
@@ -170,7 +161,6 @@ export function parsePortfolioCsv(text: string, universeTickers: ReadonlySet<str
   let tickerIndex: number | null = null
   let weightIndex: number | null = null
   let sharesIndex: number | null = null
-  let basisDateIndex: number | null = null
   let headerRowIndex = -1
   for (let index = 0; index < parsed.rows.length; index += 1) {
     const row = parsed.rows[index]
@@ -181,7 +171,6 @@ export function parsePortfolioCsv(text: string, universeTickers: ReadonlySet<str
       tickerIndex = candidateTickerIndex
       weightIndex = headerIndex(row, ['weight_pct', 'weight'])
       sharesIndex = headerIndex(row, ['shares', 'quantity', 'qty'])
-      basisDateIndex = headerIndex(row, ['basis_date'])
       headerRowIndex = index
       break
     }
@@ -199,7 +188,6 @@ export function parsePortfolioCsv(text: string, universeTickers: ReadonlySet<str
   const seen = new Set<string>()
   const positions: ParsedPosition[] = []
   let statedCash: { raw: string; value: number; line: number } | null = null
-  let basisDate: string | undefined
   let positionWeightTotal = 0
 
   for (const row of dataRows) {
@@ -227,13 +215,6 @@ export function parsePortfolioCsv(text: string, universeTickers: ReadonlySet<str
       }
       weightPct = cashValue
       statedCash = { raw: weight, value: weightPct, line: row.line }
-      const basisDateText = cell(row, basisDateIndex).trim()
-      if (basisDateText !== '') {
-        if (!isValidBasisDate(basisDateText)) {
-          return failure('basis_date must be a date in YYYY-MM-DD form', row.line)
-        }
-        basisDate = basisDateText
-      }
       continue
     }
 
@@ -263,7 +244,7 @@ export function parsePortfolioCsv(text: string, universeTickers: ReadonlySet<str
   if (positions.length === 0) {
     return {
       ok: true,
-      seed: withBasisDate({ name, mode: 'weight', cash: statedCash?.raw ?? '', rows: [] }, basisDate),
+      seed: { name, mode: 'weight', cash: statedCash?.raw ?? '', rows: [] },
       dropped: [],
     }
   }
@@ -273,7 +254,7 @@ export function parsePortfolioCsv(text: string, universeTickers: ReadonlySet<str
     const equalWeight = String(100 / surviving.length)
     return {
       ok: true,
-      seed: withBasisDate({ name, mode: 'weight', cash: '0', rows: surviving.map((position) => ({ ticker: position.ticker, shares: '', weight: equalWeight })) }, basisDate),
+      seed: { name, mode: 'weight', cash: '0', rows: surviving.map((position) => ({ ticker: position.ticker, shares: '', weight: equalWeight })) },
       dropped,
     }
   }
@@ -281,7 +262,7 @@ export function parsePortfolioCsv(text: string, universeTickers: ReadonlySet<str
   if (mode === 'shares') {
     return {
       ok: true,
-      seed: withBasisDate({ name, mode, cash: '', rows: surviving.map((position) => ({ ticker: position.ticker, shares: position.shares, weight: '' })) }, basisDate),
+      seed: { name, mode, cash: '', rows: surviving.map((position) => ({ ticker: position.ticker, shares: position.shares, weight: '' })) },
       dropped,
     }
   }
@@ -291,15 +272,15 @@ export function parsePortfolioCsv(text: string, universeTickers: ReadonlySet<str
     droppedWeight === 0 ? statedCash.raw : String(statedCash.value + droppedWeight)
   return {
     ok: true,
-    seed: withBasisDate({ name, mode, cash, rows: surviving.map((position) => ({ ticker: position.ticker, shares: position.shares, weight: position.weight })) }, basisDate),
+    seed: { name, mode, cash, rows: surviving.map((position) => ({ ticker: position.ticker, shares: position.shares, weight: position.weight })) },
     dropped,
   }
 }
 
 export function serializePortfolioCsv(portfolio: Portfolio): string {
-  const rows = portfolio.positions.map((position) => [position.ticker, String(position.weight), position.shares === undefined ? '' : String(position.shares), ''])
-  rows.push(['CASH', String(portfolio.cashWeight), '', portfolio.basisDate ?? ''])
-  return ['ticker,weight_pct,shares,basis_date', ...rows.map((row) => row.map(quote).join(','))].join('\n') + '\n'
+  const rows = portfolio.positions.map((position) => [position.ticker, String(position.weight), position.shares === undefined ? '' : String(position.shares)])
+  rows.push(['CASH', String(portfolio.cashWeight), ''])
+  return ['ticker,weight_pct,shares', ...rows.map((row) => row.map(quote).join(','))].join('\n') + '\n'
 }
 
 function filenameSafeName(name: string): string {

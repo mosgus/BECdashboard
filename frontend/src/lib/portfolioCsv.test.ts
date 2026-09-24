@@ -73,26 +73,8 @@ describe('portfolio CSV serialization', () => {
 
   it('writes a plain CSV with a stable filename', () => {
     const portfolio: Portfolio = { id: '1', name: 'Core Equity', cashWeight: 50, updatedAt: '', positions: [{ ticker: 'AAPL', weight: 50 }] }
-    expect(serializePortfolioCsv(portfolio).split('\n')[0]).toBe('ticker,weight_pct,shares,basis_date')
+    expect(serializePortfolioCsv(portfolio).split('\n')[0]).toBe('ticker,weight_pct,shares')
     expect(portfolioCsvFilename(portfolio, new Date(2026, 8, 18))).toBe('Core Equity-2026-09-18.csv')
-  })
-
-  it('round-trips a basis date through the CASH row', () => {
-    const portfolio: Portfolio = {
-      id: '1', name: 'Core Equity', cashWeight: 40, updatedAt: '', basisDate: '2026-01-02',
-      positions: [{ ticker: 'AAPL', weight: 60, shares: 2 }],
-    }
-    const csv = serializePortfolioCsv(portfolio)
-
-    expect(csv).toBe('ticker,weight_pct,shares,basis_date\nAAPL,60,2,\nCASH,40,,2026-01-02\n')
-    expect(successful(csv).seed.basisDate).toBe('2026-01-02')
-  })
-
-  it('leaves the basis date undefined when it is absent', () => {
-    const portfolio: Portfolio = {
-      id: '1', name: 'Core Equity', cashWeight: 40, updatedAt: '', positions: [{ ticker: 'AAPL', weight: 60 }],
-    }
-    expect(successful(serializePortfolioCsv(portfolio)).seed.basisDate).toBeUndefined()
   })
 
   it('round-trips GunnPort’s name and exact weights through its filename', () => {
@@ -145,22 +127,23 @@ describe('portfolio CSV serialization', () => {
 })
 
 describe('portfolio CSV seeding modes', () => {
-  it('accepts three-column exports without a basis date', () => {
+  it('accepts three-column exports', () => {
     const result = successful('ticker,weight_pct,shares\nAAPL,60,2\nCASH,40,\n')
     expect(result.seed).toEqual({
       name: '', mode: 'weight', cash: '40', rows: [{ ticker: 'AAPL', shares: '2', weight: '60' }],
     })
-    expect(result.seed.basisDate).toBeUndefined()
   })
 
-  it('rejects an invalid basis date on the CASH row', () => {
-    expect(parsePortfolioCsv('ticker,weight_pct,shares,basis_date\nAAPL,60,2,\nCASH,40,,2026-02-30\n', universe)).toEqual({
-      ok: false, error: 'basis_date must be a date in YYYY-MM-DD form', line: 3,
-    })
+  it('imports a legacy export with a basis_date column and ignores it', () => {
+    const legacy = successful('ticker,weight_pct,shares,basis_date\nAAPL,60,2,\nCASH,40,,2026-01-02\n')
+    const current = successful('ticker,weight_pct,shares\nAAPL,60,2\nCASH,40,\n')
+    expect('basisDate' in legacy.seed).toBe(false)
+    expect(legacy.seed.rows).toEqual(current.seed.rows)
+    expect(legacy.seed.cash).toBe(current.seed.cash)
   })
 
-  it('ignores a basis date on a position row', () => {
-    expect(successful('ticker,weight_pct,shares,basis_date\nAAPL,60,2,not-a-date\nCASH,40,,\n').seed.basisDate).toBeUndefined()
+  it('imports a legacy export whose basis_date is malformed', () => {
+    expect(successful('ticker,weight_pct,shares,basis_date\nAAPL,60,2,\nCASH,40,,2026-02-30\n').seed.cash).toBe('40')
   })
 
   it('equal-weights ticker-only files over all survivors', () => {

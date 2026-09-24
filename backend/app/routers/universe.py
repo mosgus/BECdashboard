@@ -29,7 +29,7 @@ from app.schemas import (
     UniverseEntry,
 )
 from app.strip import build_strip_response
-from app.returns import base_close_on_or_after, bar_window_start, nth_prior_close, pct_return, ytd_base_close
+from app.returns import bar_window_start, nth_prior_close, pct_return, ytd_base_close
 from app.models import PriceBar
 from app.indicators import (
     compute_adx,
@@ -147,7 +147,7 @@ def get_strip(background_tasks: BackgroundTasks) -> dict:
 
 
 @router.get("/returns", response_model=ReturnsResponse)
-def get_returns(tickers: str = "", since: str = "") -> dict:
+def get_returns(tickers: str = "") -> dict:
     _require_database()
     requested = list(dict.fromkeys(ticker.strip().upper() for ticker in tickers.split(",") if ticker.strip()))
     if not requested:
@@ -155,17 +155,8 @@ def get_returns(tickers: str = "", since: str = "") -> dict:
     if len(requested) > 100:
         raise HTTPException(status_code=400, detail="At most 100 tickers may be requested")
 
-    since_date: date | None = None
-    if since:
-        try:
-            since_date = date.fromisoformat(since)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail="since must be a date in YYYY-MM-DD form") from exc
-
     today = datetime.now(ZoneInfo("America/New_York")).date()
     window_start = bar_window_start(today, today.year)
-    if since_date is not None:
-        window_start = min(window_start, since_date)
     with session() as db:
         bar_rows = db.execute(
             select(PriceBar.ticker, PriceBar.date, PriceBar.adj_close)
@@ -186,18 +177,12 @@ def get_returns(tickers: str = "", since: str = "") -> dict:
     for ticker in requested:
         bars = bars_by_ticker.get(ticker, [])
         latest = bars[-1][1] if bars else None
-        since_base = (
-            base_close_on_or_after(bars, since_date)
-            if since_date is not None and bars and since_date >= bars[0][0]
-            else None
-        )
         returns.append(
             {
                 "ticker": ticker,
                 "five_day": pct_return(latest, nth_prior_close(bars, 5)),
                 "thirty_day": pct_return(latest, nth_prior_close(bars, 30)),
                 "ytd": pct_return(latest, ytd_base_close(bars, today.year)),
-                "since": pct_return(latest, since_base),
             }
         )
 

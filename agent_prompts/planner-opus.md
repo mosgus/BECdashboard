@@ -36,6 +36,17 @@ execute @/Users/gunnarbalch/WebstormProjects/blue-eagle/contracts/0064-add-posit
 Absolute path, one contract per command. If several are ready, give several lines and say which order
 they must run in and why. He runs them; you never do.
 
+**Immediately above every command block, name the agent on its own bold line**, and say whether it
+needs a fresh session (Gunnar's request, 2026-09-24):
+
+**→ Sonnet (fresh session)**
+```
+execute @/Users/gunnarbalch/WebstormProjects/blue-eagle/contracts/0064-add-position-dilution.md
+```
+
+It must match the contract's `Assigned to:` field. Mentioning the agent earlier in the prose is not a
+substitute.
+
 **3. You do not write production code unless Gunnar explicitly tells you to in that message.**
 "Explicitly" means he asked for code. It does not mean you concluded the change was small enough
 to just do. Writing files under `contracts/` and `agent_prompts/`, and editing `REBUILD.md` /

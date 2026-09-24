@@ -1766,6 +1766,21 @@ contract 0081. Both tables previously greyed the figure whenever `priceChange` r
 - The general shape, which is the part worth keeping: **when you remove a visual encoding, check what
   it was encoding.** Grey looked like styling and was carrying data.
 
+**~~A basis date replaces cost basis~~ — REVERSED 2026-09-24, removed by contract 0095.** Gunnar's
+call. Reasons, recorded so it is not re-added casually:
+- **It could not answer the question it was wanted for.** "Gains since I bought" needs lots (what,
+  when, at what price), which the no-cost-basis decision rules out. What it actually computed was
+  "today's allocation held since X", which is a hypothetical, as the limitation note below says.
+- **That hypothetical is a backtest**, and the Backtest tab will answer it properly, with a curve, a
+  portfolio total and cash included, instead of one number per row. Two places computing
+  return-since-a-date would eventually disagree. That is the 0071/0072 lesson.
+- **The `basis_date` CSV column got more expensive to remove with every export.** Removal keeps
+  compatibility: stored `basisDate` keys are stripped on read, and old CSVs import with the column
+  ignored.
+- Accepted cost: until Backtest ships, the app has no "since date X" answer at all.
+
+Original entry, kept for the reasoning:
+
 **A basis date replaces cost basis: per-portfolio, percentage only.** Gunnar's idea and call,
 2026-09-22, contract 0079. The user names one date; the app reports return since that date's close,
 from stored bars.

@@ -12,7 +12,7 @@ function storedPortfolio(cashWeight: number): Portfolio {
   }
 }
 
-function stubStorage(portfolios: Portfolio[]): { setItem: ReturnType<typeof vi.fn> } {
+function stubStorage(portfolios: unknown[]): { setItem: ReturnType<typeof vi.fn> } {
   const setItem = vi.fn()
   vi.stubGlobal('localStorage', {
     getItem: vi.fn((key: string) => key === PORTFOLIO_STORAGE_KEY ? JSON.stringify(portfolios) : null),
@@ -37,8 +37,27 @@ describe('listPortfolios', () => {
     expect(listPortfolios()).toEqual([])
   })
 
-  it('persists a valid basis date when saving and reading', () => {
-    let stored = '[]'
+  it('strips a legacy basisDate on read', () => {
+    stubStorage([{ ...storedPortfolio(0), basisDate: '2026-01-02' }])
+
+    const result = listPortfolios()
+    expect(result).toHaveLength(1)
+    expect('basisDate' in result[0]).toBe(false)
+  })
+
+  it('loads a portfolio whose legacy basisDate is malformed', () => {
+    stubStorage([{ ...storedPortfolio(0), basisDate: 'not-a-date' }])
+
+    const result = listPortfolios()
+    expect(result).toHaveLength(1)
+    expect('basisDate' in result[0]).toBe(false)
+  })
+
+  it('does not re-save a legacy basisDate on a sibling', () => {
+    let stored = JSON.stringify([
+      { ...storedPortfolio(0), id: 'first', basisDate: '2026-01-02' },
+      { ...storedPortfolio(0), id: 'second', basisDate: '2026-01-02' },
+    ])
     vi.stubGlobal('localStorage', {
       getItem: vi.fn(() => stored),
       setItem: vi.fn((_key: string, value: string) => {
@@ -46,15 +65,7 @@ describe('listPortfolios', () => {
       }),
     })
 
-    savePortfolio({ ...storedPortfolio(0), basisDate: '2026-01-02' })
-    expect(listPortfolios()).toMatchObject([{ basisDate: '2026-01-02' }])
-  })
-
-  it('rejects malformed stored basis dates while accepting portfolios without one', () => {
-    stubStorage([{ ...storedPortfolio(0), basisDate: 'not-a-date' }])
-    expect(listPortfolios()).toEqual([])
-
-    stubStorage([storedPortfolio(0)])
-    expect(listPortfolios()).toEqual([storedPortfolio(0)])
+    savePortfolio({ ...storedPortfolio(0), id: 'first' })
+    expect(JSON.parse(stored).every((portfolio: Record<string, unknown>) => !('basisDate' in portfolio))).toBe(true)
   })
 })

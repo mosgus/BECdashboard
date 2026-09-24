@@ -102,7 +102,6 @@ export interface TickerReturns {
   five_day: number | null
   thirty_day: number | null
   ytd: number | null
-  since: number | null
 }
 
 export interface ReturnsResponse {
@@ -296,10 +295,9 @@ export async function getStrip(): Promise<StripResponse> {
   return request<StripResponse>('/universe/strip')
 }
 
-export async function getReturns(tickers: string[], since?: string): Promise<ReturnsResponse> {
+export async function getReturns(tickers: string[]): Promise<ReturnsResponse> {
   if (tickers.length === 0) return { returns: [], as_of: null }
   const query = new URLSearchParams({ tickers: tickers.join(',') })
-  if (typeof since === 'string' && since !== '') query.set('since', since)
   return request<ReturnsResponse>(`/universe/returns?${query}`)
 }
 

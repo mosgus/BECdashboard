@@ -12,8 +12,6 @@ export interface Portfolio {
   cashWeight: number
   positions: Position[]
   updatedAt: string
-  /** ISO calendar date (YYYY-MM-DD) selected as the portfolio return basis. */
-  basisDate?: string
 }
 
 export interface LegacyPosition {
@@ -58,14 +56,6 @@ function isFinitePositive(value: unknown): value is number {
 
 function isFiniteNonNegative(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0
-}
-
-/** Whether a value is an actual ISO calendar date in YYYY-MM-DD form. */
-export function isValidBasisDate(value: unknown): value is string {
-  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false
-
-  const date = new Date(`${value}T00:00:00.000Z`)
-  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value
 }
 
 /** Residue below this is float noise, not an allocation. Symmetric. */
@@ -201,7 +191,6 @@ function isValidCurrentPortfolio(value: unknown): value is Portfolio {
     typeof candidate.cashWeight !== 'number' ||
     !Number.isFinite(candidate.cashWeight) ||
     candidate.cashWeight < 0 ||
-    (candidate.basisDate !== undefined && !isValidBasisDate(candidate.basisDate)) ||
     !Array.isArray(candidate.positions) ||
     !candidate.positions.every(isValidCurrentPosition) ||
     typeof candidate.updatedAt !== 'string'
@@ -277,7 +266,6 @@ export function addPositionDiluting(portfolio: Portfolio, position: Position): P
     cashWeight,
     positions,
     updatedAt: portfolio.updatedAt,
-    basisDate: portfolio.basisDate,
   }
 }
 
@@ -297,7 +285,6 @@ export function removePositionToCash(portfolio: Portfolio, ticker: string): Port
     cashWeight,
     positions,
     updatedAt: portfolio.updatedAt,
-    basisDate: portfolio.basisDate,
   }
 }
 
