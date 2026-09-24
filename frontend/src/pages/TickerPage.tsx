@@ -138,7 +138,7 @@ export function TickerPage(): JSX.Element {
       ) : (
         <>
           <section className="bg-brand-surface border border-brand-border rounded-[var(--radius-card)] p-4">
-            <div className="flex flex-wrap items-start gap-x-8 gap-y-4 pb-4 mb-4 border-b border-brand-border">
+            <div className="flex flex-col items-start gap-y-4 pb-4 mb-4 border-b border-brand-border">
               <div className="flex flex-wrap gap-4">
                 <label className="text-xs font-medium text-[var(--color-muted)]">
                   Start
