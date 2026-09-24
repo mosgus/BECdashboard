@@ -137,53 +137,53 @@ export function TickerPage(): JSX.Element {
         </div>
       ) : (
         <>
-          <section className="bg-brand-surface border border-brand-border rounded-[var(--radius-card)] p-4 flex flex-wrap gap-4">
-            <label className="text-xs font-medium text-[var(--color-muted)]">
-              Start
-              <Tooltip label="Limit the chart to this date range">
-                <input
-                  type="date"
-                  value={start}
-                  onChange={(event) => setStart(event.target.value)}
-                  className="block mt-1 text-sm px-3 py-2 rounded-[var(--radius-btn)] border border-brand-border bg-brand-surface text-foreground"
-                />
-              </Tooltip>
-            </label>
-            <label className="text-xs font-medium text-[var(--color-muted)]">
-              End
-              <Tooltip label="Limit the chart to this date range">
-                <input
-                  type="date"
-                  value={end}
-                  onChange={(event) => setEnd(event.target.value)}
-                  className="block mt-1 text-sm px-3 py-2 rounded-[var(--radius-btn)] border border-brand-border bg-brand-surface text-foreground"
-                />
-              </Tooltip>
-            </label>
-          </section>
-
           <section className="bg-brand-surface border border-brand-border rounded-[var(--radius-card)] p-4">
-            <Tooltip label="Draw this indicator on the chart">
-              <span className="text-xs font-medium text-[var(--color-muted)]">Indicators</span>
-            </Tooltip>
-            <div className="flex flex-wrap gap-x-4 gap-y-2 mt-2">
-              {INDICATOR_GROUPS.map((group) => (
-                <Tooltip key={group.key} label={INDICATOR_TOOLTIPS[group.key] ?? 'Draw this indicator on the chart'}>
-                  <label className="inline-flex items-center gap-2 text-sm cursor-pointer">
+            <div className="flex flex-wrap items-start gap-x-8 gap-y-4 pb-4 mb-4 border-b border-brand-border">
+              <div className="flex flex-wrap gap-4">
+                <label className="text-xs font-medium text-[var(--color-muted)]">
+                  Start
+                  <Tooltip label="Limit the chart to this date range">
                     <input
-                      type="checkbox"
-                      checked={enabledIndicators.has(group.key)}
-                      onChange={() => toggleIndicator(group.key)}
-                      className="accent-[var(--color-primary)]"
+                      type="date"
+                      value={start}
+                      onChange={(event) => setStart(event.target.value)}
+                      className="block mt-1 text-sm px-3 py-2 rounded-[var(--radius-btn)] border border-brand-border bg-brand-surface text-foreground"
                     />
-                    {group.label}
-                  </label>
+                  </Tooltip>
+                </label>
+                <label className="text-xs font-medium text-[var(--color-muted)]">
+                  End
+                  <Tooltip label="Limit the chart to this date range">
+                    <input
+                      type="date"
+                      value={end}
+                      onChange={(event) => setEnd(event.target.value)}
+                      className="block mt-1 text-sm px-3 py-2 rounded-[var(--radius-btn)] border border-brand-border bg-brand-surface text-foreground"
+                    />
+                  </Tooltip>
+                </label>
+              </div>
+              <div className="flex-1 min-w-64">
+                <Tooltip label="Draw this indicator on the chart">
+                  <span className="text-xs font-medium text-[var(--color-muted)]">Indicators</span>
                 </Tooltip>
-              ))}
+                <div className="flex flex-wrap gap-x-4 gap-y-2 mt-2">
+                  {INDICATOR_GROUPS.map((group) => (
+                    <Tooltip key={group.key} label={INDICATOR_TOOLTIPS[group.key] ?? 'Draw this indicator on the chart'}>
+                      <label className="inline-flex items-center gap-2 text-sm cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={enabledIndicators.has(group.key)}
+                          onChange={() => toggleIndicator(group.key)}
+                          className="accent-[var(--color-primary)]"
+                        />
+                        {group.label}
+                      </label>
+                    </Tooltip>
+                  ))}
+                </div>
+              </div>
             </div>
-          </section>
-
-          <section className="bg-brand-surface border border-brand-border rounded-[var(--radius-card)] p-4">
             {history.status === 'loading' && <p className="h-[22rem] flex items-center justify-center text-sm text-[var(--color-muted)]">Loading chart…</p>}
             {history.status === 'ready' && chartPoints.length === 0 && <p className="h-[22rem] flex items-center justify-center text-sm text-[var(--color-muted)]">No stored data in this date range.</p>}
             {history.status === 'ready' && chartPoints.length > 0 && (

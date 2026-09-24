@@ -1,4 +1,26 @@
+import { priceChange } from './change'
+import type { ChangeDirection } from './change'
+
 export const MAX_CHART_POINTS = 400
+
+export interface RangeReturn {
+  label: string
+  direction: ChangeDirection
+  from: string
+  to: string
+}
+
+/** Return from the first to the last point, or null when it cannot be computed. */
+export function rangeReturn(points: ReadonlyArray<{ date: string; value: number }>): RangeReturn | null {
+  if (points.length < 2) return null
+
+  const first = points[0]
+  const last = points[points.length - 1]
+  const change = priceChange(last.value, first.value)
+  if (change.percent === null) return null
+
+  return { label: change.label, direction: change.direction, from: first.date, to: last.date }
+}
 
 export function downsample<T>(rows: T[], maxPoints = MAX_CHART_POINTS): T[] {
   if (rows.length <= maxPoints) return rows

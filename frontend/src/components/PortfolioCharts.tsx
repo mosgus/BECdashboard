@@ -77,37 +77,37 @@ export function PortfolioCharts({ portfolio }: { portfolio: Portfolio }): JSX.El
 
   return (
     <div className="space-y-5 mt-5">
-      <section className="bg-brand-surface border border-brand-border rounded-[var(--radius-card)] p-4 flex flex-wrap gap-4">
-        <label className="text-xs font-medium text-[var(--color-muted)]">
-          Start
-          <Tooltip label="Limit the chart to this date range. Before a holding's first stored price, it is held flat.">
-            <input type="date" value={start ?? effectiveStart} min={data.dates[0]} max={effectiveEnd} onChange={(event) => setStart(event.target.value)} className="block mt-1 text-sm px-3 py-2 rounded-[var(--radius-btn)] border border-brand-border bg-brand-surface text-foreground" />
-          </Tooltip>
-        </label>
-        <label className="text-xs font-medium text-[var(--color-muted)]">
-          End
-          <Tooltip label="Limit the chart to this date range">
-            <input type="date" value={end ?? effectiveEnd} min={effectiveStart} max={data.dates.at(-1)} onChange={(event) => setEnd(event.target.value)} className="block mt-1 text-sm px-3 py-2 rounded-[var(--radius-btn)] border border-brand-border bg-brand-surface text-foreground" />
-          </Tooltip>
-        </label>
-      </section>
-
       <section className="bg-brand-surface border border-brand-border rounded-[var(--radius-card)] p-4">
-        <span className="text-xs font-medium text-[var(--color-muted)]">Indicators</span>
-        <div className="flex flex-wrap gap-x-4 gap-y-2 mt-2">
-          {INDICATOR_GROUPS.filter((group) => (PORTFOLIO_INDICATOR_KEYS as readonly string[]).includes(group.key)).map((group) => (
-            <Tooltip key={group.key} label="Draw this indicator on the chart">
-              <label className="inline-flex items-center gap-2 text-sm cursor-pointer">
-                <input type="checkbox" checked={enabledIndicators.has(group.key)} onChange={() => toggleIndicator(group.key)} className="accent-[var(--color-primary)]" />
-                {group.label}
-              </label>
-            </Tooltip>
-          ))}
+        <div className="flex flex-wrap items-start gap-x-8 gap-y-4 pb-4 mb-4 border-b border-brand-border">
+          <div className="flex flex-wrap gap-4">
+            <label className="text-xs font-medium text-[var(--color-muted)]">
+              Start
+              <Tooltip label="Limit the chart to this date range. Before a holding's first stored price, it is held flat.">
+                <input type="date" value={start ?? effectiveStart} min={data.dates[0]} max={effectiveEnd} onChange={(event) => setStart(event.target.value)} className="block mt-1 text-sm px-3 py-2 rounded-[var(--radius-btn)] border border-brand-border bg-brand-surface text-foreground" />
+              </Tooltip>
+            </label>
+            <label className="text-xs font-medium text-[var(--color-muted)]">
+              End
+              <Tooltip label="Limit the chart to this date range">
+                <input type="date" value={end ?? effectiveEnd} min={effectiveStart} max={data.dates.at(-1)} onChange={(event) => setEnd(event.target.value)} className="block mt-1 text-sm px-3 py-2 rounded-[var(--radius-btn)] border border-brand-border bg-brand-surface text-foreground" />
+              </Tooltip>
+            </label>
+          </div>
+          <div className="flex-1 min-w-64">
+            <span className="text-xs font-medium text-[var(--color-muted)]">Indicators</span>
+            <div className="flex flex-wrap gap-x-4 gap-y-2 mt-2">
+              {INDICATOR_GROUPS.filter((group) => (PORTFOLIO_INDICATOR_KEYS as readonly string[]).includes(group.key)).map((group) => (
+                <Tooltip key={group.key} label="Draw this indicator on the chart">
+                  <label className="inline-flex items-center gap-2 text-sm cursor-pointer">
+                    <input type="checkbox" checked={enabledIndicators.has(group.key)} onChange={() => toggleIndicator(group.key)} className="accent-[var(--color-primary)]" />
+                    {group.label}
+                  </label>
+                </Tooltip>
+              ))}
+            </div>
+            <p className="text-xs text-[var(--color-muted)] mt-3">ATR, Donchian, ADX, Stochastic and OBV need a single security's high, low or volume, so they aren't drawn for a portfolio.</p>
+          </div>
         </div>
-        <p className="text-xs text-[var(--color-muted)] mt-3">ATR, Donchian, ADX, Stochastic and OBV need a single security's high, low or volume, so they aren't drawn for a portfolio.</p>
-      </section>
-
-      <section className="bg-brand-surface border border-brand-border rounded-[var(--radius-card)] p-4">
         {points.length === 0 ? <p className="h-[22rem] flex items-center justify-center text-sm text-[var(--color-muted)]">No stored data in this date range.</p> : (
           <>
             <div className="text-xs text-[var(--color-muted)] mb-3">

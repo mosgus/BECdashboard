@@ -1,5 +1,43 @@
 import { describe, expect, it } from 'vitest'
-import { downsample, priceDomain, snapRange } from './chart'
+import { downsample, priceDomain, rangeReturn, snapRange } from './chart'
+
+describe('rangeReturn', () => {
+  it('returns the signed change and dates from the first to last point', () => {
+    expect(rangeReturn([
+      { date: '2024-01-02', value: 100 },
+      { date: '2024-01-03', value: 105 },
+      { date: '2024-01-04', value: 110 },
+    ])).toEqual({
+      label: '+10.00%',
+      direction: 'up',
+      from: '2024-01-02',
+      to: '2024-01-04',
+    })
+  })
+
+  it('returns a down direction for a negative change', () => {
+    expect(rangeReturn([
+      { date: '2024-01-02', value: 100 },
+      { date: '2024-01-03', value: 90 },
+    ])).toMatchObject({ label: '-10.00%', direction: 'down' })
+  })
+
+  it('returns flat for a change that rounds to zero', () => {
+    expect(rangeReturn([
+      { date: '2024-01-02', value: 100 },
+      { date: '2024-01-03', value: 100.004 },
+    ])).toMatchObject({ label: '0.00%', direction: 'flat' })
+  })
+
+  it('returns null with fewer than two points or a zero first value', () => {
+    expect(rangeReturn([{ date: '2024-01-02', value: 100 }])).toBeNull()
+    expect(rangeReturn([])).toBeNull()
+    expect(rangeReturn([
+      { date: '2024-01-02', value: 0 },
+      { date: '2024-01-03', value: 100 },
+    ])).toBeNull()
+  })
+})
 
 describe('downsample', () => {
   it('returns short input by reference', () => {

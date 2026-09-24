@@ -220,7 +220,7 @@ export function HoldingsPage(): JSX.Element {
           </table>
         </div>
       </div>
-      <PortfolioCharts portfolio={current} />
+      <PortfolioCharts key={current.id} portfolio={current} />
     </div>
   )
 }

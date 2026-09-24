@@ -1,9 +1,11 @@
 import type { JSX } from 'react'
 import { Area, Bar, CartesianGrid, ComposedChart, Legend, Line, ReferenceArea, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import type { IndicatorsResponse } from '../api/client'
-import { downsample, priceDomain, snapRange } from '../lib/chart'
+import { downsample, priceDomain, rangeReturn, snapRange } from '../lib/chart'
+import type { ChangeDirection } from '../lib/change'
 import type { ShadedRange } from '../lib/chart'
 import { formatPrice } from '../lib/format'
+import { Tooltip as HoverTooltip } from './Tooltip'
 
 export interface SeriesPoint {
   date: string
@@ -31,6 +33,12 @@ interface ChartPoint {
   date: string
   value: number
   [key: string]: string | number | number[] | null
+}
+
+const RETURN_COLOR: Record<ChangeDirection, string> = {
+  up: 'text-brand-positive',
+  down: 'text-brand-negative',
+  flat: 'text-[var(--color-muted)]',
 }
 
 function ChartTooltip({ active, label, payload, format }: ChartTooltipProps): JSX.Element | null {
@@ -109,6 +117,7 @@ export default function SeriesChart({ title, valueName, points, indicators, form
     return point
   })
   const renderedData = downsample(chartData)
+  const netReturn = rangeReturn(points)
   const shadedRange = shaded === undefined ? null : snapRange(renderedData.map((row) => row.date), shaded.from, shaded.to)
   const priceYDomain = priceDomain(renderedData)
   const showAdxPane = seriesByKey.has('adx')
@@ -118,7 +127,17 @@ export default function SeriesChart({ title, valueName, points, indicators, form
   return (
     <div className="space-y-4">
       <div>
-        <h3 className="mb-2 text-sm font-semibold">{title}</h3>
+        <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
+          <h3 className="text-sm font-semibold">{title}</h3>
+          {netReturn !== null && (
+            <HoverTooltip label="Change in the line from the first to the last date shown. Uses adjusted closes, so dividends are included. No fees or taxes.">
+              <span className="text-xs text-[var(--color-muted)]">
+                Net return{' '}
+                <span className={`text-sm font-semibold tabular-nums ${RETURN_COLOR[netReturn.direction]}`}>{netReturn.label}</span>
+              </span>
+            </HoverTooltip>
+          )}
+        </div>
         <div className="h-[22rem]">
           <ResponsiveContainer width="100%" height="100%">
             <ComposedChart data={renderedData} margin={{ top: 8, right: 8, bottom: 4, left: 0 }}>
