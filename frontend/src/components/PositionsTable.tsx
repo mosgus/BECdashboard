@@ -51,7 +51,7 @@ export function PositionsTable({ valued, onRemove }: PositionsTableProps): JSX.E
                 </td>
               </tr>
             ))}
-            <tr>
+            <tr className="bg-brand-positive/10">
               <td className={`${TD} whitespace-nowrap`}>Cash</td>
               <td className={TD} />
               <td className={TD} />
