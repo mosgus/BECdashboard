@@ -191,34 +191,30 @@ export function OptimizePage(): JSX.Element | null {
               <label className="mb-1 block text-xs font-medium text-[var(--color-muted)]">
                 {settings.allowShort ? `Max abs. weight: ${settings.maxWeightPct}%` : `Max weight: ${settings.maxWeightPct}%`}
               </label>
-              <Tooltip dismissOnPointerDown block label={settings.allowShort ? "Cap on any one holding's absolute weight, long or short" : "Cap on any one holding's share of the invested holdings"}>
-                <input
-                  type="range"
-                  min={10}
-                  max={100}
-                  step={5}
-                  value={settings.maxWeightPct}
-                  onChange={(event) => setSettings({ ...settings, maxWeightPct: Number(event.target.value) })}
-                  className="w-full accent-[var(--color-primary)]"
-                />
-              </Tooltip>
+              <input
+                type="range"
+                min={10}
+                max={100}
+                step={5}
+                value={settings.maxWeightPct}
+                onChange={(event) => setSettings({ ...settings, maxWeightPct: Number(event.target.value) })}
+                className="w-full accent-[var(--color-primary)]"
+              />
             </div>
             <div>
               <label className="mb-1 block text-xs font-medium text-[var(--color-muted)]">
                 Min weight: {settings.minWeightPct}%
               </label>
-              <Tooltip dismissOnPointerDown block label={settings.allowShort ? 'Not used while short positions are allowed' : "Floor on every holding's weight. Min weight × number of holdings must stay at or below 100%."}>
-                <input
-                  type="range"
-                  min={0}
-                  max={20}
-                  step={1}
-                  disabled={settings.allowShort}
-                  value={settings.minWeightPct}
-                  onChange={(event) => setSettings({ ...settings, minWeightPct: Number(event.target.value) })}
-                  className="w-full accent-[var(--color-primary)]"
-                />
-              </Tooltip>
+              <input
+                type="range"
+                min={0}
+                max={20}
+                step={1}
+                disabled={settings.allowShort}
+                value={settings.minWeightPct}
+                onChange={(event) => setSettings({ ...settings, minWeightPct: Number(event.target.value) })}
+                className="w-full accent-[var(--color-primary)]"
+              />
             </div>
 
             {settings.mode === 'target_volatility' && (
