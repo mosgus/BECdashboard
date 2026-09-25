@@ -70,9 +70,9 @@ export function PortfoliosPage(): JSX.Element {
   useEffect(() => {
     setCashText(current === null ? '' : String(current.cashWeight))
     setCashProblem(null)
-    // The editor owns its text between keystrokes; reseed only when the selected portfolio changes.
+    // The editor owns its text between keystrokes; reseed when the selected portfolio or its cash changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [current?.id])
+  }, [current?.id, current?.cashWeight])
 
   function persist(next: Portfolio): void {
     savePortfolio(next)
