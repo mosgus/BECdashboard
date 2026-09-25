@@ -148,3 +148,38 @@ def test_min_variance_shorting_bounds_and_sum():
     # On this fixture the unconstrained optimum is still long-only; only bounds and sum are contractual.
     assert sum(weights.values()) == pytest.approx(1, abs=1e-6)
     assert all(-1 - 1e-6 <= weight <= 1 + 1e-6 for weight in weights.values())
+
+
+def test_sortino_uses_all_days_and_downside_loss_size():
+    returns = pd.DataFrame({"small_loss": [.02, -.01] * 100, "large_loss": [.03, -.02] * 100})
+    rf = .0427
+    weights = optimize_max_sortino(returns, rf=rf)
+    port = returns.values @ np.array([1.0, 0.0])
+    hand_sortino = (float(port.mean()) * 252 - rf) / (np.sqrt(np.mean(np.minimum(port - rf / 252, 0.0) ** 2)) * np.sqrt(252))
+    assert hand_sortino == pytest.approx(10.67, abs=.01)
+    assert weights["small_loss"] > .99
+
+
+def test_short_cap_limits_total_short_exposure():
+    rng = np.random.default_rng(12)
+    common = rng.normal(0, .03, 1000)
+    returns = pd.DataFrame({
+        "A": common,
+        "B": .9 * common + rng.normal(0, .005, 1000),
+        "C": .9 * common + rng.normal(0, .005, 1000),
+    })
+    uncapped = optimize_min_variance(returns, min_weight=-1, max_weight=1)
+    capped = optimize_min_variance(returns, min_weight=-1, max_weight=1, max_short=.20)
+    assert sum(max(-weight, 0) for weight in uncapped.values()) > .20
+    assert sum(max(-weight, 0) for weight in capped.values()) <= .20 + 1e-6
+    assert sum(capped.values()) == pytest.approx(1, abs=1e-6)
+
+
+def test_risk_parity_and_max_diversification_honor_min_weight():
+    rng = np.random.default_rng(11)
+    returns = pd.DataFrame(rng.normal(0, [.01, .02, .04], size=(500, 3)), columns=["A", "B", "C"])
+    for optimizer in (optimize_risk_parity, optimize_max_diversification):
+        unfloored = optimizer(returns)
+        floored = optimizer(returns, min_weight=.3)
+        assert min(unfloored.values()) < .3
+        assert all(weight >= .3 - 1e-6 for weight in floored.values())

@@ -155,8 +155,9 @@ def optimize_portfolio(body: OptimizeRequest) -> dict:
             dict(zip(tickers, weights, strict=True)), closes, benchmark,
             mode=body.mode, lookback_days=body.lookback_days, max_weight=body.max_weight,
             min_weight=body.min_weight, vol_target=body.vol_target, allow_short=body.allow_short,
+            max_short=body.max_short,
             conviction_views=conviction_views, kappa=body.kappa, rebalance=body.rebalance,
-            **({"rf": fetch_risk_free_rate()} if body.mode == "max_sharpe_capm" else {}),
+            rf=fetch_risk_free_rate(),
         )
     except OptimizeInputError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -179,6 +180,7 @@ def optimize_portfolio(body: OptimizeRequest) -> dict:
         "lookback_days": result.lookback_days,
         "views_applied": result.views_applied,
         "delta_mu": result.delta_mu,
+        "rf": result.rf,
         "warnings": result.warnings,
     }
 
@@ -210,6 +212,7 @@ def tilt_portfolio(body: TiltRequest) -> dict:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
     else:
         raise HTTPException(status_code=422, detail=f"Unknown tilt baseline: {body.baseline}")
+    # FLAG(custom): see compute_tilt. The "optimizer" baseline calls optimize_max_sharpe without rf (rf = 0).
     tilt_weights = compute_tilt(base_weights, conviction, lam=body.lam, u0=body.u0)
     return {
         "tilt_weights": tilt_weights,

@@ -149,6 +149,7 @@ class OptimizeRequest(BaseModel):
     min_weight: float = 0.0
     vol_target: float = 0.10
     allow_short: bool = False
+    max_short: float = 0.30
     conviction_views: dict[str, float] | None = None
     kappa: float = 0.05
     rebalance: str = "none"
@@ -198,6 +199,7 @@ class OptimizeResponse(BaseModel):
     lookback_days: int
     views_applied: bool
     delta_mu: dict[str, float]
+    rf: float
     warnings: list[str]
 
 

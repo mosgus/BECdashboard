@@ -318,6 +318,7 @@ export interface OptimizeRequest {
   min_weight: number
   vol_target: number
   allow_short: boolean
+  max_short: number
   rebalance: OptimizeRebalance
   conviction_views?: Record<string, number>
   kappa?: number
@@ -362,6 +363,7 @@ export interface OptimizeResponse {
   lookback_days: number
   views_applied: boolean
   delta_mu: Record<string, number>
+  rf: number
   warnings: string[]
 }
 

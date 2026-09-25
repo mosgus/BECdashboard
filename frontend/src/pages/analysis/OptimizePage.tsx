@@ -255,7 +255,7 @@ export function OptimizePage(): JSX.Element | null {
               </Tooltip>
             </div>
 
-            <Tooltip block label="Let weights go negative. Equal Weight, Risk Parity and Max Diversification stay long-only.">
+            <Tooltip block label="Let weights go negative, up to the Max total short cap. Equal Weight, Risk Parity and Max Diversification stay long-only.">
               <label className="inline-flex items-center gap-2 text-sm cursor-pointer">
                 <input
                   type="checkbox"
@@ -266,6 +266,23 @@ export function OptimizePage(): JSX.Element | null {
                 Allow short positions
               </label>
             </Tooltip>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-[var(--color-muted)]">
+                Max total short: {settings.maxShortPct}%
+              </label>
+              <Tooltip dismissOnPointerDown block label={settings.allowShort ? 'Cap on the combined size of all short positions, as a share of the portfolio. 30% allows up to 130% long / 30% short.' : 'Only used when short positions are allowed'}>
+                <input
+                  type="range"
+                  min={0}
+                  max={100}
+                  step={5}
+                  disabled={!settings.allowShort}
+                  value={settings.maxShortPct}
+                  onChange={(event) => setSettings({ ...settings, maxShortPct: Number(event.target.value) })}
+                  className="w-full accent-[var(--color-primary)]"
+                />
+              </Tooltip>
+            </div>
           </div>
         </div>
 
@@ -431,11 +448,11 @@ function OptimizeResults({
         <div className="space-y-4">
           <div>
             <p className="text-xs font-medium text-[var(--color-muted)] mb-2">Current</p>
-            <MetricTiles items={metricItems(response.metrics.current)} />
+            <MetricTiles items={metricItems(response.metrics.current, response.rf)} />
           </div>
           <div>
             <p className="text-xs font-medium text-[var(--color-muted)] mb-2">Optimized ({modeLabel(response.mode)})</p>
-            <MetricTiles items={metricItems(response.metrics.optimized)} />
+            <MetricTiles items={metricItems(response.metrics.optimized, response.rf)} />
           </div>
         </div>
       </div>

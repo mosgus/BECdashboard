@@ -2,11 +2,11 @@
 
 Nine optimization modes:
   - equal_weight        : 1/N — simplest baseline
-  - min_variance        : minimize portfolio variance (long-only, fully invested)
+  - min_variance        : minimize portfolio variance (fully invested; long-only unless shorting is enabled)
   - max_sharpe          : historical returns-based max Sharpe (SLSQP)
   - max_sharpe_capm     : CAPM expected returns + analyst views, per-asset bounds
   - risk_parity         : equal risk contribution (ERC) portfolio
-  - max_sortino         : maximise Sortino ratio (return / downside vol)
+  - max_sortino         : maximise Sortino ratio (excess return / downside deviation below rf)
   - min_cvar            : minimise CVaR at 95% confidence (Expected Shortfall)
   - max_diversification : maximise diversification ratio (w·σ_i / σ_p)
   - target_volatility   : maximise return subject to portfolio vol ≤ vol_target
@@ -114,6 +114,10 @@ def compute_forward_looking_metrics(
     return {"expected_return": round(portfolio_return, 6), "vol": round(portfolio_vol, 6), "sharpe": round(portfolio_sharpe, 6)}
 
 
+# FLAG(custom): the `mrp * view` term is not part of CAPM or Black-Litterman. It adds a flat
+# return bump per unit of conviction (view 0.20 → +1.0% at mrp 5%). Ported unchanged from main;
+# intent to be confirmed with its author before changing. run_optimize adds a second κ bump on
+# top of this in max_sharpe_capm mode — see the FLAG there.
 def compute_capm_expected_returns(
     betas: dict[str, float], rf: float = 0.04, mrp: float = 0.05, views: Optional[dict[str, float]] = None
 ) -> dict[str, float]:
@@ -131,30 +135,39 @@ def _neg_sharpe_hist(w: np.ndarray, mean_ret: np.ndarray, cov: np.ndarray, rf: f
     return -(ret - rf) / vol if vol > 0 else 0.0
 
 
-def _run_optimizer(objective, n: int, bounds: tuple, *args) -> np.ndarray:
+def _short_cap_constraint(max_short: float | None) -> list[dict]:
+    """Total short exposure Σ max(−wᵢ, 0) ≤ max_short. Empty when there is no cap."""
+    if max_short is None:
+        return []
+    return [{"type": "ineq", "fun": lambda w: max_short - float(np.maximum(-w, 0.0).sum())}]
+
+
+def _run_optimizer(objective, n: int, bounds: tuple, *args, extra_constraints=()) -> np.ndarray:
     x0 = np.ones(n) / n
-    constraints = [{"type": "eq", "fun": lambda w: w.sum() - 1.0}]
+    constraints = [{"type": "eq", "fun": lambda w: w.sum() - 1.0}, *extra_constraints]
     result = minimize(objective, x0, args=args, method="SLSQP", bounds=bounds, constraints=constraints, options={"ftol": 1e-10, "maxiter": 2000})
     if not result.success:
         raise RuntimeError(f"Optimizer did not converge: {result.message}")
     return result.x
 
 
-def optimize_min_variance(returns: pd.DataFrame, max_weight: float = 1.0, min_weight: float = 0.0, asset_bounds: Optional[dict[str, tuple[float, float]]] = None) -> dict[str, float]:
+def optimize_min_variance(returns: pd.DataFrame, max_weight: float = 1.0, min_weight: float = 0.0, asset_bounds: Optional[dict[str, tuple[float, float]]] = None, max_short: float | None = None) -> dict[str, float]:
     cov = returns.cov().values * 252
     tickers = returns.columns.tolist()
     bounds = tuple(asset_bounds.get(t, (min_weight, max_weight)) if asset_bounds else (min_weight, max_weight) for t in tickers)
-    return dict(zip(tickers, _run_optimizer(_port_vol, len(tickers), bounds, cov).tolist()))
+    return dict(zip(tickers, _run_optimizer(_port_vol, len(tickers), bounds, cov, extra_constraints=_short_cap_constraint(max_short)).tolist()))
 
 
-def optimize_max_sharpe(returns: pd.DataFrame, rf: float = 0.0, max_weight: float = 1.0, min_weight: float = 0.0, asset_bounds: Optional[dict[str, tuple[float, float]]] = None) -> dict[str, float]:
+def optimize_max_sharpe(returns: pd.DataFrame, rf: float = 0.0, max_weight: float = 1.0, min_weight: float = 0.0, asset_bounds: Optional[dict[str, tuple[float, float]]] = None, max_short: float | None = None) -> dict[str, float]:
     mean_ret, cov = returns.mean().values, returns.cov().values
     tickers = returns.columns.tolist()
     bounds = tuple(asset_bounds.get(t, (min_weight, max_weight)) if asset_bounds else (min_weight, max_weight) for t in tickers)
-    return dict(zip(tickers, _run_optimizer(_neg_sharpe_hist, len(tickers), bounds, mean_ret, cov, rf).tolist()))
+    return dict(zip(tickers, _run_optimizer(_neg_sharpe_hist, len(tickers), bounds, mean_ret, cov, rf, extra_constraints=_short_cap_constraint(max_short)).tolist()))
 
 
-def optimize_max_sharpe_capm(returns: pd.DataFrame, expected_returns: dict[str, float], rf: float = 0.04, max_weight: float = 1.0, min_weight: float = 0.0, asset_bounds: Optional[dict[str, tuple[float, float]]] = None) -> dict[str, float]:
+# FLAG(custom): the method is standard (max Sharpe on CAPM expected returns). The custom part is
+# the expected-returns input, which carries the view bumps — see compute_capm_expected_returns.
+def optimize_max_sharpe_capm(returns: pd.DataFrame, expected_returns: dict[str, float], rf: float = 0.04, max_weight: float = 1.0, min_weight: float = 0.0, asset_bounds: Optional[dict[str, tuple[float, float]]] = None, max_short: float | None = None) -> dict[str, float]:
     tickers = [t for t in returns.columns if t in expected_returns]
     if not tickers:
         raise RuntimeError("No tickers overlap between returns and expected_returns.")
@@ -171,7 +184,7 @@ def optimize_max_sharpe_capm(returns: pd.DataFrame, expected_returns: dict[str, 
     for i, (lo, _) in enumerate(bounds):
         x0[i] = max(x0[i], lo)
     x0 = x0 / x0.sum()
-    result = minimize(neg_sharpe_capm, x0, method="SLSQP", bounds=bounds, constraints=[{"type": "eq", "fun": lambda w: w.sum() - 1.0}], options={"ftol": 1e-12, "maxiter": 3000})
+    result = minimize(neg_sharpe_capm, x0, method="SLSQP", bounds=bounds, constraints=[{"type": "eq", "fun": lambda w: w.sum() - 1.0}, *_short_cap_constraint(max_short)], options={"ftol": 1e-12, "maxiter": 3000})
     if not result.success:
         raise RuntimeError(f"CAPM optimizer did not converge: {result.message}")
     return dict(zip(tickers, result.x.tolist()))
@@ -182,7 +195,7 @@ def optimize_equal_weight(returns: pd.DataFrame) -> dict[str, float]:
     return {t: 1.0 / len(tickers) for t in tickers}
 
 
-def optimize_risk_parity(returns: pd.DataFrame, max_weight: float = 1.0) -> dict[str, float]:
+def optimize_risk_parity(returns: pd.DataFrame, max_weight: float = 1.0, min_weight: float = 0.0) -> dict[str, float]:
     cov, tickers = returns.cov().values * 252, returns.columns.tolist()
     n = len(tickers)
     def erc_objective(w: np.ndarray) -> float:
@@ -191,53 +204,55 @@ def optimize_risk_parity(returns: pd.DataFrame, max_weight: float = 1.0) -> dict
         rc = w * mrc
         target = port_var / n
         return float(np.sum((rc - target) ** 2))
-    result = minimize(erc_objective, np.ones(n) / n, method="SLSQP", bounds=tuple((1e-6, max_weight) for _ in tickers), constraints=[{"type": "eq", "fun": lambda w: w.sum() - 1.0}], options={"ftol": 1e-12, "maxiter": 3000})
+    result = minimize(erc_objective, np.ones(n) / n, method="SLSQP", bounds=tuple((max(1e-6, min_weight), max_weight) for _ in tickers), constraints=[{"type": "eq", "fun": lambda w: w.sum() - 1.0}], options={"ftol": 1e-12, "maxiter": 3000})
     if not result.success:
         raise RuntimeError(f"Risk parity optimizer did not converge: {result.message}")
     w = result.x / result.x.sum()
     return dict(zip(tickers, w.tolist()))
 
 
-def optimize_max_sortino(returns: pd.DataFrame, rf: float = 0.0, max_weight: float = 1.0, min_weight: float = 0.0) -> dict[str, float]:
-    tickers, mean_ret, ret_matrix = returns.columns.tolist(), returns.mean().values, returns.values
+def optimize_max_sortino(returns: pd.DataFrame, rf: float = 0.0, max_weight: float = 1.0, min_weight: float = 0.0, max_short: float | None = None) -> dict[str, float]:
+    tickers, ret_matrix = returns.columns.tolist(), returns.values
+    mar = rf / 252.0
     def neg_sortino(w: np.ndarray) -> float:
-        port_ann_ret = float(np.dot(w, mean_ret)) * 252
-        downside = (ret_matrix @ w)[(ret_matrix @ w) < 0]
-        if len(downside) < 2:
-            return 0.0
-        dv = float(np.std(downside, ddof=1)) * np.sqrt(252)
-        return -(port_ann_ret - rf) / dv if dv > 0 else 0.0
-    return dict(zip(tickers, _run_optimizer(neg_sortino, len(tickers), tuple((min_weight, max_weight) for _ in tickers)).tolist()))
+        port = ret_matrix @ w
+        excess_ann = float(port.mean()) * 252 - rf
+        downside_dev = float(np.sqrt(np.mean(np.minimum(port - mar, 0.0) ** 2))) * np.sqrt(252)
+        return -excess_ann / max(downside_dev, 1e-12)
+    return dict(zip(tickers, _run_optimizer(neg_sortino, len(tickers), tuple((min_weight, max_weight) for _ in tickers), extra_constraints=_short_cap_constraint(max_short)).tolist()))
 
 
-def optimize_min_cvar(returns: pd.DataFrame, alpha: float = 0.05, max_weight: float = 1.0, min_weight: float = 0.0) -> dict[str, float]:
+def optimize_min_cvar(returns: pd.DataFrame, alpha: float = 0.05, max_weight: float = 1.0, min_weight: float = 0.0, max_short: float | None = None) -> dict[str, float]:
     tickers, ret_matrix = returns.columns.tolist(), returns.values
     def cvar_objective(w: np.ndarray) -> float:
         port_rets = ret_matrix @ w
         tail = port_rets[port_rets <= float(np.percentile(port_rets, alpha * 100))]
         return -float(np.mean(tail)) if len(tail) else 0.0
-    return dict(zip(tickers, _run_optimizer(cvar_objective, len(tickers), tuple((min_weight, max_weight) for _ in tickers)).tolist()))
+    return dict(zip(tickers, _run_optimizer(cvar_objective, len(tickers), tuple((min_weight, max_weight) for _ in tickers), extra_constraints=_short_cap_constraint(max_short)).tolist()))
 
 
-def optimize_max_diversification(returns: pd.DataFrame, max_weight: float = 1.0) -> dict[str, float]:
+def optimize_max_diversification(returns: pd.DataFrame, max_weight: float = 1.0, min_weight: float = 0.0) -> dict[str, float]:
     cov, tickers = returns.cov().values * 252, returns.columns.tolist()
     asset_vols = np.sqrt(np.diag(cov))
     def neg_dr(w: np.ndarray) -> float:
         return -float(np.dot(w, asset_vols)) / float(np.sqrt(max(w @ cov @ w, 1e-12)))
-    return dict(zip(tickers, _run_optimizer(neg_dr, len(tickers), tuple((0.0, max_weight) for _ in tickers)).tolist()))
+    return dict(zip(tickers, _run_optimizer(neg_dr, len(tickers), tuple((max(0.0, min_weight), max_weight) for _ in tickers)).tolist()))
 
 
-def optimize_target_volatility(returns: pd.DataFrame, vol_target: float = 0.10, max_weight: float = 1.0, min_weight: float = 0.0) -> dict[str, float]:
+def optimize_target_volatility(returns: pd.DataFrame, vol_target: float = 0.10, max_weight: float = 1.0, min_weight: float = 0.0, max_short: float | None = None) -> dict[str, float]:
     cov, mean_ret_ann, tickers = returns.cov().values * 252, returns.mean().values * 252, returns.columns.tolist()
     def neg_ret(w: np.ndarray) -> float:
         return -float(np.dot(w, mean_ret_ann))
-    constraints = [{"type": "eq", "fun": lambda w: w.sum() - 1.0}, {"type": "ineq", "fun": lambda w: vol_target - np.sqrt(max(float(w @ cov @ w), 0.0))}]
+    constraints = [{"type": "eq", "fun": lambda w: w.sum() - 1.0}, {"type": "ineq", "fun": lambda w: vol_target - np.sqrt(max(float(w @ cov @ w), 0.0))}, *_short_cap_constraint(max_short)]
     result = minimize(neg_ret, np.ones(len(tickers)) / len(tickers), method="SLSQP", bounds=tuple((min_weight, max_weight) for _ in tickers), constraints=constraints, options={"ftol": 1e-10, "maxiter": 2000})
     if not result.success:
         raise RuntimeError(f"Target-vol optimizer did not converge: {result.message}")
     return dict(zip(tickers, result.x.tolist()))
 
 
+# FLAG(custom): house conviction tilt, not a textbook method. Each weight is multiplied by
+# exp(λ·tanh(view/u0)) and renormalised; u0 = 20 and λ are hand-picked constants. Not used by any
+# Optimize mode; reached only through POST /portfolio/tilt. Ported unchanged from main.
 def compute_tilt(base_weights: dict[str, float], conviction: dict[str, float], lam: float = 1.0, u0: float = 20.0) -> dict[str, float]:
     if not base_weights:
         return {}

@@ -42,12 +42,13 @@ export interface OptimizeSettings {
   minWeightPct: number   // slider 0–20, step 1
   volTargetPct: number   // slider 5–50, step 1
   allowShort: boolean
+  maxShortPct: number   // slider 0–100, step 5
   rebalance: OptimizeRebalance
 }
 
 export const DEFAULT_SETTINGS: OptimizeSettings = {
   mode: 'min_variance', lookbackDays: 365, maxWeightPct: 100, minWeightPct: 0,
-  volTargetPct: 10, allowShort: false, rebalance: 'none',
+  volTargetPct: 10, allowShort: false, maxShortPct: 30, rebalance: 'none',
 }
 
 export interface WeightRow { ticker: string; current: number; target: number; change: number; pinned: boolean }
@@ -170,6 +171,7 @@ export function buildOptimizeRequest(portfolio: Portfolio, settings: OptimizeSet
     min_weight: settings.allowShort ? 0 : settings.minWeightPct / 100,
     vol_target: settings.volTargetPct / 100,
     allow_short: settings.allowShort,
+    max_short: settings.maxShortPct / 100,
     rebalance: settings.rebalance,
   }
 }
@@ -182,6 +184,7 @@ export function sameSettings(a: OptimizeSettings, b: OptimizeSettings): boolean 
     a.minWeightPct === b.minWeightPct &&
     a.volTargetPct === b.volTargetPct &&
     a.allowShort === b.allowShort &&
+    a.maxShortPct === b.maxShortPct &&
     a.rebalance === b.rebalance
   )
 }
@@ -271,8 +274,9 @@ export function curveRows(curves: OptimizeCurves): CurveRow[] {
   return downsample(rows)
 }
 
-export function metricItems(metrics: OptimizeMetrics | null): MetricItem[] {
+export function metricItems(metrics: OptimizeMetrics | null, rf: number): MetricItem[] {
   const m = metrics ?? {}
+  const rfPct = (rf * 100).toFixed(2)
 
   function pct(key: string): string {
     const value = m[key]
@@ -287,7 +291,7 @@ export function metricItems(metrics: OptimizeMetrics | null): MetricItem[] {
   const items: MetricItem[] = [
     { label: 'CAGR', value: pct('cagr'), tooltip: 'Compound annual growth rate of the curve over the scored window' },
     { label: 'Volatility', value: pct('vol'), tooltip: 'Annualised volatility: daily standard deviation of returns × √252' },
-    { label: 'Sharpe', value: ratio('sharpe'), tooltip: 'CAGR ÷ volatility, with the risk-free rate taken as 0. Above 1 is broadly acceptable; above 2 is excellent.' },
+    { label: 'Sharpe', value: ratio('sharpe'), tooltip: `(CAGR − risk-free rate) ÷ volatility. Risk-free rate: 10-year Treasury yield, ${rfPct}% for this run. Above 1 is broadly acceptable; above 2 is excellent.` },
     { label: 'Max drawdown', value: pct('max_dd'), tooltip: 'Largest peak-to-trough fall in the curve' },
   ]
 
@@ -295,7 +299,7 @@ export function metricItems(metrics: OptimizeMetrics | null): MetricItem[] {
     items.push({ label: 'Beta vs SPY', value: ratio('beta'), tooltip: 'How much the curve moves with SPY: 1 moves in step, above 1 amplifies, below 1 dampens' })
   }
   if ('alpha' in m) {
-    items.push({ label: 'Alpha', value: pct('alpha'), tooltip: 'Annualised return above what beta to SPY predicts, with the risk-free rate taken as 0' })
+    items.push({ label: 'Alpha', value: pct('alpha'), tooltip: `Annualised return above what beta to SPY predicts, using the ${rfPct}% risk-free rate` })
   }
 
   return items

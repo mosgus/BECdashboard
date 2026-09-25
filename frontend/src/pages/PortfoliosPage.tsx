@@ -233,21 +233,23 @@ export function PortfoliosPage(): JSX.Element {
                   <>
                     <div className={CARD}>
                       <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
-                        <Tooltip label="Rename this portfolio">
-                          <input
-                            type="text"
-                            value={current.name}
-                            onChange={(event) => handleRename(event.target.value)}
-                            className="text-lg font-semibold bg-transparent border-b border-transparent hover:border-brand-border focus:border-brand-primary focus:outline-none text-foreground min-w-0"
-                          />
-                        </Tooltip>
+                        <div className="flex-1 min-w-0">
+                          <Tooltip block label="Rename this portfolio">
+                            <input
+                              type="text"
+                              value={current.name}
+                              onChange={(event) => handleRename(event.target.value)}
+                              className="w-full text-lg font-semibold bg-transparent border-b border-transparent hover:border-brand-border focus:border-brand-primary focus:outline-none text-foreground min-w-0"
+                            />
+                          </Tooltip>
+                        </div>
                         <div className="flex items-center gap-2">
                           <Tooltip label="Open analysis and optimization tools for this portfolio">
                             <Link
                               to={`/portfolios/${current.id}/holdings`}
                               className="text-xs font-medium px-2.5 py-1.5 rounded-[var(--radius-btn)] border border-brand-positive bg-brand-positive text-background hover:brightness-90 whitespace-nowrap"
                             >
-                              ⌕ Analysis
+                              Analyze portfolio
                             </Link>
                           </Tooltip>
                           <Tooltip label="Download this portfolio as a CSV you can re-import on another device">

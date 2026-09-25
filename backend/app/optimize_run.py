@@ -8,6 +8,7 @@ from datetime import date, timedelta
 from typing import Literal
 
 import pandas as pd
+import numpy as np
 
 from app.optimizer import (
     compute_betas,
@@ -79,6 +80,7 @@ class OptimizeResult:
     lookback_days: int
     views_applied: bool
     delta_mu: dict[str, float]
+    rf: float
     warnings: list[str]
 
 
@@ -93,6 +95,7 @@ def run_optimize(
     min_weight: float = 0.0,
     vol_target: float = 0.10,
     allow_short: bool = False,
+    max_short: float = 0.30,
     conviction_views: dict[str, float] | None = None,
     kappa: float = 0.05,
     rebalance: Rebalance = "none",
@@ -109,6 +112,8 @@ def run_optimize(
         raise OptimizeInputError(f"lookback_days must be one of {LOOKBACK_DAYS}")
     if rebalance not in _REBALANCES:
         raise OptimizeInputError(f"unknown rebalance schedule: {rebalance!r}")
+    if not math.isfinite(max_short) or not 0.0 <= max_short <= 1.0:
+        raise OptimizeInputError("max_short must be between 0 and 1")
     for ticker in weights:
         if ticker not in closes or closes[ticker].empty:
             raise OptimizeInputError(f"missing closes for weighted ticker {ticker!r}")
@@ -150,9 +155,10 @@ def run_optimize(
     max_fit = min(1.0, max_weight / fitted_scale)
     global_min = 0.0 if allow_short else min_weight / fitted_scale
     min_w = -max_fit if allow_short else global_min
+    sleeve_short = min(1.0, max_short / fitted_scale) if allow_short else None
     if allow_short:
         warnings.append(
-            "Short positions enabled. Equal Weight, Risk Parity, and Max Diversification remain long-only."
+            f"Short positions enabled (total short capped at {max_short:.0%}). Equal Weight, Risk Parity, and Max Diversification remain long-only."
         )
 
     pin_suffix = f" (after pinning {pinned_weight:.1%} in short-history holdings)" if pinned_tickers else ""
@@ -168,6 +174,9 @@ def run_optimize(
             f"— infeasible. Increase max weight.{pin_suffix}"
         )
 
+    # FLAG(custom): κ views are an ad-hoc additive bump to expected return (kappa × view / 100 per
+    # year), not Black-Litterman. In max_sharpe / max_sortino it is added to the historical daily
+    # mean; in max_sharpe_capm it is added to CAPM returns that already contain a view term.
     views_applied = bool(conviction_views) and mode in {"max_sharpe", "max_sharpe_capm", "max_sortino"}
     delta_mu = (
         {ticker: float(kappa * conviction_views.get(ticker, 0.0) / 100.0) for ticker in fitted_tickers}
@@ -179,12 +188,12 @@ def run_optimize(
         if mode == "equal_weight":
             fitted_weights = optimize_equal_weight(returns)
         elif mode == "min_variance":
-            fitted_weights = optimize_min_variance(returns, max_weight=max_fit, min_weight=min_w)
+            fitted_weights = optimize_min_variance(returns, max_weight=max_fit, min_weight=min_w, max_short=sleeve_short)
         elif mode == "max_sharpe":
             bumped = returns.copy()
             for ticker, delta in delta_mu.items():
                 bumped[ticker] = bumped[ticker] + delta / 252.0
-            fitted_weights = optimize_max_sharpe(bumped, max_weight=max_fit, min_weight=min_w)
+            fitted_weights = optimize_max_sharpe(bumped, rf=rf, max_weight=max_fit, min_weight=min_w, max_short=sleeve_short)
         elif mode == "max_sharpe_capm":
             if benchmark is None:
                 raise OptimizeInputError("SPY benchmark is required for CAPM optimization.")
@@ -195,27 +204,38 @@ def run_optimize(
             betas = compute_betas(compute_returns(capm_prices), BENCHMARK)
             capm_views = {ticker: view / 100.0 for ticker, view in (conviction_views or {}).items()}
             capm_expected_returns = compute_capm_expected_returns(betas, rf=rf, mrp=0.05, views=capm_views)
+            # FLAG(custom): views are counted twice here. compute_capm_expected_returns already added
+            # mrp × view, and delta_mu adds kappa × view again (0.05 + 0.05 per unit view by default).
+            # main does the same ("Also add kappa-based delta_mu on top"). Left as is pending the author's intent.
             capm_expected_returns = {
                 ticker: float(value + delta_mu.get(ticker, 0.0))
                 for ticker, value in capm_expected_returns.items()
             }
             fitted_weights = optimize_max_sharpe_capm(
-                returns, capm_expected_returns, rf=rf, max_weight=max_fit, min_weight=min_w
+                returns, capm_expected_returns, rf=rf, max_weight=max_fit, min_weight=min_w, max_short=sleeve_short
             )
         elif mode == "risk_parity":
-            fitted_weights = optimize_risk_parity(returns, max_weight=max_fit)
+            fitted_weights = optimize_risk_parity(returns, max_weight=max_fit, min_weight=global_min)
         elif mode == "max_sortino":
             bumped = returns.copy()
             for ticker, delta in delta_mu.items():
                 bumped[ticker] = bumped[ticker] + delta / 252.0
-            fitted_weights = optimize_max_sortino(bumped, max_weight=max_fit, min_weight=min_w)
+            fitted_weights = optimize_max_sortino(bumped, rf=rf, max_weight=max_fit, min_weight=min_w, max_short=sleeve_short)
         elif mode == "min_cvar":
-            fitted_weights = optimize_min_cvar(returns, max_weight=max_fit, min_weight=min_w)
+            fitted_weights = optimize_min_cvar(returns, max_weight=max_fit, min_weight=min_w, max_short=sleeve_short)
         elif mode == "max_diversification":
-            fitted_weights = optimize_max_diversification(returns, max_weight=max_fit)
+            fitted_weights = optimize_max_diversification(returns, max_weight=max_fit, min_weight=global_min)
         else:
+            floor_weights = optimize_min_variance(returns, max_weight=max_fit, min_weight=min_w, max_short=sleeve_short)
+            w_floor = np.array([floor_weights[t] for t in returns.columns])
+            floor_vol = float(np.sqrt(w_floor @ (returns.cov().values * 252) @ w_floor))
+            if vol_target < floor_vol - 1e-6:
+                raise OptimizeInputError(
+                    f"Vol target ({vol_target:.1%}) is below the lowest volatility the optimized holdings can reach "
+                    f"({floor_vol:.1%}) within the current weight limits. Raise the target or loosen the limits."
+                )
             fitted_weights = optimize_target_volatility(
-                returns, vol_target=vol_target, max_weight=max_fit, min_weight=min_w
+                returns, vol_target=vol_target, max_weight=max_fit, min_weight=min_w, max_short=sleeve_short
             )
     except RuntimeError as exc:
         warnings.append(f"Optimizer did not converge: {exc}")
@@ -261,8 +281,8 @@ def run_optimize(
         if mode == "max_sharpe_capm" else None
     )
     metrics = {
-        "current": compute_metrics(current_returns, benchmark_returns),
-        "optimized": compute_metrics(optimized_returns, benchmark_returns),
+        "current": compute_metrics(current_returns, benchmark_returns, rf=rf),
+        "optimized": compute_metrics(optimized_returns, benchmark_returns, rf=rf),
         "forward_looking": forward_looking,
     }
     return OptimizeResult(
@@ -289,5 +309,6 @@ def run_optimize(
         lookback_days=lookback_days,
         views_applied=views_applied,
         delta_mu=delta_mu,
+        rf=rf,
         warnings=warnings,
     )

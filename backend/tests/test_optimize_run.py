@@ -109,8 +109,9 @@ def test_views_are_only_applied_by_return_based_modes():
     assert variance.delta_mu == {}
 
 
-def test_non_convergence_falls_back_to_current_weights():
-    result = run_optimize({"A": 3, "B": 1}, {"A": A, "B": B}, SPY, mode="target_volatility", lookback_days=365, vol_target=0.01)
+def test_non_convergence_falls_back_to_current_weights(monkeypatch):
+    monkeypatch.setattr("app.optimize_run.optimize_target_volatility", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("boom")))
+    result = run_optimize({"A": 3, "B": 1}, {"A": A, "B": B}, SPY, mode="target_volatility", lookback_days=365, vol_target=.5)
     assert result.feasible is False
     assert result.target_weights == pytest.approx({"A": 0.75, "B": 0.25})
     assert any(warning.startswith("Optimizer did not converge") for warning in result.warnings)
@@ -148,8 +149,22 @@ def test_benchmark_missing_or_late_is_not_scored():
 
 def test_short_warning_and_sum_of_target_weights():
     result = run_optimize({"A": 1, "B": 1}, {"A": A, "B": B}, SPY, lookback_days=365, allow_short=True)
-    assert "Short positions enabled. Equal Weight, Risk Parity, and Max Diversification remain long-only." in result.warnings
+    assert "Short positions enabled (total short capped at 30%). Equal Weight, Risk Parity, and Max Diversification remain long-only." in result.warnings
     assert sum(result.target_weights.values()) == pytest.approx(1.0, abs=1e-6)
+    with pytest.raises(OptimizeInputError, match="max_short must be between 0 and 1"):
+        run_optimize({"A": 1, "B": 1}, {"A": A, "B": B}, SPY, lookback_days=365, max_short=1.5)
+
+
+def test_max_sharpe_uses_rf_and_echoes_it():
+    zero = run_optimize({"A": 1, "B": 1}, {"A": A, "B": B}, SPY, mode="max_sharpe", lookback_days=365, rf=0.0)
+    high = run_optimize({"A": 1, "B": 1}, {"A": A, "B": B}, SPY, mode="max_sharpe", lookback_days=365, rf=.08)
+    assert zero.target_weights != pytest.approx(high.target_weights, abs=1e-3)
+    assert high.rf == .08
+
+
+def test_target_volatility_below_floor_is_an_input_error():
+    with pytest.raises(OptimizeInputError, match="is below the lowest volatility"):
+        run_optimize({"A": 1, "B": 1}, {"A": A, "B": B}, SPY, mode="target_volatility", lookback_days=365, vol_target=.01)
 
 
 @pytest.mark.parametrize(

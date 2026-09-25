@@ -1758,9 +1758,32 @@ What was deliberately *not* ported into it is in the next bullet but one.
     - **Scoring window:** scoring still needs every holding, so the curves start at the youngest
       holding's first bar. That is shorter than the fit window, and it is labelled. This is the honest
       cost of pinning: the fit window and the score window differ.
-  - **Metrics are computed from the scored curve's daily returns.** Sharpe = (CAGR − rf) / vol, with
-    rf = 0, as in the reference and labelled. This overrides, for this tab only, the "not to port"
-    note on Sharpe in the buy-and-hold entry.
+  - **Metrics are computed from the scored curve's daily returns.** Sharpe = (CAGR − rf) / vol.
+    ~~rf = 0, as in the reference and labelled.~~ **Changed 2026-09-24, Gunnar (contract 0112):** rf is
+    the live 10-year Treasury yield from `rates.py` (yfinance `^TNX`, cached 1 h, 4.27% fallback).
+    It is fetched on every optimize call, not only for CAPM, and returned as `rf`. The Sharpe and
+    Alpha tooltips state the value used. **Why:** Max Sharpe and Max Sortino now optimise against
+    that rate, and a table using rf = 0 would score them on a different measure than the one they
+    maximised. Showing the rate elsewhere (e.g. a Universe row) is a possible follow-up.
+  - **Standard modes follow their textbook definitions (0112, from the 2026-09-24 planner review).**
+    - Sortino's downside deviation is `sqrt(mean(min(r − rf/252, 0)²))` over all days. `main` used
+      the std of the negative days only, which measures how spread out the losses are, not how big.
+    - Risk Parity and Max Diversification honour the min-weight floor.
+    - An unreachable vol target is a 422 naming the lowest reachable vol, not a "did not converge"
+      fallback.
+    - Min Variance, Equal Weight, Min CVaR and Max Diversification were checked and were already
+      correct. Min CVaR via SLSQP matched the exact Rockafellar-Uryasev LP to within 0.3%, so it
+      stays on SLSQP.
+  - **Total short exposure is capped by a slider (Gunnar, 2026-09-24; 0112).** Default 30%
+    (130/30). It is enforced as `Σ max(−wᵢ, 0) ≤ cap` on the final weights, so the cap is scaled by
+    `1 − Σ pinned` for the fitted sleeve. Before this, nothing limited total shorts, and 200% long /
+    100% short was allowed. The hinge constraint was checked against the exact split-variable
+    formulation and matched to 4 decimal places.
+  - **The custom conviction code is flagged, not fixed (0112).** `FLAG(custom)` comments mark the
+    κ bump, the `mrp × view` CAPM term, the tanh/exp tilt, and the fact that CAPM mode counts each
+    view twice (`mrp × view` plus `κ × view`, which `main` also does). None of it is changed until
+    its author confirms the intent. `main`'s git history shows only Nicholas Roma (ngrom17) as the
+    author. `tilt.py` cites an "epic spec", which may be Zach's.
 - ~~**All reference features are ported, including the three the reference coded but never made
   reachable**~~ (conviction views with the κ bump, the tilt engine, `max_sharpe_capm`).
   **Reversed for the Optimize tab on 2026-09-24, Gunnar.**

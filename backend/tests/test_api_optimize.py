@@ -76,16 +76,14 @@ def test_optimize_pins_young_holding(client, db_mode):
     assert body["score_limited_by"] == "Y"
 
 
-def test_capm_fetches_rate_and_non_capm_does_not(client, db_mode, monkeypatch):
+def test_rate_and_short_cap_round_trip(client, db_mode, monkeypatch):
     _seed()
     monkeypatch.setattr("app.routers.portfolio.fetch_risk_free_rate", lambda: 0.04)
-    capm = client.post("/portfolio/optimize", json={"tickers": ["A", "B"], "weights": [1, 1], "mode": "max_sharpe_capm", "lookback_days": 365})
-    assert capm.status_code == 200
-    assert capm.json()["capm_expected_returns"] == pytest.approx({"A": 0.09, "B": 0.04}, abs=0.01)
-    assert capm.json()["target_weights"]["A"] == pytest.approx(1.0, abs=0.01)
-    assert capm.json()["metrics"]["forward_looking"] is not None
-    monkeypatch.setattr("app.routers.portfolio.fetch_risk_free_rate", lambda: (_ for _ in ()).throw(AssertionError("called")))
-    assert client.post("/portfolio/optimize", json={"tickers": ["A", "B"], "weights": [1, 1], "lookback_days": 365}).status_code == 200
+    response = client.post("/portfolio/optimize", json={"tickers": ["A", "B"], "weights": [1, 1], "lookback_days": 365, "allow_short": True, "max_short": .1})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["rf"] == .04
+    assert sum(max(-weight, 0) for weight in body["target_weights"].values()) <= .1 + 1e-6
 
 
 def test_missing_spy_is_optional_except_for_capm(client, db_mode):
