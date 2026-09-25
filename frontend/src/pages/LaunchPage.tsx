@@ -1,27 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { JSX } from 'react'
-import { EntryCard } from '../components/EntryCard'
 import { NewsSection } from '../components/NewsSection'
 import { getUniverse } from '../api/client'
-
-const ENTRY_CARDS = [
-  {
-    title: 'Portfolio',
-    description: 'Build a portfolio by entering positions manually or importing a CSV.',
-  },
-  {
-    title: 'Optimize',
-    description: 'Mean-variance, risk parity, and target-volatility allocation.',
-  },
-  {
-    title: 'Risk',
-    description: 'Volatility, drawdown, correlation, and exposure analysis.',
-  },
-  {
-    title: 'Outlook',
-    description: 'Forward-looking projections and scenario analysis.',
-  },
-]
 
 export function LaunchPage(): JSX.Element {
   const [universeLoading, setUniverseLoading] = useState(true)
@@ -50,11 +30,6 @@ export function LaunchPage(): JSX.Element {
         ) : (
           <NewsSection />
         )}
-        <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5 mt-14">
-          {ENTRY_CARDS.map((card) => (
-            <EntryCard key={card.title} title={card.title} description={card.description} />
-          ))}
-        </section>
       </main>
     </div>
   )
