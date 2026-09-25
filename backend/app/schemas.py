@@ -155,17 +155,6 @@ class OptimizeRequest(BaseModel):
     rebalance: str = "none"
 
 
-class TiltRequest(BaseModel):
-    tickers: list[str]
-    weights: list[float]
-    baseline: str = "current"
-    optimizer_mode: str | None = None
-    conviction: dict[str, float] = {}
-    lam: float = 1.0
-    u0: float = 20.0
-    lookback_days: int = 1825
-
-
 class PinnedHoldingOut(BaseModel):
     ticker: str
     first_bar: date
@@ -200,6 +189,7 @@ class OptimizeResponse(BaseModel):
     views_applied: bool
     delta_mu: dict[str, float]
     rf: float
+    rf_source: str
     warnings: list[str]
 
 

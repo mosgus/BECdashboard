@@ -11,12 +11,11 @@ Nine optimization modes:
   - max_diversification : maximise diversification ratio (w·σ_i / σ_p)
   - target_volatility   : maximise return subject to portfolio vol ≤ vol_target
 
-Ported from main's portfolio and tilt modules. Risk parity uses variance as its
+Ported from main's portfolio module. Risk parity uses variance as its
 ERC target, and near-zero volatility produces a None Sharpe ratio.
 """
 from __future__ import annotations
 
-import math
 from typing import Optional
 
 import numpy as np
@@ -248,21 +247,3 @@ def optimize_target_volatility(returns: pd.DataFrame, vol_target: float = 0.10, 
     if not result.success:
         raise RuntimeError(f"Target-vol optimizer did not converge: {result.message}")
     return dict(zip(tickers, result.x.tolist()))
-
-
-# FLAG(custom): house conviction tilt, not a textbook method. Each weight is multiplied by
-# exp(λ·tanh(view/u0)) and renormalised; u0 = 20 and λ are hand-picked constants. Not used by any
-# Optimize mode; reached only through POST /portfolio/tilt. Ported unchanged from main.
-def compute_tilt(base_weights: dict[str, float], conviction: dict[str, float], lam: float = 1.0, u0: float = 20.0) -> dict[str, float]:
-    if not base_weights:
-        return {}
-    u0 = max(u0, 1e-6)
-    tilted: dict[str, float] = {}
-    denom = 0.0
-    for ticker, w in base_weights.items():
-        m = math.exp(lam * math.tanh(float(conviction.get(ticker, 0.0)) / u0))
-        tilted[ticker] = w * m
-        denom += w * m
-    if denom <= 0:
-        return {t: 1.0 / len(base_weights) for t in base_weights}
-    return {t: v / denom for t, v in tilted.items()}

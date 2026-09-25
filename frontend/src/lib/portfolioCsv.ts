@@ -286,7 +286,7 @@ export function parsePortfolioCsv(text: string, universeTickers: ReadonlySet<str
       ...(zeroTargets.length > 0 ? { zeroTargets } : {}),
     }
   }
-  if (surviving.length === 0) return failure('No portfolio tickers are in the current universe', null)
+  if (surviving.length === 0) return failure('No holdable portfolio tickers are in the current universe', null)
 
   if (weightIndex === null && sharesIndex === null) {
     const equalWeight = String(100 / surviving.length)

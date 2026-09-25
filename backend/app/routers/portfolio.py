@@ -10,10 +10,9 @@ from app.db import is_enabled, session
 from app.indicators import CLOSE_ONLY_INDICATORS, indicator_series
 from app.models import PriceBar
 from app.optimize_run import OptimizeInputError, run_optimize
-from app.optimizer import compute_tilt
 from app.portfolio_series import build_portfolio_series
-from app.rates import fetch_risk_free_rate
-from app.schemas import OptimizeRequest, OptimizeResponse, PortfolioSeriesResponse, TiltRequest
+from app.rates import fetch_risk_free_rate_with_source
+from app.schemas import OptimizeRequest, OptimizeResponse, PortfolioSeriesResponse
 from app.signals import compute_all_signals
 
 router = APIRouter(prefix="/portfolio", tags=["portfolio"])
@@ -150,6 +149,7 @@ def optimize_portfolio(body: OptimizeRequest) -> dict:
         {ticker.strip().upper(): value for ticker, value in body.conviction_views.items()}
         if body.conviction_views else None
     )
+    rf, rf_source = fetch_risk_free_rate_with_source()
     try:
         result = run_optimize(
             dict(zip(tickers, weights, strict=True)), closes, benchmark,
@@ -157,7 +157,7 @@ def optimize_portfolio(body: OptimizeRequest) -> dict:
             min_weight=body.min_weight, vol_target=body.vol_target, allow_short=body.allow_short,
             max_short=body.max_short,
             conviction_views=conviction_views, kappa=body.kappa, rebalance=body.rebalance,
-            rf=fetch_risk_free_rate(),
+            rf=rf,
         )
     except OptimizeInputError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -181,48 +181,6 @@ def optimize_portfolio(body: OptimizeRequest) -> dict:
         "views_applied": result.views_applied,
         "delta_mu": result.delta_mu,
         "rf": result.rf,
+        "rf_source": rf_source,
         "warnings": result.warnings,
-    }
-
-
-@router.post("/tilt")
-def tilt_portfolio(body: TiltRequest) -> dict:
-    tickers, weights = _normalise_request(body.tickers, body.weights)
-    conviction = {ticker.strip().upper(): value for ticker, value in body.conviction.items()}
-    allocation = dict(zip(tickers, weights, strict=True))
-    if body.baseline == "equal":
-        base_weights = {ticker: 1.0 / len(tickers) for ticker in tickers}
-    elif body.baseline == "current":
-        total = sum(weights)
-        base_weights = {ticker: weight / total for ticker, weight in allocation.items()}
-    elif body.baseline == "optimizer":
-        mode = body.optimizer_mode or "min_variance"
-        if mode not in {"equal_weight", "min_variance", "max_sharpe", "risk_parity"}:
-            raise HTTPException(status_code=422, detail=f"Unknown optimizer mode: {mode}")
-        _require_database()
-        closes = _load_stored_closes(tickers)
-        benchmark = closes.get("SPY")
-        if benchmark is None:
-            benchmark = _load_stored_closes(["SPY"], required=False).get("SPY")
-        try:
-            base_weights = run_optimize(
-                allocation, closes, benchmark, mode=mode, lookback_days=body.lookback_days
-            ).target_weights
-        except OptimizeInputError as exc:
-            raise HTTPException(status_code=422, detail=str(exc)) from exc
-    else:
-        raise HTTPException(status_code=422, detail=f"Unknown tilt baseline: {body.baseline}")
-    # FLAG(custom): see compute_tilt. The "optimizer" baseline calls optimize_max_sharpe without rf (rf = 0).
-    tilt_weights = compute_tilt(base_weights, conviction, lam=body.lam, u0=body.u0)
-    return {
-        "tilt_weights": tilt_weights,
-        "base_weights": base_weights,
-        "source": "tilt",
-        "params": {
-            "baseline": body.baseline,
-            "optimizer_mode": body.optimizer_mode,
-            "conviction": conviction,
-            "lam": body.lam,
-            "u0": body.u0,
-        },
     }

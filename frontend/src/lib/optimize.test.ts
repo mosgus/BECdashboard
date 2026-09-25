@@ -48,6 +48,7 @@ const RESPONSE: OptimizeResponse = {
   capm_expected_returns: null, feasible: true, mode: 'min_variance', rebalance: 'none',
   lookback_days: 1825, views_applied: false, delta_mu: {},
   rf: 0.0427,
+  rf_source: 'live',
   warnings: ['In-sample: the optimized weights were chosen using the same prices they are scored on.'],
 }
 const PORTFOLIO: Portfolio = {
@@ -311,24 +312,32 @@ describe('curveRows', () => {
 
 describe('metricItems', () => {
   it('includes beta and alpha when present', () => {
-    const items = metricItems(RESPONSE.metrics.current, .0427)
+    const items = metricItems(RESPONSE.metrics.current, .0427, 'live')
     expect(items.map((item) => item.label)).toEqual(['CAGR', 'Volatility', 'Sharpe', 'Max drawdown', 'Beta vs SPY', 'Alpha'])
     expect(items.map((item) => item.value)).toEqual(['12.3%', '20.7%', '0.60', '-18.3%', '1.10', '-1.2%'])
   })
 
   it('omits beta and alpha when absent, and renders — for null/missing/empty', () => {
-    const optimized = metricItems(RESPONSE.metrics.optimized, .0427)
+    const optimized = metricItems(RESPONSE.metrics.optimized, .0427, 'live')
     expect(optimized.map((item) => item.value)).toEqual(['15.0%', '19.0%', '—', '-10.0%'])
 
-    expect(metricItems(null, .0427).map((item) => item.value)).toEqual(['—', '—', '—', '—'])
-    expect(metricItems({}, .0427).map((item) => item.value)).toEqual(['—', '—', '—', '—'])
+    expect(metricItems(null, .0427, 'live').map((item) => item.value)).toEqual(['—', '—', '—', '—'])
+    expect(metricItems({}, .0427, 'live').map((item) => item.value)).toEqual(['—', '—', '—', '—'])
 
-    const withNullBeta = metricItems({ cagr: 0.1, vol: 0.2, sharpe: 0.5, max_dd: -0.1, beta: null }, .0427)
+    const withNullBeta = metricItems({ cagr: 0.1, vol: 0.2, sharpe: 0.5, max_dd: -0.1, beta: null }, .0427, 'live')
     expect(withNullBeta.length).toBe(5)
     expect(withNullBeta.at(-1)).toEqual({ label: 'Beta vs SPY', value: '—', tooltip: expect.any(String) })
-    const allItems = metricItems(RESPONSE.metrics.current, .0427)
-    expect(allItems.find((item) => item.label === 'Sharpe')?.tooltip).toContain('4.27%')
-    expect(allItems.find((item) => item.label === 'Alpha')?.tooltip).toContain('4.27% risk-free rate')
+  })
+
+  it('describes the risk-free rate as live, with the 3-month T-bill wording', () => {
+    const items = metricItems(RESPONSE.metrics.current, 0.0407, 'live')
+    expect(items.find((item) => item.label === 'Sharpe')?.tooltip).toContain('3-month Treasury bill yield, 4.07% for this run')
+  })
+
+  it('describes the risk-free rate as a fallback in both Sharpe and Alpha tooltips', () => {
+    const items = metricItems(RESPONSE.metrics.current, 0.0427, 'fallback')
+    expect(items.find((item) => item.label === 'Sharpe')?.tooltip).toContain('live rate unavailable, so the 4.27% fallback was used')
+    expect(items.find((item) => item.label === 'Alpha')?.tooltip).toContain('live rate unavailable, so the 4.27% fallback was used')
   })
 })
 

@@ -8,6 +8,7 @@ import type { DraftRow, EntryMode, Portfolio, Position } from '../lib/portfolio'
 import { parsePortfolioCsv, portfolioNameFromFilename as nameFromFilename } from '../lib/portfolioCsv'
 import type { DraftSeed, DroppedRow, TargetAdjustment } from '../lib/portfolioCsv'
 import { PRESETS } from '../lib/presets'
+import { isHoldableType } from '../lib/tickerType'
 import { Tooltip } from './Tooltip'
 
 interface NewPortfolioDialogProps {
@@ -41,7 +42,8 @@ export function NewPortfolioDialog({ universe, onCancel, onCreate }: NewPortfoli
     return () => document.removeEventListener('keydown', handleKeyDown)
   }, [onCancel])
 
-  const byTicker = new Map(universe.map((entry) => [entry.ticker, entry]))
+  const holdable = universe.filter((entry) => isHoldableType(entry.quote_type))
+  const byTicker = new Map(holdable.map((entry) => [entry.ticker, entry]))
   const summary = summariseDraft({ name, mode, cash: cashText, rows }, byTicker)
   const pristine = name.trim() === '' && cashText === '' && rows.length === 0
   const tickerOnlyDrop = mode === 'weight' && droppedRows.every((row) => row.weightPct === null)
@@ -61,7 +63,7 @@ export function NewPortfolioDialog({ universe, onCancel, onCreate }: NewPortfoli
     if (file === undefined) return
 
     try {
-      const result = parsePortfolioCsv(await file.text(), new Set(universe.map((entry) => entry.ticker)))
+      const result = parsePortfolioCsv(await file.text(), new Set(holdable.map((entry) => entry.ticker)))
       setImportError(null)
       setDroppedRows([])
       setAdjustment(null)
@@ -88,7 +90,7 @@ export function NewPortfolioDialog({ universe, onCancel, onCreate }: NewPortfoli
     const preset = PRESETS.find((candidate) => candidate.id === event.target.value)
     if (preset === undefined) return
 
-    const result = parsePortfolioCsv(preset.csv, new Set(universe.map((entry) => entry.ticker)))
+    const result = parsePortfolioCsv(preset.csv, new Set(holdable.map((entry) => entry.ticker)))
     setImportError(null)
     setDroppedRows([])
     setAdjustment(null)
@@ -106,7 +108,7 @@ export function NewPortfolioDialog({ universe, onCancel, onCreate }: NewPortfoli
 
   function availableTickersFor(rowId: string): UniverseEntry[] {
     const chosenElsewhere = new Set(rows.filter((row) => row.id !== rowId && row.ticker !== '').map((row) => row.ticker))
-    return universe.filter((entry) => !chosenElsewhere.has(entry.ticker))
+    return holdable.filter((entry) => !chosenElsewhere.has(entry.ticker))
   }
 
   function handleModeChange(nextMode: EntryMode): void {
@@ -216,7 +218,7 @@ export function NewPortfolioDialog({ universe, onCancel, onCreate }: NewPortfoli
           {droppedRows.length > 0 && (
             <div className="text-xs text-[var(--color-muted)]">
               <p>
-                Skipped {droppedRows.length} {droppedRows.length === 1 ? 'ticker' : 'tickers'} not in your Universe:{' '}
+                Skipped {droppedRows.length} {droppedRows.length === 1 ? 'ticker' : 'tickers'} not in your Universe or not holdable (e.g. an index):{' '}
                 {droppedRows.map((row) => row.weightPct === null ? row.ticker : `${row.ticker} (${formatPercent(row.weightPct)})`).join(', ')}.
               </p>
               {tickerOnlyDrop ? (
@@ -373,7 +375,7 @@ export function NewPortfolioDialog({ universe, onCancel, onCreate }: NewPortfoli
             })}
           </div>
 
-          {universe.length === 0 ? (
+          {holdable.length === 0 ? (
             <p className="text-sm text-[var(--color-muted)]">
               Add tickers to your <Link to="/universe" className="underline hover:text-foreground">Universe</Link> to add assets to this portfolio.
             </p>

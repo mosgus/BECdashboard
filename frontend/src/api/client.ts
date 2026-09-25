@@ -364,6 +364,7 @@ export interface OptimizeResponse {
   views_applied: boolean
   delta_mu: Record<string, number>
   rf: number
+  rf_source: 'live' | 'fallback'
   warnings: string[]
 }
 

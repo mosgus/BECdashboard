@@ -53,9 +53,9 @@ tier 6  routers/*                                                 (HTTP only)
 | `indicators.py` | **Pure.** Technical-indicator series. `CLOSE_ONLY_INDICATORS` is the subset valid on a portfolio value series |
 | `signals.py` | **Pure.** Technical-signal states derived from `indicators` |
 | `portfolio_series.py` | **Pure.** Portfolio value series from units × prices, plus the rebalancing backtest the optimizer compares against |
-| `optimizer.py` | **Pure** (numpy/pandas). The optimizer modes, ported from `main:core/`, plus `compute_tilt`, which has no UI (see "Open questions") |
+| `optimizer.py` | **Pure** (numpy/pandas). The optimizer modes, ported from `main:core/`. `compute_tilt` was removed in 0113 |
 | `optimize_run.py` | Validates an optimize request and runs `optimizer` + `portfolio_series` over the fetched prices |
-| `rates.py` | The live risk-free rate (10Y `^TNX`), 1-hour TTL, falling back to 0.0427 |
+| `rates.py` | The live risk-free rate (3-month T-bill `^IRX`, since 0114), 1-hour TTL, falling back to 0.0427 |
 | `db.py` | Engine and transactional `session()` |
 | `cache.py` | Price history read/write, 24-hour in-process `TTLCache` over the database |
 | `quotes.py` | Live intraday quotes, 10-minute TTL, market-hours aware |
@@ -67,7 +67,7 @@ tier 6  routers/*                                                 (HTTP only)
 | `autorefresh.py` | The visit-triggered universe sweep, claimed per window |
 | `jobrun.py` | `record_run` — one `job_runs` row per sweep that actually ran. Never breaks the job it records |
 | `ops.py` | System-health aggregation and job-run history. **Booleans and counts only — never a secret** |
-| `routers/` | **The only modules that know about HTTP.** Everything below raises domain exceptions. `routers/portfolio.py` serves `GET /portfolio/series`, `POST /portfolio/optimize` and `POST /portfolio/tilt` |
+| `routers/` | **The only modules that know about HTTP.** Everything below raises domain exceptions. `routers/portfolio.py` serves `GET /portfolio/series` and `POST /portfolio/optimize` (`POST /portfolio/tilt` was removed in 0113) |
 
 `cache.py`, `config.py`, `db.py`, `models.py` and `main.py` have no module docstring — their function
 docstrings carry the reasoning instead.
@@ -1764,7 +1764,26 @@ What was deliberately *not* ported into it is in the next bullet but one.
     It is fetched on every optimize call, not only for CAPM, and returned as `rf`. The Sharpe and
     Alpha tooltips state the value used. **Why:** Max Sharpe and Max Sortino now optimise against
     that rate, and a table using rf = 0 would score them on a different measure than the one they
-    maximised. Showing the rate elsewhere (e.g. a Universe row) is a possible follow-up.
+    maximised.
+    **Changed 2026-09-24, Gunnar (contract 0114):** the source is the 3-month T-bill (`^IRX`), not
+    `^TNX`. The response adds `rf_source: "live" | "fallback"`, and the tooltips say which. The valid
+    range is `0 ≤ rf < 20%`. **Why:**
+    - Sharpe's convention is the T-bill; the 10Y adds a term premium (on 2026-09-24, 5.16% vs 4.07%).
+    - The old `0.001 <` lower bound would have silently swapped in 4.27% whenever T-bills were near
+      zero, as in 2020–21.
+    - The fallback was invisible.
+  - **Portfolios accept only holdable types (Gunnar, 2026-09-24; 0114).** The New Portfolio pickers,
+    the presets, CSV import and Add Position filter the universe to `quote_type` EQUITY, ETF,
+    MUTUALFUND or null (fundamentals not loaded yet). **Why:** `^GSPC` and `^IXIC` are universe
+    members for the strip, and nothing stopped them becoming "holdings" the optimizer would buy.
+    Existing portfolios that hold an index are not migrated.
+  - **A reference/macro panel is deferred (Gunnar, 2026-09-24).** This means a panel of non-holdable
+    series: rates, FX (JPY=X), crypto (BTC-USD), futures (CL=F, GC=F). Yahoo's `instrumentType`
+    would make auto-classifying them from the Add Ticker box easy. It is deferred because putting them
+    in the universe changes what membership means for the strip, news, briefing, signals, export and
+    optimizer. The value is mostly "nice to look at". If it is built, it goes in its own table, never
+    the universe, and possibly on Outlook. Futures need care: CL=F closed at −$37.63 in April 2020,
+    which breaks log returns.
   - **Standard modes follow their textbook definitions (0112, from the 2026-09-24 planner review).**
     - Sortino's downside deviation is `sqrt(mean(min(r − rf/252, 0)²))` over all days. `main` used
       the std of the negative days only, which measures how spread out the losses are, not how big.
@@ -1780,7 +1799,7 @@ What was deliberately *not* ported into it is in the next bullet but one.
     100% short was allowed. The hinge constraint was checked against the exact split-variable
     formulation and matched to 4 decimal places.
   - **The custom conviction code is flagged, not fixed (0112).** `FLAG(custom)` comments mark the
-    κ bump, the `mrp × view` CAPM term, the tanh/exp tilt, and the fact that CAPM mode counts each
+    κ bump, the `mrp × view` CAPM term, the tanh/exp tilt (deleted with tilt in 0113), and the fact that CAPM mode counts each
     view twice (`mrp × view` plus `κ × view`, which `main` also does). None of it is changed until
     its author confirms the intent. `main`'s git history shows only Nicholas Roma (ngrom17) as the
     author. `tilt.py` cites an "epic spec", which may be Zach's.
@@ -1797,7 +1816,7 @@ What was deliberately *not* ported into it is in the next bullet but one.
   - **What already exists in the backend and has no UI:**
     - `POST /portfolio/optimize` accepts `mode: "max_sharpe_capm"` (it fetches rf through `rates.py`),
       plus `conviction_views` and `kappa`.
-    - `POST /portfolio/tilt` exists (0106).
+    - ~~`POST /portfolio/tilt` exists (0106).~~ Removed in 0113.
     - Whether the Outlook port reuses, reshapes or deletes these is decided in the Outlook contracts.
       Don't build UI on them ahead of that.
 - **Reference bugs fixed in the port, not copied.** Each was found by running `main`'s code on literal
@@ -1821,15 +1840,49 @@ What was deliberately *not* ported into it is in the next bullet but one.
 - **Short positions can be optimized but not applied.** Portfolio validation requires positive
   weights, so Apply is disabled whenever any target weight is negative, with an explanation.
 
-## Open questions (not decided)
+**The Outlook tab is a port of `main`'s Outlook page, all three sections.** Gunnar, 2026-09-24,
+after declaring Optimize finished. Contracts start at 0115. 0110 was dropped, 0111 and 0112 were
+used for Optimize follow-ups, 0113 removes tilt, and 0114 (from a second planner session) moves the
+risk-free rate to the 3-month T-bill and limits portfolios to holdable tickers.
+- **Source:** `main:frontend/app/portfolios/[id]/outlook/page.tsx` (973 lines). Backend routes are in
+  `main:backend/routers/portfolios_optimize.py` (`capm_optimize` at line 451, `monte_carlo` at 663,
+  `efficient_frontier` at 905) and `portfolios_scenarios.py` (`forecast` at 131). Also
+  `main:backend/core/forecast.py`, `ForecastGuide.tsx`, `MonteCarloGuide.tsx` and `types/outlook.ts`.
+- **Three sub-tabs under Outlook: "CAPM Optimizer", "Monte Carlo", "Forecast"**, as in `main`. In
+  `main` these are in-page state (`"capm" | "montecarlo" | "forecast"`), not routes.
+- **CAPM uses the formula the page states:** `E[R_i] = Rf + β_i·MRP + MRP·View_i`, which is the
+  existing `optimizer.compute_capm_expected_returns`, then `optimize_max_sharpe_capm` long-only
+  with per-holding bounds. A frozen holding's bounds are `(current, current)`.
+  - `main`'s Outlook path applies each view **once**. The double count flagged in 0112
+    (`mrp × view` plus `κ × view`) happens only on the unreachable Targets path, so it is not
+    ported here. The `mrp × view` term itself stays under the 0112 `FLAG(custom)` pending its
+    author's confirmation, but on this page it is the formula shown to the user.
+- **Target value defaults to the portfolio's current market value** (Σ shares × last close) when
+  every position has a share count. Otherwise the user types it. Gunnar was indifferent. The planner
+  kept the default because Holdings already computes that value.
+- **Forecast ports all four methods: EWMA, ARIMA, Prophet and Ensemble** (Gunnar: "the more the
+  merrier"). Accepted costs, which the planner raised:
+  - **Deploy weight:** Prophet 1.4 ships prebuilt wheels with cmdstan bundled, so there is no
+    compile step. But it pulls in `cmdstanpy`, `matplotlib` and `holidays`, which makes the Render
+    build larger and slower.
+  - **Speed on Render's free tier:** `main`'s own tooltip says Prophet "may take 30–60 s". Each
+    request fits twice: once for the forecast and once for the 30-day calibration hold-out.
+    Ensemble fits every method, so it is the slowest.
+  - **Compatibility is unverified:** Prophet and statsmodels have not been tested against this
+    stack (pandas 3, numpy 2.5, Python 3.13). The Forecast contracts must check that in a scratch
+    venv before anything touches `requirements.txt`.
+  - **Mitigation:** Prophet and Ensemble get their own contract, after EWMA and ARIMA, and are
+    lazy-imported. If they prove too slow on Render, that contract can be dropped without touching
+    the rest.
+  - `main`'s `_calibration` swallows every exception and returns nulls. The port must not: a failed
+    calibration is reported as failed.
+- **Tilt is removed** (Gunnar, 2026-09-24; contract 0113). `POST /portfolio/tilt`, `TiltRequest`,
+  `optimizer.compute_tilt` and their five tests are deleted. `main` never made tilt reachable, so there
+  was no reference behaviour to keep, and no rebuild UI called it. Gunnar first chose to keep it,
+  then chose deletion once it was clear it was unused. That also retires the 0112 `FLAG(custom)` on
+  the tanh/exp tilt.
 
-- **Tilt.** `main`'s tilt engine (`core/tilt.py`, ported as `optimizer.compute_tilt` behind
-  `POST /portfolio/tilt`) was never reachable in `main`, so there is no reference behaviour to match.
-  The options are to drop it, or to design it later as its own feature. The planner recommends
-  dropping it unless a concrete use appears. Undecided as of 2026-09-24.
-- **Outlook tab structure.** `main`'s Outlook page (`main:frontend/app/portfolios/[id]/outlook/page.tsx`,
-  973 lines) has three sections: CAPM optimizer, Monte Carlo and Forecast. How they are split,
-  ordered and contracted is to be discussed next (2026-09-24).
+## Open questions (not decided)
 
 - **Whether tickers can be removed from the universe.** Only add and update have been specified. If removal exists, decide whether it deletes cached price history or just de-lists the ticker — the no-FK rule above means de-listing is the cheap default.
 - ~~**Bulk update ("update all").**~~ **Built 2026-09-14, contract 0014 — frontend only.** One `Update all N` control loops **sequentially** over the existing per-ticker `POST /universe/{ticker}/refresh`; no new backend surface, no `Promise.all`. Sequential is the load-bearing choice, not a style preference: concurrent fan-out reproduces the request burst that got Render's shared IP crumb-throttled in contract 0013. The freshness rule keeps the cost proportional to *stale* tickers rather than total ones. The per-row refresh button was removed at the same time, making `UniverseTable` a pure display component.

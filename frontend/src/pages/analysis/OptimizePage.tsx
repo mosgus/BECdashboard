@@ -448,11 +448,11 @@ function OptimizeResults({
         <div className="space-y-4">
           <div>
             <p className="text-xs font-medium text-[var(--color-muted)] mb-2">Current</p>
-            <MetricTiles items={metricItems(response.metrics.current, response.rf)} />
+            <MetricTiles items={metricItems(response.metrics.current, response.rf, response.rf_source)} />
           </div>
           <div>
             <p className="text-xs font-medium text-[var(--color-muted)] mb-2">Optimized ({modeLabel(response.mode)})</p>
-            <MetricTiles items={metricItems(response.metrics.optimized, response.rf)} />
+            <MetricTiles items={metricItems(response.metrics.optimized, response.rf, response.rf_source)} />
           </div>
         </div>
       </div>

@@ -78,12 +78,21 @@ def test_optimize_pins_young_holding(client, db_mode):
 
 def test_rate_and_short_cap_round_trip(client, db_mode, monkeypatch):
     _seed()
-    monkeypatch.setattr("app.routers.portfolio.fetch_risk_free_rate", lambda: 0.04)
+    monkeypatch.setattr("app.routers.portfolio.fetch_risk_free_rate_with_source", lambda: (0.04, "live"))
     response = client.post("/portfolio/optimize", json={"tickers": ["A", "B"], "weights": [1, 1], "lookback_days": 365, "allow_short": True, "max_short": .1})
     assert response.status_code == 200
     body = response.json()
     assert body["rf"] == .04
+    assert body["rf_source"] == "live"
     assert sum(max(-weight, 0) for weight in body["target_weights"].values()) <= .1 + 1e-6
+
+
+def test_rate_fallback_is_reported(client, db_mode, monkeypatch):
+    _seed()
+    monkeypatch.setattr("app.routers.portfolio.fetch_risk_free_rate_with_source", lambda: (0.0427, "fallback"))
+    response = client.post("/portfolio/optimize", json={"tickers": ["A", "B"], "weights": [1, 1], "lookback_days": 365})
+    assert response.status_code == 200
+    assert response.json()["rf_source"] == "fallback"
 
 
 def test_missing_spy_is_optional_except_for_capm(client, db_mode):
@@ -127,34 +136,3 @@ def test_optimize_returns_json_safe_nan_metrics(client, db_mode):
 def test_optimize_requires_database(client):
     response = client.post("/portfolio/optimize", json={"tickers": ["A", "B"], "weights": [1, 1]})
     assert response.status_code == 503
-
-
-def test_tilt_equal_and_current_need_no_database(client):
-    equal = client.post("/portfolio/tilt", json={"tickers": ["A", "B"], "weights": [1, 1], "baseline": "equal", "conviction": {"a": 20}})
-    current = client.post("/portfolio/tilt", json={"tickers": ["A", "B"], "weights": [60, 40], "baseline": "current", "conviction": {"B": -10}, "lam": 2})
-    assert equal.status_code == 200
-    assert equal.json()["tilt_weights"] == pytest.approx({"A": 0.6817, "B": 0.3183}, abs=0.0001)
-    assert equal.json()["params"]["conviction"] == {"A": 20}
-    assert current.status_code == 200
-    assert current.json()["base_weights"] == pytest.approx({"A": 0.6, "B": 0.4})
-    assert current.json()["tilt_weights"] == pytest.approx({"A": 0.7908, "B": 0.2092}, abs=0.0001)
-
-
-def test_tilt_optimizer_uses_pinned_run_optimize(client, db_mode):
-    _seed()
-    response = client.post("/portfolio/tilt", json={"tickers": ["A", "B", "Y"], "weights": [1, 1, 2], "baseline": "optimizer", "lookback_days": 365})
-    assert response.status_code == 200
-    assert response.json()["base_weights"] == pytest.approx({"A": 0.4, "B": 0.1, "Y": 0.5}, abs=0.01)
-    assert response.json()["tilt_weights"] == pytest.approx(response.json()["base_weights"])
-
-
-def test_tilt_optimizer_default_lookback_requires_two_full_history_holdings(client, db_mode):
-    _seed()
-    response = client.post("/portfolio/tilt", json={"tickers": ["A", "B", "Y"], "weights": [1, 1, 2], "baseline": "optimizer"})
-    assert response.status_code == 422
-    assert "at least 2 holdings with full history" in response.json()["detail"]
-
-
-def test_tilt_rejects_unknown_baselines_and_optimizer_modes(client):
-    assert client.post("/portfolio/tilt", json={"tickers": ["A", "B"], "weights": [1, 1], "baseline": "nope"}).status_code == 422
-    assert client.post("/portfolio/tilt", json={"tickers": ["A", "B"], "weights": [1, 1], "baseline": "optimizer", "optimizer_mode": "max_sortino"}).status_code == 422

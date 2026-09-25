@@ -5,7 +5,7 @@ import pytest
 from app.optimizer import (
     compute_betas, compute_capm_expected_returns, compute_drawdown, compute_equity_curve,
     compute_forward_looking_metrics, compute_metrics, compute_portfolio_returns, compute_returns,
-    compute_rolling_vol, compute_tilt, optimize_equal_weight, optimize_max_diversification,
+    compute_rolling_vol, optimize_equal_weight, optimize_max_diversification,
     optimize_max_sharpe, optimize_max_sharpe_capm, optimize_max_sortino, optimize_min_cvar,
     optimize_min_variance, optimize_risk_parity, optimize_target_volatility,
 )
@@ -72,11 +72,6 @@ def test_target_volatility_analytic_and_infeasible():
 
 def test_min_cvar_analytic():
     assert_weights(optimize_min_cvar(pd.DataFrame({"A": A, "Z": np.zeros(100)})), {"A": 0, "Z": 1})
-
-
-def test_tilt_and_empty_tilt():
-    assert_weights(compute_tilt({"A": .5, "B": .5}, {"A": 20}), {"A": .6817, "B": .3183})
-    assert compute_tilt({}, {}) == {}
 
 
 def test_capm_helpers():

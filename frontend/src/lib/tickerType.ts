@@ -16,3 +16,10 @@ export function typeLabel(quoteType: string | null): string {
   if (quoteType.length === 0) return quoteType
   return quoteType.charAt(0).toUpperCase() + quoteType.slice(1).toLowerCase()
 }
+
+/** Types a portfolio can hold. null (no fundamentals row yet) is allowed: Yahoo always types an
+ *  index, so an untyped ticker is an equity whose fundamentals haven't loaded, not an index. */
+const HOLDABLE_TYPES = new Set(['EQUITY', 'ETF', 'MUTUALFUND'])
+export function isHoldableType(quoteType: string | null): boolean {
+  return quoteType === null || HOLDABLE_TYPES.has(quoteType.toUpperCase())
+}

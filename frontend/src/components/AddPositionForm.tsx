@@ -5,6 +5,7 @@ import type { UniverseEntry } from '../api/client'
 import { formatPercent } from '../lib/format'
 import { impliedPortfolioValue, positionPrice, weightFromShares } from '../lib/portfolio'
 import type { Portfolio, Position } from '../lib/portfolio'
+import { isHoldableType } from '../lib/tickerType'
 import { Tooltip } from './Tooltip'
 
 interface AddPositionFormProps {
@@ -21,7 +22,9 @@ export function AddPositionForm({ universe, portfolio, onAdd }: AddPositionFormP
   const [weight, setWeight] = useState('')
   const [shares, setShares] = useState('')
 
-  if (universe.length === 0) {
+  const holdable = universe.filter((entry) => isHoldableType(entry.quote_type))
+
+  if (holdable.length === 0) {
     return (
       <p className="text-sm text-[var(--color-muted)]">
         No tickers available — add one to your <Link to="/universe" className="underline hover:text-foreground">Universe</Link> first.
@@ -30,7 +33,7 @@ export function AddPositionForm({ universe, portfolio, onAdd }: AddPositionFormP
   }
 
   const heldTickers = new Set(portfolio.positions.map((position) => position.ticker))
-  const available = universe.filter((entry) => !heldTickers.has(entry.ticker))
+  const available = holdable.filter((entry) => !heldTickers.has(entry.ticker))
 
   if (available.length === 0) {
     return (
@@ -40,7 +43,7 @@ export function AddPositionForm({ universe, portfolio, onAdd }: AddPositionFormP
     )
   }
 
-  const byTicker = new Map(universe.map((entry) => [entry.ticker, entry]))
+  const byTicker = new Map(holdable.map((entry) => [entry.ticker, entry]))
   const impliedValue = impliedPortfolioValue(portfolio, byTicker)
   const weightNumber = Number(weight)
   const sharesNumber = Number(shares)
