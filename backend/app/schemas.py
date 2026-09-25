@@ -140,6 +140,67 @@ class PortfolioSeriesResponse(BaseModel):
     signals: list[SignalOut]
 
 
+class OptimizeRequest(BaseModel):
+    tickers: list[str]
+    weights: list[float]
+    mode: str = "min_variance"
+    lookback_days: int = 1825
+    max_weight: float = 1.0
+    min_weight: float = 0.0
+    vol_target: float = 0.10
+    allow_short: bool = False
+    conviction_views: dict[str, float] | None = None
+    kappa: float = 0.05
+    rebalance: str = "none"
+
+
+class TiltRequest(BaseModel):
+    tickers: list[str]
+    weights: list[float]
+    baseline: str = "current"
+    optimizer_mode: str | None = None
+    conviction: dict[str, float] = {}
+    lam: float = 1.0
+    u0: float = 20.0
+    lookback_days: int = 1825
+
+
+class PinnedHoldingOut(BaseModel):
+    ticker: str
+    first_bar: date
+    weight: float
+    exceeds_max: bool
+
+
+class OptimizeCurvesOut(BaseModel):
+    dates: list[date]
+    current: list[float]
+    optimized: list[float]
+    benchmark: list[float] | None
+
+
+class OptimizeResponse(BaseModel):
+    tickers: list[str]
+    current_weights: dict[str, float]
+    target_weights: dict[str, float]
+    implied_trades: dict[str, float]
+    pinned: list[PinnedHoldingOut]
+    fit_start: date
+    fit_end: date
+    score_start: date
+    score_limited_by: str | None
+    curves: OptimizeCurvesOut
+    metrics: dict[str, dict[str, float | None] | None]
+    capm_expected_returns: dict[str, float] | None
+    feasible: bool
+    mode: str
+    rebalance: str
+    lookback_days: int
+    views_applied: bool
+    delta_mu: dict[str, float]
+    warnings: list[str]
+
+
 class TickerSignals(BaseModel):
     ticker: str
     signals: list[SignalOut]

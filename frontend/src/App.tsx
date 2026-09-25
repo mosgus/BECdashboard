@@ -2,9 +2,9 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { Header } from './components/Header'
 import { TickerStrip } from './components/TickerStrip'
 import { AnalysisLayout } from './pages/analysis/AnalysisLayout'
-import { BacktestPage } from './pages/analysis/BacktestPage'
 import { HoldingsPage } from './pages/analysis/HoldingsPage'
 import { MonitorPage } from './pages/analysis/MonitorPage'
+import { OptimizePage } from './pages/analysis/OptimizePage'
 import { OutlookPage } from './pages/analysis/OutlookPage'
 import { RiskPage } from './pages/analysis/RiskPage'
 import { LaunchPage } from './pages/LaunchPage'
@@ -27,7 +27,7 @@ export default function App() {
         <Route path="/portfolios/:portfolioId" element={<AnalysisLayout />}>
           <Route index element={<Navigate to="holdings" replace />} />
           <Route path="holdings" element={<HoldingsPage />} />
-          <Route path="backtest" element={<BacktestPage />} />
+          <Route path="optimize" element={<OptimizePage />} />
           <Route path="outlook" element={<OutlookPage />} />
           <Route path="monitor" element={<MonitorPage />} />
           <Route path="risk" element={<RiskPage />} />

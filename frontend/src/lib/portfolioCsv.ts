@@ -133,11 +133,11 @@ function finitePositive(raw: string): number | null {
   return Number.isFinite(value) && value > 0 ? value : null
 }
 
-function datePart(now: Date): string {
+export function datePart(now: Date): string {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
 }
 
-function quote(field: string): string {
+export function quote(field: string): string {
   return /[",\r\n]/.test(field) ? `"${field.replaceAll('"', '""')}"` : field
 }
 
@@ -283,7 +283,7 @@ export function serializePortfolioCsv(portfolio: Portfolio): string {
   return ['ticker,weight_pct,shares', ...rows.map((row) => row.map(quote).join(','))].join('\n') + '\n'
 }
 
-function filenameSafeName(name: string): string {
+export function filenameSafeName(name: string): string {
   return Array.from(name)
     .map((character) => {
       const code = character.charCodeAt(0)

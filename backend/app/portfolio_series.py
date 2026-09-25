@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from datetime import date
+from typing import Literal
 
 import pandas as pd
 
@@ -58,4 +59,83 @@ def build_portfolio_series(
         cash_value=float(cash_value),
         first_bar=first_bar,
         last_close=last_close,
+    )
+
+
+Rebalance = Literal["none", "monthly", "quarterly", "annual"]
+
+_REBALANCE_SCHEDULES = ("none", "monthly", "quarterly", "annual")
+
+
+@dataclass(frozen=True)
+class BacktestSeries:
+    dates: list[date]
+    total: list[float]
+    by_holding: dict[str, list[float]]
+    start: date
+    rebalance_dates: list[date]
+
+
+def _period_key(d: date, rebalance: Rebalance):
+    if rebalance == "monthly":
+        return (d.year, d.month)
+    if rebalance == "quarterly":
+        return (d.year, (d.month - 1) // 3)
+    return d.year
+
+
+def backtest_series(
+    weights: dict[str, float],
+    closes: dict[str, pd.Series],
+    rebalance: Rebalance = "none",
+    anchor_value: float = 100.0,
+) -> BacktestSeries:
+    if not weights:
+        raise ValueError("weights is empty")
+    weight_sum = sum(weights.values())
+    if weight_sum <= 0:
+        raise ValueError("weights must sum to a positive number")
+    if rebalance not in _REBALANCE_SCHEDULES:
+        raise ValueError(f"unknown rebalance schedule: {rebalance!r}")
+    for ticker in weights:
+        if ticker not in closes or closes[ticker].empty:
+            raise ValueError(f"missing closes for weighted ticker {ticker!r}")
+
+    normalised = {ticker: weight / weight_sum for ticker, weight in weights.items()}
+
+    start = max(closes[ticker].index[0] for ticker in weights)
+    prices = pd.DataFrame({ticker: closes[ticker] for ticker in weights}).sort_index()
+    prices = prices.loc[prices.index >= start].ffill()
+
+    dates = list(prices.index)
+    prices_at_start = {ticker: float(prices.iloc[0][ticker]) for ticker in weights}
+    units, _ = units_from_weights(normalised, 0.0, prices_at_start, anchor_value)
+
+    total: list[float] = []
+    by_holding: dict[str, list[float]] = {ticker: [] for ticker in weights}
+    rebalance_dates: list[date] = []
+    previous_key = _period_key(dates[0], rebalance) if rebalance != "none" else None
+
+    for index, current_date in enumerate(dates):
+        row = prices.iloc[index]
+        if index > 0 and rebalance != "none":
+            key = _period_key(current_date, rebalance)
+            if key != previous_key:
+                rebalance_dates.append(current_date)
+                value = sum(units[ticker] * float(row[ticker]) for ticker in weights)
+                units = {
+                    ticker: normalised[ticker] * value / float(row[ticker]) for ticker in weights
+                }
+            previous_key = key
+        row_values = {ticker: units[ticker] * float(row[ticker]) for ticker in weights}
+        for ticker in weights:
+            by_holding[ticker].append(row_values[ticker])
+        total.append(sum(row_values.values()))
+
+    return BacktestSeries(
+        dates=dates,
+        total=total,
+        by_holding=by_holding,
+        start=start,
+        rebalance_dates=rebalance_dates,
     )

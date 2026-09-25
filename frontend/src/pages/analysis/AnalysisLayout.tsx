@@ -4,7 +4,7 @@ import { isLegacyPortfolio, listPortfolios } from '../../lib/portfolioStore'
 
 const ANALYSIS_TABS = [
   { path: 'holdings', label: 'Holdings' },
-  { path: 'backtest', label: 'Backtest' },
+  { path: 'optimize', label: 'Optimize' },
   { path: 'outlook', label: 'Outlook' },
   { path: 'monitor', label: 'Monitor' },
   { path: 'risk', label: 'Risk & Perf' },

@@ -10,16 +10,19 @@ interface TooltipProps {
   label: string
   children: ReactNode
   placement?: 'top' | 'bottom'
+  block?: boolean
+  dismissOnPointerDown?: boolean
 }
 
 const SHOW_DELAY_MS = 400
 const GAP_PX = 8
 const VIEWPORT_MARGIN_PX = 8
 
-export function Tooltip({ label, children, placement = 'top' }: TooltipProps): JSX.Element {
+export function Tooltip({ label, children, placement = 'top', block = false, dismissOnPointerDown = false }: TooltipProps): JSX.Element {
   const [targetRect, setTargetRect] = useState<DOMRect | null>(null)
   const wrapperRef = useRef<HTMLSpanElement>(null)
   const showTimerRef = useRef<number | null>(null)
+  const suppressFocusRef = useRef(false)
   const id = useId()
   const visible = targetRect !== null
 
@@ -42,6 +45,19 @@ export function Tooltip({ label, children, placement = 'top' }: TooltipProps): J
     setTargetRect(null)
   }
 
+  function handleFocus(): void {
+    if (suppressFocusRef.current) {
+      suppressFocusRef.current = false
+      return
+    }
+    show()
+  }
+
+  function handlePointerDown(): void {
+    suppressFocusRef.current = true
+    hide()
+  }
+
   useEffect(() => {
     if (!visible) return
     function handleKeyDown(event: KeyboardEvent): void {
@@ -62,10 +78,14 @@ export function Tooltip({ label, children, placement = 'top' }: TooltipProps): J
   return (
     <span
       ref={wrapperRef}
-      className="inline-flex"
+      className={block ? 'flex w-full' : 'inline-flex'}
       onMouseEnter={show}
-      onMouseLeave={hide}
-      onFocus={show}
+      onMouseLeave={() => {
+        suppressFocusRef.current = false
+        hide()
+      }}
+      onPointerDown={dismissOnPointerDown ? handlePointerDown : undefined}
+      onFocus={handleFocus}
       onBlur={hide}
     >
       {describedChild}

@@ -1643,6 +1643,97 @@ goes stale.
 The fix is at the source: bound `add()`'s `end` to the last completed session so a partial bar is
 never written. Not yet built.
 
+**The Backtest tab becomes Optimize: a port of `main`'s optimizer, kept as close to it as practical.**
+Gunnar's decision, 2026-09-24, after learning that `main`'s "Backtest" tab is an optimizer (slug
+`targets`). Contracts 0103 onward. He accepted a job of about six contracts.
+
+- **Renamed because the old name was misleading.** Its comparison is **in-sample**: the weights are
+  fitted and then scored on the same window, so "Optimized" beats "Current" almost by construction.
+  The comparison is kept, as in the reference, but it is labelled in-sample and not a forecast.
+- **Picking weights and scoring them are two jobs with different models.** Revised 2026-09-24, after
+  Gunnar challenged "constant weights, rebalanced daily". This deliberately departs from the
+  reference.
+  - **Picking: the reference's constant-mix objective, unchanged.** The expected-return (`w·μ`) and
+    risk (`w'Σw`) terms computed from daily returns are exact only for a portfolio held at `w` every
+    day. That makes it the one consistent thing to optimize. Optimizing for buy-and-hold directly has
+    no clean objective, depends on the start date and overfits the window. The UI labels the weights
+    "constant-mix".
+  - **Scoring and curves: buy-and-hold from the window start by default.** There is an optional
+    rebalance schedule: none (the default), monthly, quarterly or annual. These portfolios are held,
+    not traded. The shortest hold is about a month. A daily-rebalanced curve sells winners every day at
+    no cost. On a concentrated book (Gunnar's is 74% MU), that trims exactly what buy-and-hold lets
+    compound, and over a trending multi-year window the two curves diverge a lot. Daily vs monthly vs
+    quarterly usually differ little. The large gap is between rebalancing on any schedule and never
+    rebalancing, which is why "none" is the default and the others are options.
+  - **Built on the `value_series(units, prices)` seam** in `app/portfolio_series.py`:
+    - units are set at the window start from the weights (`units_from_weights`), and re-set from the
+      running value at each rebalance date
+    - per-holding series therefore sum to the total by construction
+    - this avoids `main:core/scenarios.py`'s bug, where contributions don't add up to the curve
+  - **Anchored at the window start, not today, unlike Holdings.** Anchoring at today would be
+    look-ahead: start weights implied by future prices, so winners start small because they later grew
+    into today's weight. So the "Current" curve still differs from the Holdings chart. It's the same
+    buy-and-hold model with a different anchor, and a one-line note says so.
+  - **Still in-sample.** Scoring constant-mix weights as drifting removes one flattering assumption.
+    It does not remove fitting and scoring on the same window. The "in-sample, not a forecast" label
+    stays. An accepted cost is that "Optimized" will beat "Current" less often. That is the honest
+    result, not a regression.
+  - **Cash is excluded from both curves**, as in the reference: the weights are renormalised over the
+    tickers. The optimizer allocates only the invested sleeve, and Apply keeps cash fixed. A constant
+    cash sleeve in both curves would compress their gap without adding information. The UI says
+    "invested holdings only".
+  - **No flat fill.** The *scored* curves start at the latest first bar among the holdings
+    (`backtest_series`, 0104), and the start date is labelled with the holding responsible. Flat fill is
+    a labelled Holdings convenience. Here it would invent zero-return days that then get scored.
+  - **Young holdings are pinned, not allowed to shrink the fit** (decided 2026-09-24, Gunnar).
+    - **Why:** `main` fit on the common history and warned only below 60 days. So one recent listing
+      silently cut a 3-year lookback down to months, and the optimizer produced confident weights from
+      it. A second planner session raised this, and Gunnar chose pinning over a refusal floor or a
+      manual toggle.
+    - **Which holdings are pinned:** those whose first bar is more than 7 calendar days after the
+      lookback start. The grace absorbs weekends and holidays at the window edge.
+    - **What pinning means:** a pinned holding keeps its current weight. The optimizer fits only the
+      full-history holdings, on the full requested lookback. Their weights are scaled to `1 − Σ pinned`.
+    - **Bounds:** the user's max and min weight apply to the **final** weights, so the optimizer gets
+      `bound ÷ (1 − Σ pinned)`, capped at 1, and the feasibility guards use those scaled bounds. A
+      pinned holding may itself exceed the max, and the banner says so.
+    - **Too few to fit:** fewer than 2 full-history holdings is a 422 ("need at least 2 holdings with
+      full history"), mirroring `main`'s two-ticker minimum.
+    - **Banner:** a banner, not a warning line, names each pinned holding with its first date and weight.
+    - **Scoring window:** scoring still needs every holding, so the curves start at the youngest
+      holding's first bar. That is shorter than the fit window, and it is labelled. This is the honest
+      cost of pinning: the fit window and the score window differ.
+  - **Metrics are computed from the scored curve's daily returns.** Sharpe = (CAGR − rf) / vol, with
+    rf = 0, as in the reference and labelled. This overrides, for this tab only, the "not to port"
+    note on Sharpe in the buy-and-hold entry.
+- **All reference features are ported, including the three the reference coded but never made
+  reachable:**
+  - conviction views, with the κ return bump
+  - the tilt engine (`core/tilt.py`)
+  - `max_sharpe_capm` with its forward-looking panel
+  The reference's dropdown omits `max_sharpe_capm` and draws no controls for entering views. Gunnar
+  chose to wire these up rather than skip them. That part is new design work, not a copy.
+- **Reference bugs fixed in the port, not copied.** Each was found by running `main`'s code on literal
+  fixtures in the reference venv:
+  - **Risk parity** aimed each asset's risk contribution `wᵢ(Σw)ᵢ` at `σ/n`, but those contributions
+    sum to `σ²`, not `σ`. On two uncorrelated assets with daily vols of 1% and 2% it returns
+    0.788/0.212, where true equal risk contribution (inverse vol) is 0.667/0.333. The fix aims at
+    `σ²/n`.
+  - **A Sharpe with zero volatility** fell through the `vol > 0` guard because of float noise
+    (`vol ≈ 3e-18`), giving Sharpe ≈ 8e16. The guard becomes `vol > 1e-12`, and the result is `None`
+    rather than `0.0`. Zero is a false claim, and `None` is shown as "—".
+- **Apply to Portfolio also writes share counts.**
+  - **When every position has a share count**, the new counts are
+    `target weight × invested value ÷ last close`, where invested value = Σ shares × last close.
+    Counts are **fractional**, per Gunnar, so the weights land exactly and no remainder goes to cash.
+  - **When only some positions have shares**, the weights are applied and **all share counts are
+    cleared**, per Gunnar. This deliberately destroys data, so the confirm dialog must say so.
+  - **When no position has shares**, only the weights are applied.
+  - The price is `last_close`, not the live quote, for the same reason as the Holdings dollar rule.
+  - `main` computed target shares in its action table, then threw them away on Apply.
+- **Short positions can be optimized but not applied.** Portfolio validation requires positive
+  weights, so Apply is disabled whenever any target weight is negative, with an explanation.
+
 ## Open questions (not decided)
 
 - **Whether tickers can be removed from the universe.** Only add and update have been specified. If removal exists, decide whether it deletes cached price history or just de-lists the ticker — the no-FK rule above means de-listing is the cheap default.
@@ -1786,6 +1877,9 @@ call. Reasons, recorded so it is not re-added casually:
 - **That hypothetical is a backtest**, and the Backtest tab will answer it properly, with a curve, a
   portfolio total and cash included, instead of one number per row. Two places computing
   return-since-a-date would eventually disagree. That is the 0071/0072 lesson.
+  **Superseded 2026-09-24:** the Backtest tab became Optimize, which excludes cash and scores fitted
+  weights in-sample, so it does not answer this question. The since-a-date hypothetical has no home
+  yet.
 - **The `basis_date` CSV column got more expensive to remove with every export.** Removal keeps
   compatibility: stored `basisDate` keys are stripped on read, and old CSVs import with the column
   ignored.
@@ -1846,10 +1940,20 @@ cash included; the anchor is the planner's.
   total, so contributions sum to the total by construction. `main:core/scenarios.py` gets this wrong:
   its contributors use buy-and-hold per-asset returns while its equity curve is daily-rebalanced, so
   the parts do not add up to the whole.
-- Also not to port from `main`: its Sharpe is `CAGR / vol` with `rf = 0`. `main` has **no Backtest
-  tab**. Its "backtest" code is `/portfolios/{id}/analytics` (equity curve vs SPY, feeding the Risk
-  page), `scenarios.py` (historical-window replay) and `walk_forward.py` (optimizer out-of-sample
-  folds, which depends on optimizers not yet rebuilt).
+- Also not to port from `main`: its Sharpe is `CAGR / vol` with `rf = 0`. **Corrected 2026-09-24:**
+  `main` *does* have a tab labelled "Backtest". It is the `targets` slug
+  (`main:frontend/app/portfolios/[id]/targets/page.tsx`, 773 lines), and it is really an
+  **optimizer**:
+  - 8 modes via scipy, with lookback, min/max weight, shorting, vol target and conviction κ.
+  - A CAPM forward panel.
+  - An **in-sample** current-vs-optimized comparison, i.e. weights fitted and scored on the same
+    window.
+  - An action table with CSV export, an equity curve vs SPY, and "Apply to Portfolio", which
+    overwrites the weights.
+
+  Its other backtest-like code is `/portfolios/{id}/analytics` (equity curve vs SPY, feeding the
+  Risk page), `scenarios.py` (historical-window replay) and `walk_forward.py` (optimizer
+  out-of-sample folds).
 - **Dollars on the y-axis only when the share counts agree with the weights.** Gunnar approved this
   rule 2026-09-24. Dollars are used only when every position has a share count and each position's
   share-implied weight, `shares × last_close / V`, is within **0.5 percentage points** of its declared
@@ -1873,8 +1977,9 @@ cash included; the anchor is the planner's.
 
 **Portfolio analysis lives at `/portfolios/:id/<tab>`, portfolio-scoped.** Decided 2026-09-22,
 contract 0075, matching `main:frontend/app/portfolios/[id]/`. Five tabs: Holdings (default), Backtest,
-Outlook, Monitor, Risk & Perf — **not** the reference's set, which has `rebalance` and `targets` and
-no backtest.
+Outlook, Monitor, Risk & Perf. The labels match `main`'s tab bar, where "Backtest" is the `targets`
+slug and is an optimizer (see the buy-and-hold entry). `main` also has an unlinked `rebalance` page.
+*(Corrected 2026-09-24. This previously said the reference had no backtest.)*
 
 - **The id is in the URL because selection is not durable anywhere else.** `PortfoliosPage` holds
   `selectedId` in React state, which a reload destroys, so `/portfolios/holdings` would have no way to

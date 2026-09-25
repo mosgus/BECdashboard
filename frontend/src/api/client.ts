@@ -307,6 +307,68 @@ export async function getIndicators(ticker: string, include: string[]): Promise<
   return request<IndicatorsResponse>(`/universe/${ticker}/indicators?${query}`)
 }
 
+export type OptimizeRebalance = 'none' | 'monthly' | 'quarterly' | 'annual'
+
+export interface OptimizeRequest {
+  tickers: string[]
+  weights: number[]
+  mode: string
+  lookback_days: number
+  max_weight: number
+  min_weight: number
+  vol_target: number
+  allow_short: boolean
+  rebalance: OptimizeRebalance
+  conviction_views?: Record<string, number>
+  kappa?: number
+}
+
+export interface PinnedHolding {
+  ticker: string
+  first_bar: string
+  weight: number
+  exceeds_max: boolean
+}
+
+export interface OptimizeCurves {
+  dates: string[]
+  current: number[]
+  optimized: number[]
+  benchmark: number[] | null
+}
+
+export type OptimizeMetrics = Record<string, number | null>
+
+export interface OptimizeResponse {
+  tickers: string[]
+  current_weights: Record<string, number>
+  target_weights: Record<string, number>
+  implied_trades: Record<string, number>
+  pinned: PinnedHolding[]
+  fit_start: string
+  fit_end: string
+  score_start: string
+  score_limited_by: string | null
+  curves: OptimizeCurves
+  metrics: {
+    current: OptimizeMetrics | null
+    optimized: OptimizeMetrics | null
+    forward_looking: OptimizeMetrics | null
+  }
+  capm_expected_returns: Record<string, number> | null
+  feasible: boolean
+  mode: string
+  rebalance: OptimizeRebalance
+  lookback_days: number
+  views_applied: boolean
+  delta_mu: Record<string, number>
+  warnings: string[]
+}
+
+export async function optimizePortfolio(body: OptimizeRequest): Promise<OptimizeResponse> {
+  return request<OptimizeResponse>('/portfolio/optimize', { method: 'POST', body })
+}
+
 export async function getPortfolioSeries(
   tickers: string[], weights: number[], cash: number, include: string[],
 ): Promise<PortfolioSeriesResponse> {
