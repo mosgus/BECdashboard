@@ -22,7 +22,14 @@ export default function OptimizeChart({ rows, hasBenchmark }: { rows: CurveRow[]
           <YAxis allowDecimals={false} tickFormatter={(v: number) => `${v.toFixed(0)}%`} domain={['auto', 'auto']} />
           <ReferenceLine y={0} stroke="var(--color-muted)" />
           <Legend />
-          <ChartTooltip formatter={(value) => (typeof value === 'number' ? `${value > 0 ? '+' : ''}${value.toFixed(2)}%` : value)} />
+          <ChartTooltip
+            formatter={(value) => (typeof value === 'number' ? `${value > 0 ? '+' : ''}${value.toFixed(2)}%` : value)}
+            contentStyle={{
+              backgroundColor: 'var(--color-surface)',
+              border: '1px solid var(--color-border)',
+              color: 'var(--color-text)',
+            }}
+          />
           <Line
             dataKey="optimized"
             name="Optimized"

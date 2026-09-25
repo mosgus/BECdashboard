@@ -181,7 +181,7 @@ function isValidCurrentPosition(value: unknown): value is Position {
   )
 }
 
-function isValidCurrentPortfolio(value: unknown): value is Portfolio {
+export function isValidCurrentPortfolio(value: unknown): value is Portfolio {
   if (typeof value !== 'object' || value === null) return false
   const candidate = value as Record<string, unknown>
   if ('cash' in candidate || 'totalValue' in candidate) return false

@@ -1,5 +1,6 @@
 import type { OptimizeCurves, OptimizeMetrics, OptimizeRebalance, OptimizeRequest, OptimizeResponse, PinnedHolding } from '../api/client'
 import { downsample } from './chart'
+import { isValidCurrentPortfolio } from './portfolio'
 import type { Portfolio } from './portfolio'
 import { DOLLAR_WEIGHT_TOLERANCE_PP } from './portfolioChart'
 import { datePart, filenameSafeName, quote } from './portfolioCsv'
@@ -65,8 +66,72 @@ export interface TradeRow extends WeightRow {
 export interface CurveRow { date: string; current: number; optimized: number; benchmark: number | null }
 export interface MetricItem { label: string; value: string; tooltip: string }
 
+export const APPLY_MIN_FRACTION = 0.0005
+
+export type ApplyBlockedReason = 'tickers-changed' | 'infeasible' | 'short' | 'no-price' | 'invalid'
+export type ApplySharesMode = 'recomputed' | 'cleared' | 'none'
+export type ApplyPlan =
+  | { ok: true; portfolio: Portfolio; sharesMode: ApplySharesMode; removed: string[] }
+  | { ok: false; reason: ApplyBlockedReason }
+
 export function canOptimize(portfolio: Portfolio): boolean {
   return portfolio.positions.length >= 2
+}
+
+export function applyPlan(portfolio: Portfolio, response: OptimizeResponse, lastCloseByTicker: ReadonlyMap<string, number | null>): ApplyPlan {
+  const portfolioTickers = portfolio.positions.map((position) => position.ticker).sort()
+  const responseTickers = [...response.tickers].sort()
+  if (portfolioTickers.length !== responseTickers.length || portfolioTickers.some((ticker, index) => ticker !== responseTickers[index])) return { ok: false, reason: 'tickers-changed' }
+  if (!response.feasible) return { ok: false, reason: 'infeasible' }
+  if (response.tickers.some((ticker) => response.target_weights[ticker] <= -APPLY_MIN_FRACTION)) return { ok: false, reason: 'short' }
+
+  const allHaveShares = portfolio.positions.every((position) => typeof position.shares === 'number' && Number.isFinite(position.shares) && position.shares > 0)
+  const sharesMode: ApplySharesMode = allHaveShares ? 'recomputed' : portfolio.positions.some((position) => 'shares' in position) ? 'cleared' : 'none'
+  const prices: Record<string, number> = {}
+  if (sharesMode === 'recomputed') {
+    for (const position of portfolio.positions) {
+      const price = lastCloseByTicker.get(position.ticker)
+      if (price === undefined || price === null || !Number.isFinite(price) || price <= 0) return { ok: false, reason: 'no-price' }
+      prices[position.ticker] = price
+    }
+  }
+
+  const kept = portfolio.positions.filter((position) => response.target_weights[position.ticker] >= APPLY_MIN_FRACTION)
+  const removed = portfolio.positions.filter((position) => response.target_weights[position.ticker] < APPLY_MIN_FRACTION).map((position) => position.ticker)
+  const targetTotal = kept.reduce((sum, position) => sum + response.target_weights[position.ticker], 0)
+  const investedValue = sharesMode === 'recomputed'
+    ? portfolio.positions.reduce((sum, position) => sum + position.shares! * prices[position.ticker], 0)
+    : 0
+  const positions = kept.map((position) => {
+    const fraction = response.target_weights[position.ticker] / targetTotal
+    const weight = fraction * (100 - portfolio.cashWeight)
+    return sharesMode === 'recomputed'
+      ? { ticker: position.ticker, weight, shares: fraction * investedValue / prices[position.ticker] }
+      : { ticker: position.ticker, weight }
+  })
+  const next: Portfolio = { id: portfolio.id, name: portfolio.name, cashWeight: portfolio.cashWeight, positions, updatedAt: portfolio.updatedAt }
+  if (!isValidCurrentPortfolio(next)) return { ok: false, reason: 'invalid' }
+  return { ok: true, portfolio: next, sharesMode, removed }
+}
+
+export function applyBlockedText(reason: ApplyBlockedReason): string {
+  if (reason === 'tickers-changed') return "This portfolio's holdings changed after the run. Run the optimizer again."
+  if (reason === 'infeasible') return 'The optimizer did not converge, so there is nothing to apply.'
+  if (reason === 'short') return "Short positions can't be saved to a portfolio. Turn off Allow short and run again."
+  if (reason === 'no-price') return "A holding has no stored closing price, so its new share count can't be worked out."
+  return "These weights don't make a valid portfolio, so they can't be applied."
+}
+
+export function applyConfirmLines(plan: Extract<ApplyPlan, { ok: true }>): string[] {
+  const lines = [`Holdings weights will be replaced by the Optimized column. Cash stays at ${plan.portfolio.cashWeight.toFixed(1)}%.`]
+  if (plan.sharesMode === 'recomputed') lines.push("Share counts will be recalculated from each holding's last stored close, as fractional shares.")
+  if (plan.sharesMode === 'cleared') lines.push('Only some holdings have share counts, so all share counts will be removed.')
+  if (plan.removed.length > 0) {
+    const list = plan.removed.length === 1 ? plan.removed[0] : `${plan.removed.slice(0, -1).join(', ')} and ${plan.removed.at(-1)}`
+    lines.push(`${list} ${plan.removed.length === 1 ? 'has' : 'have'} a 0.0% target and will be removed from the portfolio.`)
+  }
+  lines.push('There is no undo.')
+  return lines
 }
 
 export function tradeBasis(portfolio: Portfolio, lastCloseByTicker: ReadonlyMap<string, number | null>): TradeBasis {

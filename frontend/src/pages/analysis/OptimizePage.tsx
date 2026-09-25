@@ -8,6 +8,9 @@ import { OptimizerGuide } from '../../components/OptimizerGuide'
 import { Tooltip } from '../../components/Tooltip'
 import {
   DEFAULT_SETTINGS,
+  applyBlockedText,
+  applyConfirmLines,
+  applyPlan,
   LOOKBACK_OPTIONS,
   OPTIMIZE_MODES,
   REBALANCE_OPTIONS,
@@ -32,10 +35,10 @@ import {
   optimizeCsv,
   optimizeCsvFilename,
 } from '../../lib/optimize'
-import type { OptimizeSettings, TradeBasis } from '../../lib/optimize'
+import type { ApplyPlan, OptimizeSettings, TradeBasis } from '../../lib/optimize'
 import { formatPrice, formatShares } from '../../lib/format'
 import { downloadTextFile } from '../../lib/download'
-import { isLegacyPortfolio, listPortfolios } from '../../lib/portfolioStore'
+import { isLegacyPortfolio, listPortfolios, savePortfolio } from '../../lib/portfolioStore'
 
 const OptimizeChart = lazy(() => import('../../components/OptimizeChart'))
 
@@ -46,7 +49,7 @@ type RunState =
   | { status: 'idle' }
   | { status: 'running' }
   | { status: 'error'; message: string }
-  | { status: 'ready'; response: OptimizeResponse; settings: OptimizeSettings; basis: TradeBasis }
+  | { status: 'ready'; response: OptimizeResponse; settings: OptimizeSettings; basis: TradeBasis; applied: boolean }
 
 type PricesState =
   | { status: 'loading' }
@@ -67,6 +70,8 @@ export function OptimizePage(): JSX.Element | null {
   const [guideOpen, setGuideOpen] = useState(false)
   const [run, setRun] = useState<RunState>({ status: 'idle' })
   const [prices, setPrices] = useState<PricesState>({ status: 'loading' })
+  const [applyOpen, setApplyOpen] = useState(false)
+  const [applyError, setApplyError] = useState<string | null>(null)
   const mountedRef = useRef(true)
 
   useEffect(() => {
@@ -93,15 +98,19 @@ export function OptimizePage(): JSX.Element | null {
   if (current === null) return null
 
   const runnable = canOptimize(current)
+  const plan = run.status === 'ready'
+    ? applyPlan(current, run.response, prices.status === 'ready' ? prices.lastClose : new Map())
+    : null
 
   function handleRun(): void {
     if (current === null || prices.status !== 'ready') return
+    setApplyError(null)
     setRun({ status: 'running' })
     const requestSettings = settings
     const basis = tradeBasis(current, prices.lastClose)
     void optimizePortfolio(buildOptimizeRequest(current, requestSettings, basis))
       .then((response) => {
-        if (mountedRef.current) setRun({ status: 'ready', response, settings: requestSettings, basis })
+        if (mountedRef.current) setRun({ status: 'ready', response, settings: requestSettings, basis, applied: false })
       })
       .catch((error: unknown) => {
         if (mountedRef.current) {
@@ -109,6 +118,19 @@ export function OptimizePage(): JSX.Element | null {
           setRun({ status: 'error', message })
         }
       })
+  }
+
+  function handleConfirmApply(): void {
+    if (current === null || run.status !== 'ready' || plan === null || !plan.ok) return
+    savePortfolio(plan.portfolio)
+    const saved = listPortfolios().find((candidate) => candidate.id === current.id)
+    if (saved === undefined || isLegacyPortfolio(saved) || saved.updatedAt === current.updatedAt) {
+      setApplyError("Couldn't save to this browser's storage. Nothing was changed.")
+    } else {
+      setRun({ ...run, applied: true })
+      setApplyError(null)
+    }
+    setApplyOpen(false)
   }
 
   return (
@@ -204,7 +226,7 @@ export function OptimizePage(): JSX.Element | null {
                 <label className="mb-1 block text-xs font-medium text-[var(--color-muted)]">
                   Vol target: {settings.volTargetPct}%
                 </label>
-                <Tooltip block label="The optimizer finds the highest-return mix whose annual volatility stays at or below this">
+                <Tooltip dismissOnPointerDown block label="The optimizer finds the highest-return mix whose annual volatility stays at or below this">
                   <input
                     type="range"
                     min={5}
@@ -268,10 +290,30 @@ export function OptimizePage(): JSX.Element | null {
       </div>
 
       {run.status === 'ready' && (
-        <OptimizeResults response={run.response} settings={run.settings} liveSettings={settings} portfolio={current} basis={run.basis} />
+        <OptimizeResults response={run.response} settings={run.settings} liveSettings={settings} portfolio={current} basis={run.basis} plan={plan!} applied={run.applied} applyError={applyError} onOpenApply={() => setApplyOpen(true)} />
       )}
 
       {guideOpen && <OptimizerGuide onClose={() => setGuideOpen(false)} />}
+
+      {applyOpen && run.status === 'ready' && plan !== null && plan.ok && (
+        <div
+          className="fixed inset-0 bg-overlay flex items-center justify-center px-4 z-[110]"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) setApplyOpen(false)
+          }}
+        >
+          <div role="dialog" aria-modal="true" aria-labelledby="apply-portfolio-heading" className="bg-brand-surface border border-brand-border rounded-[var(--radius-card)] p-4 w-full max-w-sm shadow-xl">
+            <h2 id="apply-portfolio-heading" className="font-heading font-bold text-lg text-foreground mb-2">Apply to {current.name}?</h2>
+            <div className="space-y-2 mb-4">
+              {applyConfirmLines(plan).map((line) => <p key={line} className="text-sm text-[var(--color-muted)] leading-relaxed">{line}</p>)}
+            </div>
+            <div className="flex justify-end gap-2">
+              <button type="button" autoFocus onClick={() => setApplyOpen(false)} className="text-sm font-medium px-4 py-2 rounded-[var(--radius-btn)] bg-brand-surface border border-brand-border text-[var(--color-muted)] hover:bg-brand-border hover:text-foreground">Cancel</button>
+              <button type="button" onClick={handleConfirmApply} className="text-sm font-medium px-4 py-2 rounded-[var(--radius-btn)] bg-btn-action text-btn-action-text hover:opacity-90">Apply</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -282,12 +324,20 @@ function OptimizeResults({
   liveSettings,
   portfolio,
   basis,
+  plan,
+  applied,
+  applyError,
+  onOpenApply,
 }: {
   response: OptimizeResponse
   settings: OptimizeSettings
   liveSettings: OptimizeSettings
   portfolio: { cashWeight: number; name: string }
   basis: TradeBasis
+  plan: ApplyPlan
+  applied: boolean
+  applyError: string | null
+  onOpenApply: () => void
 }): JSX.Element {
   const rows = weightRows(response)
   const dollarRows = basis.kind === 'dollar' ? tradeRows(response, basis) : null
@@ -332,17 +382,23 @@ function OptimizeResults({
       <div className="bg-brand-surface border border-brand-border rounded-[var(--radius-card)] p-4">
         <div className="flex items-center justify-between gap-3 mb-3">
           <h3 className="text-sm font-semibold">Weights</h3>
-          <Tooltip label="Download this table as a CSV">
-            <button
-              type="button"
-              onClick={() => downloadTextFile(optimizeCsvFilename(portfolio.name, response.mode, new Date()), optimizeCsv(response, basis), 'text/csv;charset=utf-8')}
-              className="inline-flex items-center gap-2 text-sm font-medium px-4 py-2 rounded-[var(--radius-btn)] bg-brand-surface border border-brand-border text-[var(--color-muted)] hover:bg-brand-border hover:text-foreground"
-            >
-              <DownloadIcon />
-              <span>Export CSV</span>
-            </button>
-          </Tooltip>
+          <div className="flex gap-2">
+            <Tooltip label="Download this table as a CSV">
+              <button
+                type="button"
+                onClick={() => downloadTextFile(optimizeCsvFilename(portfolio.name, response.mode, new Date()), optimizeCsv(response, basis), 'text/csv;charset=utf-8')}
+                className="inline-flex items-center gap-2 text-sm font-medium px-4 py-2 rounded-[var(--radius-btn)] bg-brand-surface border border-brand-border text-[var(--color-muted)] hover:bg-brand-border hover:text-foreground"
+              >
+                <DownloadIcon />
+                <span>Export CSV</span>
+              </button>
+            </Tooltip>
+            <Tooltip label={applied ? 'Already applied. Run again to optimize the new weights.' : !plan.ok ? applyBlockedText(plan.reason) : "Save the Optimized weights to this portfolio's Holdings"}>
+              <button type="button" disabled={applied || !plan.ok} onClick={onOpenApply} className="text-sm font-semibold px-4 py-2 rounded-[var(--radius-btn)] bg-btn-action text-btn-action-text hover:opacity-90 disabled:opacity-50">Apply to portfolio</button>
+            </Tooltip>
+          </div>
         </div>
+        {applied && <p className="text-sm text-brand-positive mb-3">Applied. Holdings now use the Optimized weights. Run again to compare against them.</p>}
         <div className="overflow-x-auto">
           <table className="w-full border-collapse text-sm">
             {dollarRows === null ? (
@@ -367,6 +423,7 @@ function OptimizeResults({
           </table>
         </div>
         <p className="mt-3 text-xs text-[var(--color-muted)]">{tradeBasisNote(basis)}</p>
+        {applyError !== null && <p className="mt-3 text-sm text-brand-negative">{applyError}</p>}
       </div>
 
       <div className="bg-brand-surface border border-brand-border rounded-[var(--radius-card)] p-4">

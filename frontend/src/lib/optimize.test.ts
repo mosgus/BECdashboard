@@ -3,6 +3,9 @@ import type { OptimizeResponse } from '../api/client'
 import type { Portfolio } from './portfolio'
 import {
   DEFAULT_SETTINGS,
+  applyBlockedText,
+  applyConfirmLines,
+  applyPlan,
   buildOptimizeRequest,
   canOptimize,
   curveRows,
@@ -102,6 +105,89 @@ describe('tradeBasis', () => {
     expect(tradeBasis(DOLLAR_PORTFOLIO, new Map([['AAA', 45], ['BBB', 13.5]]))).toEqual({ kind: 'weights', reason: 'no-price' })
     expect(tradeBasis(DOLLAR_PORTFOLIO, new Map([...CLOSES, ['YNG', null]]))).toEqual({ kind: 'weights', reason: 'no-price' })
     expect(tradeBasis({ ...DOLLAR_PORTFOLIO, positions: DOLLAR_PORTFOLIO.positions.map((position) => position.ticker === 'BBB' ? { ...position, shares: 21 } : position) }, CLOSES)).toEqual({ kind: 'weights', reason: 'shares-mismatch' })
+  })
+})
+
+describe('applyPlan', () => {
+  it('clears mixed share counts while applying weights', () => {
+    const plan = applyPlan(PORTFOLIO, RESPONSE, CLOSES)
+    if (!plan.ok) throw new Error(plan.reason)
+    expect(plan.sharesMode).toBe('cleared')
+    expect(plan.removed).toEqual([])
+    expect(plan.portfolio.positions.map((position) => position.weight)).toEqual([55.8, 16.2, 18])
+    expect(plan.portfolio.positions.every((position) => !('shares' in position))).toBe(true)
+    expect(plan.portfolio).toMatchObject({ id: PORTFOLIO.id, name: PORTFOLIO.name, cashWeight: 10, updatedAt: PORTFOLIO.updatedAt })
+  })
+
+  it('applies weights without creating shares when none exist', () => {
+    const noShares = { ...PORTFOLIO, positions: PORTFOLIO.positions.map(({ ticker, weight }) => ({ ticker, weight })) }
+    const plan = applyPlan(noShares, RESPONSE, CLOSES)
+    if (!plan.ok) throw new Error(plan.reason)
+    expect(plan.sharesMode).toBe('none')
+    expect(plan.portfolio.positions.map((position) => position.weight)).toEqual([55.8, 16.2, 18])
+    expect(plan.portfolio.positions.every((position) => !('shares' in position))).toBe(true)
+  })
+
+  it('recomputes all shares from invested value', () => {
+    const plan = applyPlan(DOLLAR_PORTFOLIO, RESPONSE, CLOSES)
+    if (!plan.ok) throw new Error(plan.reason)
+    expect(plan.sharesMode).toBe('recomputed')
+    expect(plan.portfolio.positions.map((position) => position.weight)).toEqual([55.8, 16.2, 18])
+    plan.portfolio.positions.forEach((position, index) => expect(position.shares).toBeCloseTo([12.4, 12, 4][index], 6))
+  })
+
+  it('recomputes mismatched shares from their actual invested value', () => {
+    const mismatched = { ...DOLLAR_PORTFOLIO, positions: DOLLAR_PORTFOLIO.positions.map((position) => position.ticker === 'BBB' ? { ...position, shares: 21 } : position) }
+    const plan = applyPlan(mismatched, RESPONSE, CLOSES)
+    if (!plan.ok) throw new Error(plan.reason)
+    expect(plan.sharesMode).toBe('recomputed')
+    expect(plan.portfolio.positions.map((position) => position.weight)).toEqual([55.8, 16.2, 18])
+    plan.portfolio.positions.forEach((position, index) => expect(position.shares).toBeCloseTo([12.586, 12.18, 4.06][index], 6))
+  })
+
+  it('removes zero and solver-noise target holdings', () => {
+    const mixedPlan = applyPlan(PORTFOLIO, { ...RESPONSE, target_weights: { AAA: 0.8, BBB: -1e-12, YNG: 0.2 } }, CLOSES)
+    if (!mixedPlan.ok) throw new Error(mixedPlan.reason)
+    expect(mixedPlan).toMatchObject({ sharesMode: 'cleared', removed: ['BBB'] })
+    expect(mixedPlan.portfolio.positions.map((position) => [position.ticker, position.weight])).toEqual([['AAA', 72], ['YNG', 18]])
+    const dollarPlan = applyPlan(DOLLAR_PORTFOLIO, { ...RESPONSE, target_weights: { AAA: 0.8, BBB: 0.0004, YNG: 0.2 } }, CLOSES)
+    if (!dollarPlan.ok) throw new Error(dollarPlan.reason)
+    expect(dollarPlan.removed).toEqual(['BBB'])
+    expect(dollarPlan.portfolio.positions.map((position) => position.weight)).toEqual([72, 18])
+    dollarPlan.portfolio.positions.forEach((position, index) => expect(position.shares).toBeCloseTo([16, 4][index], 6))
+  })
+
+  it('reports each blocked reason', () => {
+    expect(applyPlan(PORTFOLIO, { ...RESPONSE, target_weights: { AAA: 0.9, BBB: -0.1, YNG: 0.2 } }, CLOSES)).toEqual({ ok: false, reason: 'short' })
+    expect(applyPlan(PORTFOLIO, { ...RESPONSE, feasible: false }, CLOSES)).toEqual({ ok: false, reason: 'infeasible' })
+    expect(applyPlan({ ...PORTFOLIO, positions: PORTFOLIO.positions.slice(0, 2) }, RESPONSE, CLOSES)).toEqual({ ok: false, reason: 'tickers-changed' })
+    expect(applyPlan(DOLLAR_PORTFOLIO, RESPONSE, new Map([['AAA', 45], ['BBB', 13.5]]))).toEqual({ ok: false, reason: 'no-price' })
+  })
+
+  it('does not require prices for weights-only modes', () => {
+    const plan = applyPlan(PORTFOLIO, RESPONSE, new Map())
+    expect(plan.ok && plan.sharesMode).toBe('cleared')
+  })
+
+  it('explains every block reason', () => {
+    expect(applyBlockedText('tickers-changed')).toBe("This portfolio's holdings changed after the run. Run the optimizer again.")
+    expect(applyBlockedText('infeasible')).toBe('The optimizer did not converge, so there is nothing to apply.')
+    expect(applyBlockedText('short')).toBe("Short positions can't be saved to a portfolio. Turn off Allow short and run again.")
+    expect(applyBlockedText('no-price')).toBe("A holding has no stored closing price, so its new share count can't be worked out.")
+    expect(applyBlockedText('invalid')).toBe("These weights don't make a valid portfolio, so they can't be applied.")
+  })
+
+  it('describes every apply confirmation shape', () => {
+    const cleared = applyPlan(PORTFOLIO, RESPONSE, CLOSES)
+    const recomputed = applyPlan(DOLLAR_PORTFOLIO, RESPONSE, CLOSES)
+    const none = applyPlan({ ...PORTFOLIO, positions: PORTFOLIO.positions.map(({ ticker, weight }) => ({ ticker, weight })) }, RESPONSE, CLOSES)
+    const removed = applyPlan(PORTFOLIO, { ...RESPONSE, target_weights: { AAA: 0.8, BBB: -1e-12, YNG: 0.2 } }, CLOSES)
+    if (!cleared.ok || !recomputed.ok || !none.ok || !removed.ok) throw new Error('expected plans')
+    expect(applyConfirmLines(cleared)).toEqual(['Holdings weights will be replaced by the Optimized column. Cash stays at 10.0%.', 'Only some holdings have share counts, so all share counts will be removed.', 'There is no undo.'])
+    expect(applyConfirmLines(recomputed)[1]).toBe("Share counts will be recalculated from each holding's last stored close, as fractional shares.")
+    expect(applyConfirmLines(none)).toHaveLength(2)
+    expect(applyConfirmLines(removed)[2]).toBe('BBB has a 0.0% target and will be removed from the portfolio.')
+    expect(applyConfirmLines({ ...cleared, removed: ['AAA', 'BBB', 'CCC'] })[2]).toBe('AAA, BBB and CCC have a 0.0% target and will be removed from the portfolio.')
   })
 })
 

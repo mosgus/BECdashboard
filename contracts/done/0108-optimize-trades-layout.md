@@ -1,6 +1,6 @@
 # Contract 0108 — Optimize tab: trade table, CSV export, settings layout and % chart
 
-**Status:** reported
+**Status:** accepted
 **Assigned to:** sonnet
 **Author:** planner (opus)
 
@@ -448,7 +448,7 @@ None.
 
 ## Amendment 1 (planner audit, 2026-09-24) — Haiku
 
-**Status:** open
+**Status:** accepted
 
 This fixes one spacing defect found in the audit. Column 3 of the settings card is
 `flex flex-col gap-4`.
