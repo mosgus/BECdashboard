@@ -1,7 +1,7 @@
 # Blue Eagle
 
 A portfolio analysis tool: a curated, shared universe of securities on the server, and allocation
-work — portfolios, and eventually optimization and risk — in the browser.
+work — portfolios and optimization now, and eventually outlook and risk — in the browser.
 
 This branch (`rebuild`) is a ground-up rewrite of an earlier implementation still intact on `main`.
 The rewrite is well past the exploratory stage: the architecture below is what the app is being made
@@ -10,20 +10,27 @@ including the decisions that were reversed and why.
 
 ## Status
 
-Four pages ship, all backed by a live deployment on Render.
+These pages ship, all backed by a live deployment on Render.
 
 | page | what works |
 |---|---|
 | `/` | Market briefing (Gemini, over stored headlines), news cards and text list, four explanatory entry cards |
 | `/universe` | Add, refresh and delete tickers; filters; charts; CSV and zip export; live quotes and day change |
+| `/ticker/:symbol` | Price chart with technical indicators and signal states for one universe ticker |
 | `/portfolios` | Weight-first portfolios in browser storage: create by weight or by shares, add positions with pro-rata dilution, CSV import and export |
+| `/portfolios/:id/holdings` | Positions plus buy-and-hold value/return charts anchored at today's weights |
+| `/portfolios/:id/optimize` | **Finished 2026-09-24 (contracts 0103–0109).** Eight optimizer modes, in-sample current-vs-optimized comparison with metrics and a %-return chart vs SPY, a share-and-dollar trade table, CSV export, and Apply to portfolio |
 | `/ops` | System health, job-run history, theme selector |
 
 Chrome on every page: a scrolling ticker strip, a backend status indicator, and light/dark theming
 off a single attribute.
 
-Not built: optimization, risk, forecasting, and the `Research` nav destination. The four entry cards
-on `/` describe those and are deliberately inert.
+Not built: the Outlook, Monitor and Risk & Perf portfolio tabs (they render empty on purpose), and
+the `Research` nav destination. The four entry cards on `/` describe the unbuilt features and are
+deliberately inert.
+
+**Next: the Outlook tab**, a port of `main`'s CAPM optimizer (with per-holding conviction views),
+Monte Carlo and forecast sections. Decided 2026-09-24.
 
 **Order of work, decided 2026-09-22: Portfolios → Ops → Research.** All four nav destinations are
 real features; none is a placeholder. Research is last on purpose — it is the only one whose shape

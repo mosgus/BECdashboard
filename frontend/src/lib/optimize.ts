@@ -46,7 +46,7 @@ export interface OptimizeSettings {
 }
 
 export const DEFAULT_SETTINGS: OptimizeSettings = {
-  mode: 'min_variance', lookbackDays: 1825, maxWeightPct: 100, minWeightPct: 0,
+  mode: 'min_variance', lookbackDays: 365, maxWeightPct: 100, minWeightPct: 0,
   volTargetPct: 10, allowShort: false, rebalance: 'none',
 }
 

@@ -6,7 +6,7 @@ import { formatPercent } from '../lib/format'
 import { summariseDraft, toFieldText } from '../lib/portfolio'
 import type { DraftRow, EntryMode, Portfolio, Position } from '../lib/portfolio'
 import { parsePortfolioCsv, portfolioNameFromFilename as nameFromFilename } from '../lib/portfolioCsv'
-import type { DraftSeed, DroppedRow } from '../lib/portfolioCsv'
+import type { DraftSeed, DroppedRow, TargetAdjustment } from '../lib/portfolioCsv'
 import { PRESETS } from '../lib/presets'
 import { Tooltip } from './Tooltip'
 
@@ -30,6 +30,8 @@ export function NewPortfolioDialog({ universe, onCancel, onCreate }: NewPortfoli
   const [rows, setRows] = useState<DraftRow[]>([])
   const [importError, setImportError] = useState<string | null>(null)
   const [droppedRows, setDroppedRows] = useState<DroppedRow[]>([])
+  const [adjustment, setAdjustment] = useState<TargetAdjustment | null>(null)
+  const [zeroTargets, setZeroTargets] = useState<string[]>([])
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent): void {
@@ -62,15 +64,21 @@ export function NewPortfolioDialog({ universe, onCancel, onCreate }: NewPortfoli
       const result = parsePortfolioCsv(await file.text(), new Set(universe.map((entry) => entry.ticker)))
       setImportError(null)
       setDroppedRows([])
+      setAdjustment(null)
+      setZeroTargets([])
       if (!result.ok) {
         setImportError(`${result.error}${result.line === null ? '' : ` (line ${result.line})`}`)
         return
       }
       applySeed({ ...result.seed, name: result.seed.name || nameFromFilename(file.name) })
       setDroppedRows(result.dropped)
+      setAdjustment(result.adjustment ?? null)
+      setZeroTargets(result.zeroTargets ?? [])
     } catch {
       setImportError('Could not read the selected CSV file.')
       setDroppedRows([])
+      setAdjustment(null)
+      setZeroTargets([])
     } finally {
       input.value = ''
     }
@@ -83,6 +91,8 @@ export function NewPortfolioDialog({ universe, onCancel, onCreate }: NewPortfoli
     const result = parsePortfolioCsv(preset.csv, new Set(universe.map((entry) => entry.ticker)))
     setImportError(null)
     setDroppedRows([])
+    setAdjustment(null)
+    setZeroTargets([])
     event.target.value = ''
     if (!result.ok) {
       setImportError(`Preset "${preset.name}" could not be loaded: ${result.error}`)
@@ -90,6 +100,8 @@ export function NewPortfolioDialog({ universe, onCancel, onCreate }: NewPortfoli
     }
     applySeed({ ...result.seed, name: preset.name })
     setDroppedRows(result.dropped)
+    setAdjustment(result.adjustment ?? null)
+    setZeroTargets(result.zeroTargets ?? [])
   }
 
   function availableTickersFor(rowId: string): UniverseEntry[] {
@@ -213,6 +225,14 @@ export function NewPortfolioDialog({ universe, onCancel, onCreate }: NewPortfoli
                 <p>Their {formatPercent(droppedRows.reduce((sum, row) => sum + (row.weightPct ?? 0), 0))} was added to cash.</p>
               ) : null}
             </div>
+          )}
+
+          {zeroTargets.length > 0 && (
+            <p className="text-xs text-[var(--color-muted)]">{`Left out ${zeroTargets.length} ${zeroTargets.length === 1 ? 'ticker' : 'tickers'} with a 0% target: ${zeroTargets.join(', ')}.`}</p>
+          )}
+
+          {adjustment !== null && (
+            <p className="text-xs text-[var(--color-muted)]">Target weights in the file add up to {formatPercent(adjustment.fileTotalPct)} because the export rounds them. {adjustment.ticker} was reduced from {formatPercent(adjustment.fromPct)} to {formatPercent(adjustment.toPct)} so the portfolio totals 100%.</p>
           )}
 
           <Tooltip label="Name this portfolio">

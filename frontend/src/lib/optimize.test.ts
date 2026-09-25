@@ -65,7 +65,7 @@ describe('buildOptimizeRequest', () => {
     const req = buildOptimizeRequest(PORTFOLIO, DEFAULT_SETTINGS)
     expect(req).toEqual({
       tickers: ['AAA', 'BBB', 'YNG'], weights: [45, 27, 18], mode: 'min_variance',
-      lookback_days: 1825, max_weight: 1, min_weight: 0, vol_target: 0.1,
+      lookback_days: 365, max_weight: 1, min_weight: 0, vol_target: 0.1,
       allow_short: false, rebalance: 'none',
     })
     expect('kappa' in req).toBe(false)

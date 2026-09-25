@@ -206,3 +206,51 @@ describe('portfolio CSV whole-file rejections', () => {
   })
   it('rejects more than 5000 data rows', () => expect(parsePortfolioCsv(`ticker\n${Array.from({ length: 5001 }, () => 'AAPL').join('\n')}`, universe)).toMatchObject({ ok: false, line: 5002 }))
 })
+
+describe('optimization-result CSV imports', () => {
+  it('uses target values from a dollar export', () => {
+    const csv = 'ticker,price,current_shares,current_value,current_pct,target_shares,target_value,target_pct,trade_shares,trade_value,change_pp,pinned\nAAPL,200,10,2000,50,5,1000,25,-5,-1000,-25,false\nMSFT,400,5,2000,50,7.5,3000,75,2.5,1000,25,true\n'
+    expect(parsePortfolioCsv(csv, universe)).toEqual({ ok: true, seed: { name: '', mode: 'weight', cash: '0', rows: [{ ticker: 'AAPL', weight: '25', shares: '5' }, { ticker: 'MSFT', weight: '75', shares: '7.5' }] }, dropped: [] })
+  })
+
+  it('imports weights-only exports', () => {
+    const result = successful('ticker,current_pct,target_pct,change_pp,pinned\nAAPL,50,40,-10,false\nMSFT,50,60,10,true\n')
+    expect(result.seed).toEqual({ name: '', mode: 'weight', cash: '0', rows: [{ ticker: 'AAPL', weight: '40', shares: '' }, { ticker: 'MSFT', weight: '60', shares: '' }] })
+  })
+
+  it('prefers target columns over canonical columns', () => {
+    const result = successful('ticker,weight_pct,shares,target_pct,target_shares\nAAPL,50,10,20,4\nMSFT,50,10,80,16\n')
+    expect(result.seed.rows).toEqual([{ ticker: 'AAPL', weight: '20', shares: '4' }, { ticker: 'MSFT', weight: '80', shares: '16' }])
+  })
+
+  it('rejects short target weights before negative share validation', () => {
+    const csv = 'ticker,price,current_shares,current_value,current_pct,target_shares,target_value,target_pct,trade_shares,trade_value,change_pp,pinned\nMU,1080.53,10,10805.3,74.18,-0.657262,-710.19,-4.88,-10.657262,-11515.49,-79.06,false\nVOO,707.6,2.08,1471.81,10.1,20.261565,14337.08,98.43,18.181565,12865.27,88.33,false\nPBR,21.14,47,993.58,6.82,89.303,1887.87,12.96,42.303,894.29,6.14,false\nORCL,144.56,4.46,644.74,4.43,-4.189537,-605.64,-4.16,-8.649537,-1250.38,-8.58,false\nSHNY,8.81,68.84,606.48,4.16,-30.619489,-269.76,-1.85,-99.459489,-876.24,-6.02,false\nXIACF,3.345,13,43.49,0.3,-22.113077,-73.97,-0.51,-35.113077,-117.45,-0.81,false\n'
+    expect(parsePortfolioCsv(csv, new Set(['MU', 'VOO', 'PBR', 'ORCL', 'SHNY', 'XIACF']))).toEqual({ ok: false, line: 2, error: "Short target weights can't be imported: MU (-4.88%), ORCL (-4.16%), SHNY (-1.85%), XIACF (-0.51%). Portfolios hold long positions only; re-run the optimizer with shorting turned off." })
+  })
+
+  it('leaves zero targets out without validating their shares', () => {
+    const weights = successful('ticker,current_pct,target_pct,change_pp,pinned\nAAPL,30,0,-30,false\nMSFT,30,40,10,false\nGOOG,40,60,20,false\n')
+    expect(weights.seed).toMatchObject({ cash: '0', rows: [{ ticker: 'MSFT', weight: '40' }, { ticker: 'GOOG', weight: '60' }] })
+    expect(weights.dropped).toEqual([])
+    expect(weights.zeroTargets).toEqual(['AAPL'])
+    const dollars = successful('ticker,price,current_shares,current_value,current_pct,target_shares,target_value,target_pct,trade_shares,trade_value,change_pp,pinned\nAAPL,100,3,300,30,0,0,0,-3,-300,-30,false\nMSFT,100,7,700,70,10,1000,100,3,300,30,false\n')
+    expect(dollars.seed.rows).toEqual([{ ticker: 'MSFT', weight: '100', shares: '10' }])
+  })
+
+  it('trims a rounding-sized target overshoot from the largest survivor', () => {
+    const csv = 'ticker,current_pct,target_pct,change_pp,pinned\nAAPL,20,40.01,20.01,false\nMSFT,20,30.01,10.01,false\nGOOG,20,20,0,false\nAMZN,20,5,-15,false\nNVDA,20,5,-15,false\n'
+    const result = successful(csv, new Set(['AAPL', 'MSFT', 'GOOG', 'AMZN', 'NVDA']))
+    expect(result.seed.cash).toBe('0')
+    expect(result.seed.rows[0].weight).toBe('39.99')
+    expect(result.adjustment).toMatchObject({ ticker: 'AAPL', fromPct: 40.01, toPct: 39.99 })
+    expect(result.adjustment?.fileTotalPct).toBeCloseTo(100.02, 9)
+  })
+
+  it('rejects target overshoot beyond export rounding', () => {
+    expect(parsePortfolioCsv('ticker,target_pct\nAAPL,60.02\nMSFT,40.02\n', universe)).toEqual({ ok: false, line: null, error: 'Target weights add up to 100.04%, which is more than export rounding can explain.' })
+  })
+
+  it('rejects non-finite target weights', () => {
+    expect(parsePortfolioCsv('ticker,target_pct\nAAPL,abc\nMSFT,100\n', universe)).toEqual({ ok: false, line: 2, error: 'Target weight for AAPL must be a number' })
+  })
+})

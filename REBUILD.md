@@ -31,7 +31,8 @@ Nothing on a lower tier imports anything above it.
 
 ```
 tier 0  config  models  schemas  freshness  schedule  export      (zero app-internal imports)
-tier 1  db → config
+        bars  returns  indicators  optimizer  portfolio_series  rates
+tier 1  db → config    signals → indicators    optimize_run → optimizer, portfolio_series
 tier 2  cache → db, models    quotes → cache, db    jobrun → db, models
 tier 3  market_data → cache, freshness
 tier 4  universe → cache, db, market_data, models, quotes
@@ -47,6 +48,14 @@ tier 6  routers/*                                                 (HTTP only)
 | `freshness.py` | **Pure.** Is stored history stale, what range is missing, has a split restated it |
 | `schedule.py` | **Pure.** The 09:30 / 12:00 / 16:00 ET refresh windows |
 | `export.py` | **Pure.** OHLCV → CSV text, byte-compatible with the old `YF.py` |
+| `bars.py` | **Pure.** Normalises stored OHLCV bars onto the adjusted-close basis |
+| `returns.py` | **Pure.** Period returns (`pct_return`, YTD base, nth prior close) over stored bars |
+| `indicators.py` | **Pure.** Technical-indicator series. `CLOSE_ONLY_INDICATORS` is the subset valid on a portfolio value series |
+| `signals.py` | **Pure.** Technical-signal states derived from `indicators` |
+| `portfolio_series.py` | **Pure.** Portfolio value series from units × prices, plus the rebalancing backtest the optimizer compares against |
+| `optimizer.py` | **Pure** (numpy/pandas). The optimizer modes, ported from `main:core/`, plus `compute_tilt`, which has no UI (see "Open questions") |
+| `optimize_run.py` | Validates an optimize request and runs `optimizer` + `portfolio_series` over the fetched prices |
+| `rates.py` | The live risk-free rate (10Y `^TNX`), 1-hour TTL, falling back to 0.0427 |
 | `db.py` | Engine and transactional `session()` |
 | `cache.py` | Price history read/write, 24-hour in-process `TTLCache` over the database |
 | `quotes.py` | Live intraday quotes, 10-minute TTL, market-hours aware |
@@ -58,7 +67,7 @@ tier 6  routers/*                                                 (HTTP only)
 | `autorefresh.py` | The visit-triggered universe sweep, claimed per window |
 | `jobrun.py` | `record_run` — one `job_runs` row per sweep that actually ran. Never breaks the job it records |
 | `ops.py` | System-health aggregation and job-run history. **Booleans and counts only — never a secret** |
-| `routers/` | **The only modules that know about HTTP.** Everything below raises domain exceptions |
+| `routers/` | **The only modules that know about HTTP.** Everything below raises domain exceptions. `routers/portfolio.py` serves `GET /portfolio/series`, `POST /portfolio/optimize` and `POST /portfolio/tilt` |
 
 `cache.py`, `config.py`, `db.py`, `models.py` and `main.py` have no module docstring — their function
 docstrings carry the reasoning instead.
@@ -67,12 +76,20 @@ docstrings carry the reasoning instead.
 
 ```
 App.tsx        Header + TickerStrip (chrome, outside <Routes>) + the routes
-pages/         LaunchPage, UniversePage, OpsPage
-components/    chrome:    Header, NavItem, SettingsIcon, BackendStatus, Tooltip, DownloadIcon, TickerStrip
+pages/         LaunchPage, UniversePage, TickerPage, PortfoliosPage, OpsPage
+pages/analysis/  AnalysisLayout (the tab bar) + HoldingsPage, OptimizePage,
+               and OutlookPage / MonitorPage / RiskPage (stubs)
+components/    chrome:    Header, NavItem, SettingsIcon, BackendStatus, Tooltip, DownloadIcon,
+                          TickerStrip, HelpSidebar
                launch:    NewsSection, EntryCard
-               universe:  UniverseTable, ChartDialog, FilterDialog, AddTickerForm
+               universe:  UniverseTable, ChartDialog, FilterDialog, AddTickerForm, SeriesChart,
+                          SignalBadge
+               portfolio: NewPortfolioDialog, AddPositionForm, PositionsTable, PortfolioCharts,
+                          OptimizeChart, OptimizerGuide
                ops:       ThemeSelector, SystemHealthCard, JobRunsCard
-lib/           pure helpers — change, filters, format, opsFormat, ranges, relativeTime, theme
+lib/           pure helpers — change, chart, download, filters, format, indicators, opsFormat,
+               optimize, portfolio, portfolioChart, portfolioCsv, portfolioStore, presets, ranges,
+               relativeTime, theme, tickerType
 api/client.ts  the single fetch boundary: base URL, ApiError, GET-only transient retry (0041)
 index.html     an inline pre-paint script that sets data-theme from localStorage (see below)
 ```
@@ -109,9 +126,13 @@ Three consequences worth keeping:
 **Every `lib/` function takes `now` as an argument and never reads the clock.** That is what makes
 them testable, and it is the same discipline `freshness.py` and `schedule.py` follow on the backend.
 
-`components/` is deliberately flat at 13 files. Splitting 7 shared / 4 universe / 2 launch would add
-two folders holding four and two files, and `TickerStrip` is arguable either way — chrome that fetches
-universe data. Revisit past roughly 25 components.
+`components/` is deliberately flat. At 13 files, a split into folders would have produced folders of
+four and two files, and `TickerStrip` is arguable either way (chrome that fetches universe data).
+The threshold was "revisit past roughly 25". **It is at 25 now (2026-09-24).** Outlook will push it
+over, so decide on a `components/portfolio/` split before or during the Outlook contracts.
+
+**Known duplication:** `isValidCurrentPortfolio` exists in both `lib/portfolio.ts` (exported for
+0109's Apply) and `lib/portfolioStore.ts`. The two can drift. Worth a small contract that keeps one.
 
 ### Where a request goes
 
@@ -304,6 +325,31 @@ export button, 0063 the import UI.
   format the app itself writes. Disagreement between the two is handled by the existing 0.5-point
   dollar-display rule. Presets still never carry shares (see the preset rule earlier in this
   section). A person's own share counts arrive by importing their own file.
+- **Optimizer exports import as portfolios: target columns replace, shorts are rejected, and a
+  rounding overshoot is trimmed visibly.** Contract 0111, 2026-09-24. Everything below applies only
+  when the header has `target_pct`. Files without it keep every rule above unchanged.
+  - `target_pct` is the weight and `target_shares` the share count. `current_*` is never read.
+    Replacing is the only meaning; adding target to current describes no portfolio.
+  - **Shorts are an error that names every short ticker.** Portfolios cannot hold short positions.
+    Clipping or dropping a short would silently rewrite the optimizer's allocation. The short check
+    runs before the shares check, because short rows also carry negative `target_shares`, and "shares
+    must be > 0" would blame the wrong thing.
+  - **A 0% target is left out and listed, not rejected.** Optimizers set weights to exactly 0 all the
+    time. Under the canonical rule (weight > 0), most long-only exports would be unimportable.
+  - **Rounding overshoot: the one exception to "visible and wrong beats silently normalized".**
+    Gunnar's call. The export rounds `target_pct` to 2 decimals, so a valid result can sum over 100.
+    Simulated with random long-only weights: about 1% of 6-holding, 4% of 10-holding and 12% of
+    20-holding exports exceed `100.01`.
+    - An overshoot up to `max(0.01, 0.005 × n)` is taken from the largest surviving position, and the
+      import review states the amount and the ticker. That bound is the most `n` roundings can move a
+      sum.
+    - Anything larger is rejected. It is not rounding, and trimming it would be the normalization the
+      rule forbids.
+    - "Visible" is what keeps this inside the spirit of the rule. The adjustment is never silent.
+  - Accepted limit: an imported optimizer result starts at about 0% cash. `target_pct` is a share of
+    the invested sleeve, and the export carries no cash row. The cleaner long-term fix is an export
+    that writes full-precision `target_pct` and the cash weight. That was ruled out of 0111, and is
+    worth doing if the trim notice turns out to fire often.
 - **The import seam is `DraftSeed`** — `{name, mode, cash, rows}`, exactly `summariseDraft`'s input
   minus React keys. A future preset catalog returns a `DraftSeed` and nothing else changes. That is
   the only accommodation made for presets; no preset content exists or should be invented.
@@ -1646,6 +1692,15 @@ never written. Not yet built.
 **The Backtest tab becomes Optimize: a port of `main`'s optimizer, kept as close to it as practical.**
 Gunnar's decision, 2026-09-24, after learning that `main`'s "Backtest" tab is an optimizer (slug
 `targets`). Contracts 0103 onward. He accepted a job of about six contracts.
+**Declared finished by Gunnar on 2026-09-24, after contracts 0103–0109.** The shipped tab has:
+- 8 modes
+- pinning of young holdings
+- the in-sample comparison with metrics
+- a %-return chart vs SPY
+- a share-and-dollar trade table with CSV export (0108)
+- Apply to portfolio (0109)
+
+What was deliberately *not* ported into it is in the next bullet but one.
 
 - **Renamed because the old name was misleading.** Its comparison is **in-sample**: the weights are
   fitted and then scored on the same window, so "Optimized" beats "Current" almost by construction.
@@ -1706,13 +1761,22 @@ Gunnar's decision, 2026-09-24, after learning that `main`'s "Backtest" tab is an
   - **Metrics are computed from the scored curve's daily returns.** Sharpe = (CAGR − rf) / vol, with
     rf = 0, as in the reference and labelled. This overrides, for this tab only, the "not to port"
     note on Sharpe in the buy-and-hold entry.
-- **All reference features are ported, including the three the reference coded but never made
-  reachable:**
-  - conviction views, with the κ return bump
-  - the tilt engine (`core/tilt.py`)
-  - `max_sharpe_capm` with its forward-looking panel
-  The reference's dropdown omits `max_sharpe_capm` and draws no controls for entering views. Gunnar
-  chose to wire these up rather than skip them. That part is new design work, not a copy.
+- ~~**All reference features are ported, including the three the reference coded but never made
+  reachable**~~ (conviction views with the κ bump, the tilt engine, `max_sharpe_capm`).
+  **Reversed for the Optimize tab on 2026-09-24, Gunnar.**
+  - **Why:** Gunnar read `main` side by side and pointed out that the CAPM work belongs to Outlook.
+    The planner confirmed it:
+    - **`main`'s Targets page** holds `convictionViews`, `kappa` and tilt state, but nothing on it
+      ever sets a view or triggers tilt. The κ slider only renders when views exist, and views never
+      can. So wiring these into Optimize would be inventing features, not porting them.
+    - **`main`'s Outlook page** has the *reachable* version: a CAPM optimizer with per-holding views,
+      freeze and bounds. That is where the port goes (see the Outlook entry).
+  - **What already exists in the backend and has no UI:**
+    - `POST /portfolio/optimize` accepts `mode: "max_sharpe_capm"` (it fetches rf through `rates.py`),
+      plus `conviction_views` and `kappa`.
+    - `POST /portfolio/tilt` exists (0106).
+    - Whether the Outlook port reuses, reshapes or deletes these is decided in the Outlook contracts.
+      Don't build UI on them ahead of that.
 - **Reference bugs fixed in the port, not copied.** Each was found by running `main`'s code on literal
   fixtures in the reference venv:
   - **Risk parity** aimed each asset's risk contribution `wᵢ(Σw)ᵢ` at `σ/n`, but those contributions
@@ -1735,6 +1799,14 @@ Gunnar's decision, 2026-09-24, after learning that `main`'s "Backtest" tab is an
   weights, so Apply is disabled whenever any target weight is negative, with an explanation.
 
 ## Open questions (not decided)
+
+- **Tilt.** `main`'s tilt engine (`core/tilt.py`, ported as `optimizer.compute_tilt` behind
+  `POST /portfolio/tilt`) was never reachable in `main`, so there is no reference behaviour to match.
+  The options are to drop it, or to design it later as its own feature. The planner recommends
+  dropping it unless a concrete use appears. Undecided as of 2026-09-24.
+- **Outlook tab structure.** `main`'s Outlook page (`main:frontend/app/portfolios/[id]/outlook/page.tsx`,
+  973 lines) has three sections: CAPM optimizer, Monte Carlo and Forecast. How they are split,
+  ordered and contracted is to be discussed next (2026-09-24).
 
 - **Whether tickers can be removed from the universe.** Only add and update have been specified. If removal exists, decide whether it deletes cached price history or just de-lists the ticker — the no-FK rule above means de-listing is the cheap default.
 - ~~**Bulk update ("update all").**~~ **Built 2026-09-14, contract 0014 — frontend only.** One `Update all N` control loops **sequentially** over the existing per-ticker `POST /universe/{ticker}/refresh`; no new backend surface, no `Promise.all`. Sequential is the load-bearing choice, not a style preference: concurrent fan-out reproduces the request burst that got Render's shared IP crumb-throttled in contract 0013. The freshness rule keeps the cost proportional to *stale* tickers rather than total ones. The per-row refresh button was removed at the same time, making `UniverseTable` a pure display component.
@@ -1883,7 +1955,9 @@ call. Reasons, recorded so it is not re-added casually:
 - **The `basis_date` CSV column got more expensive to remove with every export.** Removal keeps
   compatibility: stored `basisDate` keys are stripped on read, and old CSVs import with the column
   ignored.
-- Accepted cost: until Backtest ships, the app has no "since date X" answer at all.
+- Accepted cost: until Backtest ships, the app has no "since date X" answer at all. *(2026-09-24:
+  "Backtest" became Optimize, which compares strategies over a lookback window. It is not a
+  "since date X" P&L, so that gap still stands.)*
 
 Original entry, kept for the reasoning:
 
@@ -1934,7 +2008,8 @@ cash included; the anchor is the planner's.
   Weighted constituent highs always overstate the portfolio's range, because holdings peak at
   different times. So ATR, Donchian, ADX, Stochastic and OBV are omitted on the portfolio chart
   rather than approximated.
-- **The seam that keeps Backtest open:** `value_series(units, prices)` is separate from how the
+- **The seam that keeps Backtest open** (now Optimize; its `backtest_series` re-chooses units at
+  rebalance dates through `units_from_weights` rather than calling `value_series`): `value_series(units, prices)` is separate from how the
   units are chosen. Holdings chooses them from today's weights. Backtest will choose them at a start
   date and re-choose them at rebalance dates. Per-holding value series are returned alongside the
   total, so contributions sum to the total by construction. `main:core/scenarios.py` gets this wrong:
@@ -1976,8 +2051,8 @@ cash included; the anchor is the planner's.
   wire format.
 
 **Portfolio analysis lives at `/portfolios/:id/<tab>`, portfolio-scoped.** Decided 2026-09-22,
-contract 0075, matching `main:frontend/app/portfolios/[id]/`. Five tabs: Holdings (default), Backtest,
-Outlook, Monitor, Risk & Perf. The labels match `main`'s tab bar, where "Backtest" is the `targets`
+contract 0075, matching `main:frontend/app/portfolios/[id]/`. Five tabs: Holdings (default), Backtest
+(renamed **Optimize** in 0107, slug `optimize`), Outlook, Monitor, Risk & Perf. The labels match `main`'s tab bar, where "Backtest" is the `targets`
 slug and is an optimizer (see the buy-and-hold entry). `main` also has an unlinked `rebalance` page.
 *(Corrected 2026-09-24. This previously said the reference had no backtest.)*
 

@@ -1,3 +1,4 @@
+import { WEIGHT_EPSILON } from './portfolio'
 import type { EntryMode, Portfolio } from './portfolio'
 
 export interface SeedRow {
@@ -18,8 +19,15 @@ export interface DroppedRow {
   weightPct: number | null
 }
 
+export interface TargetAdjustment {
+  ticker: string
+  fromPct: number
+  toPct: number
+  fileTotalPct: number
+}
+
 export type CsvImportResult =
-  | { ok: true; seed: DraftSeed; dropped: DroppedRow[] }
+  | { ok: true; seed: DraftSeed; dropped: DroppedRow[]; adjustment?: TargetAdjustment; zeroTargets?: string[] }
   | { ok: false; error: string; line: number | null }
 
 interface CsvRow {
@@ -161,6 +169,7 @@ export function parsePortfolioCsv(text: string, universeTickers: ReadonlySet<str
   let tickerIndex: number | null = null
   let weightIndex: number | null = null
   let sharesIndex: number | null = null
+  let targetWeights = false
   let headerRowIndex = -1
   for (let index = 0; index < parsed.rows.length; index += 1) {
     const row = parsed.rows[index]
@@ -169,8 +178,11 @@ export function parsePortfolioCsv(text: string, universeTickers: ReadonlySet<str
     if (candidateTickerIndex !== null) {
       header = row
       tickerIndex = candidateTickerIndex
-      weightIndex = headerIndex(row, ['weight_pct', 'weight'])
-      sharesIndex = headerIndex(row, ['shares', 'quantity', 'qty'])
+      const targetWeightIndex = headerIndex(row, ['target_pct'])
+      const targetSharesIndex = headerIndex(row, ['target_shares'])
+      targetWeights = targetWeightIndex !== null
+      weightIndex = targetWeightIndex ?? headerIndex(row, ['weight_pct', 'weight'])
+      sharesIndex = targetSharesIndex ?? headerIndex(row, ['shares', 'quantity', 'qty'])
       headerRowIndex = index
       break
     }
@@ -184,11 +196,28 @@ export function parsePortfolioCsv(text: string, universeTickers: ReadonlySet<str
   if (dataRows.length > MAX_DATA_ROWS) return failure('CSV files may contain at most 5000 data rows', dataRows[MAX_DATA_ROWS].line)
   if (dataRows.length === 0) return failure('The CSV has no data rows', null)
 
-  const mode: EntryMode = weightIndex !== null ? 'weight' : sharesIndex !== null ? 'shares' : 'weight'
+  if (targetWeights) {
+    const shorts: Array<{ ticker: string; raw: string; line: number }> = []
+    for (const row of dataRows) {
+      const ticker = cell(row, tickerIndex).trim().toUpperCase()
+      if (ticker === '' || ticker === 'CASH') continue
+      const raw = cell(row, weightIndex)
+      if (raw.trim() === '') continue
+      const value = Number(raw)
+      if (!Number.isFinite(value)) return failure(`Target weight for ${ticker} must be a number`, row.line)
+      if (value < 0) shorts.push({ ticker, raw, line: row.line })
+    }
+    if (shorts.length > 0) {
+      return failure(`Short target weights can't be imported: ${shorts.map((short) => `${short.ticker} (${short.raw.trim()}%)`).join(', ')}. Portfolios hold long positions only; re-run the optimizer with shorting turned off.`, shorts[0].line)
+    }
+  }
+
+  const mode: EntryMode = targetWeights || weightIndex !== null ? 'weight' : sharesIndex !== null ? 'shares' : 'weight'
   const seen = new Set<string>()
   const positions: ParsedPosition[] = []
   let statedCash: { raw: string; value: number; line: number } | null = null
   let positionWeightTotal = 0
+  const zeroTargets: string[] = []
 
   for (const row of dataRows) {
     const tickerRaw = cell(row, tickerIndex)
@@ -198,6 +227,10 @@ export function parsePortfolioCsv(text: string, universeTickers: ReadonlySet<str
     const hasOtherValue = row.fields.some((value, index) => index !== tickerIndex && value.trim() !== '')
     if (ticker === '') {
       if (hasOtherValue) return failure('A row with values needs a ticker', row.line)
+      continue
+    }
+    if (targetWeights && ticker !== 'CASH' && weight.trim() !== '' && Number(weight) === 0) {
+      zeroTargets.push(ticker)
       continue
     }
     if (seen.has(ticker)) return failure(`Duplicate ticker: ${ticker}`, row.line)
@@ -228,7 +261,11 @@ export function parsePortfolioCsv(text: string, universeTickers: ReadonlySet<str
   }
 
   const fileTotal = positionWeightTotal + (statedCash?.value ?? 0)
-  if (fileTotal > 100.01) {
+  const targetOvershoot = targetWeights && statedCash === null && fileTotal - 100 > WEIGHT_EPSILON ? fileTotal - 100 : null
+  if (targetOvershoot !== null && targetOvershoot > Math.max(0.01, 0.005 * positions.length)) {
+    return failure(`Target weights add up to ${fileTotal.toFixed(2)}%, which is more than export rounding can explain.`, null)
+  }
+  if ((!targetWeights || statedCash !== null) && fileTotal > 100.01) {
     return failure('Position weights and cash cannot exceed 100%', statedCash?.line ?? positions[positions.length - 1]?.line ?? null)
   }
   if (statedCash !== null && Math.abs(fileTotal - 100) > 0.01) {
@@ -244,8 +281,9 @@ export function parsePortfolioCsv(text: string, universeTickers: ReadonlySet<str
   if (positions.length === 0) {
     return {
       ok: true,
-      seed: { name, mode: 'weight', cash: statedCash?.raw ?? '', rows: [] },
+      seed: { name, mode: 'weight', cash: targetWeights ? '0' : statedCash?.raw ?? '', rows: [] },
       dropped: [],
+      ...(zeroTargets.length > 0 ? { zeroTargets } : {}),
     }
   }
   if (surviving.length === 0) return failure('No portfolio tickers are in the current universe', null)
@@ -268,12 +306,29 @@ export function parsePortfolioCsv(text: string, universeTickers: ReadonlySet<str
   }
 
   const droppedWeight = dropped.reduce((total, row) => total + (row.weightPct ?? 0), 0)
-  const cash = statedCash === null ? String(100 - positionWeightTotal + droppedWeight) :
+  let adjustment: TargetAdjustment | undefined
+  const rows = surviving.map((position) => ({ ticker: position.ticker, shares: position.shares, weight: position.weight }))
+  if (targetOvershoot !== null) {
+    const largest = surviving.reduce((best, position) => best === null || position.weightPct! > best.weightPct! ? position : best, null as ParsedPosition | null)
+    if (largest !== null) {
+      const toPct = Number((largest.weightPct! - targetOvershoot).toFixed(6))
+      const row = rows.find((candidate) => candidate.ticker === largest.ticker)!
+      row.weight = String(toPct)
+      adjustment = { ticker: largest.ticker, fromPct: largest.weightPct!, toPct, fileTotalPct: fileTotal }
+    }
+  }
+  let cash = targetOvershoot !== null ? String(droppedWeight) : statedCash === null ? String(100 - positionWeightTotal + droppedWeight) :
     droppedWeight === 0 ? statedCash.raw : String(statedCash.value + droppedWeight)
+  if (targetWeights && targetOvershoot === null) {
+    const value = Number(cash)
+    cash = Math.abs(value) < WEIGHT_EPSILON ? '0' : String(Number(value.toFixed(6)))
+  }
   return {
     ok: true,
-    seed: { name, mode, cash, rows: surviving.map((position) => ({ ticker: position.ticker, shares: position.shares, weight: position.weight })) },
+    seed: { name, mode, cash, rows },
     dropped,
+    ...(adjustment === undefined ? {} : { adjustment }),
+    ...(zeroTargets.length === 0 ? {} : { zeroTargets }),
   }
 }
 

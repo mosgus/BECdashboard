@@ -115,7 +115,6 @@ export function HoldingsPage(): JSX.Element {
       )}
 
       <div className="flex items-center justify-end gap-2 mb-3">
-        <HelpSidebar />
         <Tooltip label="Choose which technical signal the table shows for every holding">
           <select
             value={selectedSignal}
@@ -127,6 +126,7 @@ export function HoldingsPage(): JSX.Element {
             ))}
           </select>
         </Tooltip>
+        <HelpSidebar />
       </div>
 
       <div className="bg-brand-surface border border-brand-border rounded-[var(--radius-card)]">

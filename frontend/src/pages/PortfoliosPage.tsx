@@ -245,7 +245,7 @@ export function PortfoliosPage(): JSX.Element {
                           <Tooltip label="Open analysis and optimization tools for this portfolio">
                             <Link
                               to={`/portfolios/${current.id}/holdings`}
-                              className="text-xs font-medium px-2.5 py-1.5 rounded-[var(--radius-btn)] border border-brand-border text-[var(--color-muted)] hover:bg-brand-positive hover:text-background whitespace-nowrap"
+                              className="text-xs font-medium px-2.5 py-1.5 rounded-[var(--radius-btn)] border border-brand-positive bg-brand-positive text-background hover:brightness-90 whitespace-nowrap"
                             >
                               ⌕ Analysis
                             </Link>
