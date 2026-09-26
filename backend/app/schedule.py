@@ -1,5 +1,5 @@
 """Visit-triggered auto-refresh windows: universe price history refreshes itself at most once
-per window (09:30, 12:00, 16:00 ET), the first time anyone visits inside it. Pure — no
+per window (09:30, 12:00, 16:00 ET, every day), the first time anyone visits inside it. Pure — no
 database, no clock, no network; the impure sweep this drives lives in app/autorefresh.py.
 
 The 12:00 window can never pick up a new bar — last_completed_session (app/freshness.py)
@@ -12,17 +12,11 @@ from datetime import datetime, time
 WINDOW_TIMES = (time(9, 30), time(12, 0), time(16, 0))
 
 
-def current_window_start(now_et: datetime, *, include_weekends: bool = False) -> datetime | None:
-    """The ET datetime at which the current refresh window opened. None before 09:30 ET, and
-    — unless `include_weekends` is set — None on Saturday or Sunday too: bars cannot change
-    over a weekend, so there is nothing for a weekend visitor's *universe* window to claim.
-
-    `include_weekends` is keyword-only and defaults to False so every existing call site (the
-    universe sweep) keeps its exact current behavior. News (contract 0037) opts in: a 6-hour
-    weekday-only gate would freeze the feed and briefing from Friday 16:00 to Monday 09:30."""
-    if not include_weekends and now_et.weekday() >= 5:  # Saturday=5, Sunday=6
-        return None
-
+def current_window_start(now_et: datetime) -> datetime | None:
+    """The ET datetime at which the current refresh window opened, or None before 09:30 ET.
+    Windows open every day, weekends included (contract 0116): if nobody visits after Friday
+    16:00, Saturday's first window is what fetches Friday's close. Weekday-only windows
+    (contract 0036) left that bar missing until Monday 09:30."""
     t = now_et.time()
     if t < WINDOW_TIMES[0]:
         return None
@@ -39,8 +33,6 @@ def current_window_start(now_et: datetime, *, include_weekends: bool = False) ->
 def needs_auto_refresh(
     last_refreshed_at: datetime | None,
     now_et: datetime,
-    *,
-    include_weekends: bool = False,
 ) -> bool:
     """True when a window is open and nothing has refreshed since that window opened.
 
@@ -51,9 +43,8 @@ def needs_auto_refresh(
 
     last_refreshed_at arrives timezone-aware (UTC, from storage); window_start is aware ET.
     They are compared directly — Python resolves cross-zone comparisons correctly — never
-    stripped or re-labeled here. `include_weekends` is forwarded to current_window_start
-    unchanged; see its docstring."""
-    window_start = current_window_start(now_et, include_weekends=include_weekends)
+    stripped or re-labeled here."""
+    window_start = current_window_start(now_et)
     if window_start is None:
         return False
     if last_refreshed_at is None:

@@ -1,6 +1,6 @@
 # Contract 0115 — CAPM optimizer backend for the Outlook tab
 
-**Status:** open <!-- open | in-progress | reported | accepted | rejected | abandoned -->
+**Status:** accepted <!-- open | in-progress | reported | accepted | rejected | abandoned -->
 **Assigned to:** sonnet <!-- haiku | sonnet -->
 **Author:** planner (opus)
 
@@ -387,9 +387,20 @@ Tolerances are `pytest.approx(abs=…)`, as given.
 8. **`test_non_convergence_is_an_input_error`** — monkeypatch `app.capm_run.optimize_max_sharpe_capm`
    to raise `RuntimeError("CAPM optimizer did not converge: test")`. Expect `CapmInputError` with
    exactly that message.
-9. **`test_short_history_warns`** — `A`, `B` and `M` each truncated to `.iloc[:50]`, with
-   `weights={"A": 1, "B": 1}`. `warnings == ["Fewer than 60 trading days of history — optimization results may be unreliable."]`.
-   Do not assert weights.
+9. **`test_short_history_warns`** — *(amended 2026-09-26: the original 50-daily-bar fixture cannot
+   reach this path, because 50 daily bars never cover a 365-day lookback, so the market guard fires first.
+   Sonnet's BLOCKED report was correct.)* Use **weekly** bars that span the lookback but give
+   fewer than 60 returns:
+   ```python
+   WEEKS = [d.date() for d in pd.date_range("2024-01-05", periods=55, freq="W-FRI")]   # … 2025-01-17
+   Mw = prices(m[:54], index=WEEKS)
+   Aw = prices((1.5 * m + e1)[:54], index=WEEKS)
+   Bw = prices((0.5 * m + e2)[:54], index=WEEKS)
+   ```
+   `run_capm({"A": 1, "B": 1}, {"A": Aw, "B": Bw}, Mw, market_ticker="M", rf=0.04, mrp=0.05, lookback_days=365)`:
+   - `warnings == ["Fewer than 60 trading days of history — optimization results may be unreliable."]`
+   - `fit_start == score_start == date(2024, 1, 26)`, `fit_end == date(2025, 1, 17)`
+   - betas 1.5 and 0.5 (1e-9); A 0.75, B 0.25 (1e-4); neither holding pinned
 
 `test_api_capm.py` has exactly **6** tests. Seed `A`, `B` and `M`, but not `SPY`:
 1. **`test_capm_requires_database`** — no `db_mode`: POST → 503.

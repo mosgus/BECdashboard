@@ -193,6 +193,70 @@ class OptimizeResponse(BaseModel):
     warnings: list[str]
 
 
+class CapmHoldingConfigIn(BaseModel):
+    freeze: bool = False
+    view: float = 0.0
+    min_weight: float = 0.0
+    max_weight: float = 1.0
+
+
+class CapmRequest(BaseModel):
+    tickers: list[str]
+    weights: list[float]
+    lookback_days: int = 1825
+    rf: float | None = None
+    mrp: float = 0.05
+    market_ticker: str = "SPY"
+    configs: dict[str, CapmHoldingConfigIn] = {}
+
+
+class CapmHoldingOut(BaseModel):
+    ticker: str
+    current_weight: float
+    target_weight: float
+    beta: float
+    capm_return: float
+    view: float
+    expected_return: float
+    vol: float
+    frozen: bool
+    pinned: bool
+    first_bar: date
+
+
+class CapmMetricsOut(BaseModel):
+    expected_return: float
+    expected_vol: float
+    expected_sharpe: float | None
+    portfolio_beta: float
+
+
+class CapmVarOut(BaseModel):
+    daily: float
+    weekly: float
+    monthly: float
+    quarterly: float
+    annual: float
+
+
+class CapmResponse(BaseModel):
+    tickers: list[str]
+    holdings: list[CapmHoldingOut]
+    current_weights: dict[str, float]
+    target_weights: dict[str, float]
+    metrics: CapmMetricsOut
+    var_95: CapmVarOut
+    rf: float
+    rf_source: str
+    mrp: float
+    market_ticker: str
+    lookback_days: int
+    fit_start: date
+    fit_end: date
+    score_start: date
+    warnings: list[str]
+
+
 class TickerSignals(BaseModel):
     ticker: str
     signals: list[SignalOut]

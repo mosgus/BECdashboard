@@ -1,6 +1,6 @@
 # Contract 0116 — Align signal state details and justify briefing text
 
-**Status:** in-progress <!-- open | in-progress | reported | accepted | rejected | abandoned -->
+**Status:** reported <!-- open | in-progress | reported | accepted | rejected | abandoned -->
 **Assigned to:** haiku <!-- haiku | sonnet -->
 **Author:** planner (opus)
 

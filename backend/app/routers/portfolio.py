@@ -1,18 +1,20 @@
 """Portfolio value-series endpoint over stored adjusted closing prices."""
 
 import math
+from dataclasses import asdict
 
 import pandas as pd
 from fastapi import APIRouter, HTTPException
 from sqlalchemy import select
 
 from app.db import is_enabled, session
+from app.capm_run import CapmInputError, HoldingConfig, run_capm
 from app.indicators import CLOSE_ONLY_INDICATORS, indicator_series
 from app.models import PriceBar
 from app.optimize_run import OptimizeInputError, run_optimize
 from app.portfolio_series import build_portfolio_series
 from app.rates import fetch_risk_free_rate_with_source
-from app.schemas import OptimizeRequest, OptimizeResponse, PortfolioSeriesResponse
+from app.schemas import CapmRequest, CapmResponse, OptimizeRequest, OptimizeResponse, PortfolioSeriesResponse
 from app.signals import compute_all_signals
 
 router = APIRouter(prefix="/portfolio", tags=["portfolio"])
@@ -182,5 +184,59 @@ def optimize_portfolio(body: OptimizeRequest) -> dict:
         "delta_mu": result.delta_mu,
         "rf": result.rf,
         "rf_source": rf_source,
+        "warnings": result.warnings,
+    }
+
+
+@router.post("/capm", response_model=CapmResponse)
+def capm_portfolio(body: CapmRequest) -> dict:
+    _require_database()
+    tickers, weights = _normalise_request(body.tickers, body.weights)
+    market_ticker = body.market_ticker.strip().upper()
+    closes = _load_stored_closes(tickers)
+    market = closes.get(market_ticker)
+    if market is None:
+        market = _load_stored_closes([market_ticker], required=False).get(market_ticker)
+    if market is None:
+        raise HTTPException(
+            status_code=422,
+            detail=f"No stored price history for market ticker {market_ticker}. Add it to the Universe first.",
+        )
+    if body.rf is None:
+        rf, rf_source = fetch_risk_free_rate_with_source()
+    else:
+        rf, rf_source = body.rf, "manual"
+    configs = {
+        key.strip().upper(): HoldingConfig(**value.model_dump())
+        for key, value in body.configs.items()
+    }
+    try:
+        result = run_capm(
+            dict(zip(tickers, weights, strict=True)), closes, market,
+            market_ticker=market_ticker, rf=rf, mrp=body.mrp,
+            lookback_days=body.lookback_days, configs=configs,
+        )
+    except CapmInputError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {
+        "tickers": result.tickers,
+        "holdings": [asdict(holding) for holding in result.holdings],
+        "current_weights": result.current_weights,
+        "target_weights": result.target_weights,
+        "metrics": {
+            "expected_return": result.expected_return,
+            "expected_vol": result.expected_vol,
+            "expected_sharpe": result.expected_sharpe,
+            "portfolio_beta": result.portfolio_beta,
+        },
+        "var_95": result.var_95,
+        "rf": result.rf,
+        "rf_source": rf_source,
+        "mrp": result.mrp,
+        "market_ticker": result.market_ticker,
+        "lookback_days": result.lookback_days,
+        "fit_start": result.fit_start,
+        "fit_end": result.fit_end,
+        "score_start": result.score_start,
         "warnings": result.warnings,
     }

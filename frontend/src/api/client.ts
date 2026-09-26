@@ -372,6 +372,59 @@ export async function optimizePortfolio(body: OptimizeRequest): Promise<Optimize
   return request<OptimizeResponse>('/portfolio/optimize', { method: 'POST', body })
 }
 
+export interface CapmHoldingConfig {
+  freeze: boolean
+  view: number
+  min_weight: number
+  max_weight: number
+}
+
+export interface CapmRequest {
+  tickers: string[]
+  weights: number[]
+  lookback_days: number
+  rf: number | null
+  mrp: number
+  market_ticker: string
+  configs: Record<string, CapmHoldingConfig>
+}
+
+export interface CapmHolding {
+  ticker: string
+  current_weight: number
+  target_weight: number
+  beta: number
+  capm_return: number
+  view: number
+  expected_return: number
+  vol: number
+  frozen: boolean
+  pinned: boolean
+  first_bar: string
+}
+
+export interface CapmResponse {
+  tickers: string[]
+  holdings: CapmHolding[]
+  current_weights: Record<string, number>
+  target_weights: Record<string, number>
+  metrics: { expected_return: number; expected_vol: number; expected_sharpe: number | null; portfolio_beta: number }
+  var_95: { daily: number; weekly: number; monthly: number; quarterly: number; annual: number }
+  rf: number
+  rf_source: 'live' | 'fallback' | 'manual'
+  mrp: number
+  market_ticker: string
+  lookback_days: number
+  fit_start: string
+  fit_end: string
+  score_start: string
+  warnings: string[]
+}
+
+export async function capmPortfolio(body: CapmRequest): Promise<CapmResponse> {
+  return request<CapmResponse>('/portfolio/capm', { method: 'POST', body })
+}
+
 export async function getPortfolioSeries(
   tickers: string[], weights: number[], cash: number, include: string[],
 ): Promise<PortfolioSeriesResponse> {

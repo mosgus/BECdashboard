@@ -7,7 +7,7 @@ ET = ZoneInfo("America/New_York")
 
 
 def _et(hour: int, minute: int, day: int = 16) -> datetime:
-    # 2026-09-16 is a Wednesday, 2026-09-19 a Saturday, 2026-09-20 a Sunday.
+    # 2026-09-18 is a Friday, 2026-09-19 a Saturday, 2026-09-20 a Sunday.
     return datetime(2026, 9, day, hour, minute, tzinfo=ET)
 
 
@@ -46,14 +46,14 @@ def test_current_window_start_at_2359_is_1600():
     assert current_window_start(_et(23, 59)) == _window(16, 0)
 
 
-def test_current_window_start_saturday_is_none():
+def test_current_window_start_saturday_returns_a_real_window():
     # 2026-09-19 is a Saturday.
-    assert current_window_start(_et(10, 0, day=19)) is None
+    assert current_window_start(_et(10, 0, day=19)) == _window(9, 30, day=19)
 
 
-def test_current_window_start_sunday_is_none():
+def test_current_window_start_sunday_returns_a_real_window():
     # 2026-09-20 is a Sunday.
-    assert current_window_start(_et(13, 0, day=20)) is None
+    assert current_window_start(_et(13, 0, day=20)) == _window(12, 0, day=20)
 
 
 # --- needs_auto_refresh --------------------------------------------------------------------
@@ -79,21 +79,12 @@ def test_needs_auto_refresh_false_before_the_first_window_even_with_no_prior_ref
     assert needs_auto_refresh(None, _et(9, 0)) is False
 
 
-# --- include_weekends -------------------------------------------------------------------------
+def test_needs_auto_refresh_saturday_true_when_last_claim_was_friday_noon():
+    """The 2026-09-26 incident: Friday's last claim was the 12:00 window, so Friday's close was
+    never fetched. Saturday's 09:30 window must be due."""
+    friday_noon_claim = _window(13, 52, day=18).astimezone(timezone.utc)
+    assert needs_auto_refresh(friday_noon_claim, _et(10, 0, day=19)) is True
 
 
-def test_current_window_start_saturday_with_include_weekends_returns_a_real_window():
-    # 2026-09-19 is a Saturday; the same 10:00 slot as a weekday still falls in the 09:30 window.
-    assert current_window_start(_et(10, 0, day=19), include_weekends=True) == _window(9, 30, day=19)
-
-
-def test_current_window_start_saturday_default_is_still_none():
-    """The universe sweep must not start running at weekends as a side effect of adding the
-    flag — the default (no keyword passed) has to keep today's exact behavior."""
-    assert current_window_start(_et(10, 0, day=19)) is None
-
-
-def test_needs_auto_refresh_unaffected_by_the_new_flag_when_not_passed():
-    """Proof the universe sweep itself is untouched: called exactly as every existing call
-    site calls it (no keyword), a Saturday visit is still False."""
-    assert needs_auto_refresh(None, _et(10, 0, day=19)) is False
+def test_needs_auto_refresh_saturday_before_930_is_still_false():
+    assert needs_auto_refresh(None, _et(9, 0, day=19)) is False

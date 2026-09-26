@@ -121,11 +121,10 @@ def needs_news_refresh(
     `newest_fetched_at is None` is checked first and wins regardless of the window or the day
     — an empty feed on a fresh deploy must not stay blank until the next window opens, the
     same rule needs_summary already follows for the briefing. Once that's ruled out, this
-    defers entirely to needs_auto_refresh with weekends included: a weekday-only gate would
-    freeze the feed and briefing from Friday 16:00 to Monday 09:30, about 65 hours."""
+    defers entirely to needs_auto_refresh, whose windows open every day, weekends included."""
     if newest_fetched_at is None:
         return True
-    return needs_auto_refresh(last_claim_at, now_et, include_weekends=True)
+    return needs_auto_refresh(last_claim_at, now_et)
 
 
 def _parse_pub_date(raw: object) -> datetime | None:

@@ -1303,6 +1303,16 @@ about automatic function calling on every `generate_content`; the fix is
 A `logging.Filter` on `google_genai` would also swallow real errors from the same logger.
 
 **The universe refreshes itself on a visit, once per window: 09:30 / 12:00 / 16:00 ET, weekdays.**
+**~~weekdays~~ → every day. Changed 2026-09-26, Gunnar (contract `0116-weekend-universe-refresh`; the other planner session also used 0116).**
+- **What happened:** Friday 9/25's last claim was the 12:00 window. Nobody visited after 16:00, and
+  weekday-only windows then left Coverage at 9/24 until Monday 09:30.
+- **Why the old rule was wrong:** "bars cannot change over a weekend" assumed Friday's 16:00 window
+  had run.
+- **What changed:** `include_weekends` is removed from `schedule.py`, since every caller (universe,
+  news, ops) now wants weekends.
+- **Cost:** a weekend sweep over current tickers costs about one reference fetch, the same as a
+  market holiday.
+- **Unchanged:** nothing refreshes before 09:30 ET.
 Contract 0036, 2026-09-17. `app/schedule.py` is pure (`current_window_start`, `needs_auto_refresh`,
 both taking `now_et`); `app/autorefresh.py` does the sweep; `app_state(key, value_at)` — a generic
 key→timestamp table — records the claim. Triggered as a `BackgroundTasks` job from
@@ -1881,6 +1891,21 @@ risk-free rate to the 3-month T-bill and limits portfolios to holdable tickers.
   was no reference behaviour to keep, and no rebuild UI called it. Gunnar first chose to keep it,
   then chose deletion once it was clear it was unused. That also retires the 0112 `FLAG(custom)` on
   the tanh/exp tilt.
+- **CAPM backend is `POST /portfolio/capm` over the pure `app/capm_run.py`** (0115). It is additive:
+  `/optimize` is untouched. It differs from `main` in these ways:
+  - The market ticker defaults to SPY, not VT.
+  - Young holdings are pinned, as in Optimize.
+  - A frozen holding keeps its current *weight*, not its share value.
+  - Volatility, Sharpe and VaR use the common window of all holdings.
+  - `rf: null` means the live rate, and an explicit 0 means 0%.
+  - There is no backend trade table: trades are built on the frontend.
+- **Outlook's sub-tab sections live in `frontend/src/pages/analysis/outlook/`** (0118), not in
+  `components/`, which had already reached 25 files. The CAPM UI (0118) has these properties:
+  - The market ticker is a select of Universe tickers.
+  - The view stays enabled on frozen holdings, because it still moves the statistics.
+  - Target value, trades, CSV, the CAL chart and Apply are the next contract.
+  - Contract numbers are shared with a second planner session, so the Outlook contracts are not
+    consecutive.
 
 ## Open questions (not decided)
 
