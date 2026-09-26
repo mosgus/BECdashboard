@@ -150,8 +150,6 @@ class OptimizeRequest(BaseModel):
     vol_target: float = 0.10
     allow_short: bool = False
     max_short: float = 0.30
-    conviction_views: dict[str, float] | None = None
-    kappa: float = 0.05
     rebalance: str = "none"
 
 
@@ -181,13 +179,10 @@ class OptimizeResponse(BaseModel):
     score_limited_by: str | None
     curves: OptimizeCurvesOut
     metrics: dict[str, dict[str, float | None] | None]
-    capm_expected_returns: dict[str, float] | None
     feasible: bool
     mode: str
     rebalance: str
     lookback_days: int
-    views_applied: bool
-    delta_mu: dict[str, float]
     rf: float
     rf_source: str
     warnings: list[str]
@@ -245,6 +240,7 @@ class CapmResponse(BaseModel):
     current_weights: dict[str, float]
     target_weights: dict[str, float]
     metrics: CapmMetricsOut
+    current_metrics: CapmMetricsOut
     var_95: CapmVarOut
     rf: float
     rf_source: str

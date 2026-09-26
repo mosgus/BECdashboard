@@ -86,27 +86,9 @@ def test_equal_weight_preserves_pinned_weight():
     assert result.target_weights == pytest.approx({"A": 0.25, "B": 0.25, "Y": 0.5})
 
 
-def test_capm_returns_expected_returns_and_forward_looking_metrics():
-    result = run_optimize({"A": 1, "B": 1}, {"A": A, "B": B}, SPY, mode="max_sharpe_capm", lookback_days=365, rf=0.04)
-
-    assert result.capm_expected_returns == pytest.approx({"A": 0.09, "B": 0.04}, abs=0.01)
-    assert result.target_weights == pytest.approx({"A": 1.0, "B": 0.0}, abs=0.01)
-    assert {"expected_return", "vol", "sharpe"} <= result.metrics["forward_looking"].keys()
-
-
-def test_capm_requires_spy():
-    with pytest.raises(OptimizeInputError, match="SPY"):
-        run_optimize({"A": 1, "B": 1}, {"A": A, "B": B}, None, mode="max_sharpe_capm", lookback_days=365)
-
-
-def test_views_are_only_applied_by_return_based_modes():
-    sharpe = run_optimize({"A": 1, "B": 1}, {"A": A, "B": B}, SPY, mode="max_sharpe", lookback_days=365, conviction_views={"A": 20}, kappa=0.05)
-    variance = run_optimize({"A": 1, "B": 1}, {"A": A, "B": B}, SPY, mode="min_variance", lookback_days=365, conviction_views={"A": 20})
-
-    assert sharpe.views_applied is True
-    assert sharpe.delta_mu == pytest.approx({"A": 0.01, "B": 0.0})
-    assert variance.views_applied is False
-    assert variance.delta_mu == {}
+def test_capm_mode_is_no_longer_an_optimize_mode():
+    with pytest.raises(OptimizeInputError, match="unknown optimization mode"):
+        run_optimize({"A": 1, "B": 1}, {"A": A, "B": B}, SPY, mode="max_sharpe_capm", lookback_days=365)
 
 
 def test_non_convergence_falls_back_to_current_weights(monkeypatch):

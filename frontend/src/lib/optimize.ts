@@ -79,7 +79,10 @@ export function canOptimize(portfolio: Portfolio): boolean {
   return portfolio.positions.length >= 2
 }
 
-export function applyPlan(portfolio: Portfolio, response: OptimizeResponse, lastCloseByTicker: ReadonlyMap<string, number | null>): ApplyPlan {
+export type WeightSource = Pick<OptimizeResponse, 'tickers' | 'current_weights' | 'target_weights' | 'implied_trades'> & { pinned: ReadonlyArray<{ ticker: string }> }
+export type ApplySource = Pick<OptimizeResponse, 'tickers' | 'target_weights' | 'feasible'>
+
+export function applyPlan(portfolio: Portfolio, response: ApplySource, lastCloseByTicker: ReadonlyMap<string, number | null>): ApplyPlan {
   const portfolioTickers = portfolio.positions.map((position) => position.ticker).sort()
   const responseTickers = [...response.tickers].sort()
   if (portfolioTickers.length !== responseTickers.length || portfolioTickers.some((ticker, index) => ticker !== responseTickers[index])) return { ok: false, reason: 'tickers-changed' }
@@ -123,8 +126,8 @@ export function applyBlockedText(reason: ApplyBlockedReason): string {
   return "These weights don't make a valid portfolio, so they can't be applied."
 }
 
-export function applyConfirmLines(plan: Extract<ApplyPlan, { ok: true }>): string[] {
-  const lines = [`Holdings weights will be replaced by the Optimized column. Cash stays at ${plan.portfolio.cashWeight.toFixed(1)}%.`]
+export function applyConfirmLines(plan: Extract<ApplyPlan, { ok: true }>, column: string = 'Optimized'): string[] {
+  const lines = [`Holdings weights will be replaced by the ${column} column. Cash stays at ${plan.portfolio.cashWeight.toFixed(1)}%.`]
   if (plan.sharesMode === 'recomputed') lines.push("Share counts will be recalculated from each holding's last stored close, as fractional shares.")
   if (plan.sharesMode === 'cleared') lines.push('Only some holdings have share counts, so all share counts will be removed.')
   if (plan.removed.length > 0) {
@@ -201,7 +204,7 @@ export function formatChangePp(fraction: number): string {
   return `${r > 0 ? '+' : '-'}${Math.abs(r).toFixed(1)} pp`
 }
 
-export function weightRows(response: OptimizeResponse): WeightRow[] {
+export function weightRows(response: WeightSource): WeightRow[] {
   const pinnedTickers = new Set(response.pinned.map((holding) => holding.ticker))
   return response.tickers.map((ticker) => ({
     ticker,
@@ -212,14 +215,14 @@ export function weightRows(response: OptimizeResponse): WeightRow[] {
   }))
 }
 
-export function tradeRows(response: OptimizeResponse, basis: Extract<TradeBasis, { kind: 'dollar' }>): TradeRow[] {
+export function tradeRows(response: WeightSource, basis: Extract<TradeBasis, { kind: 'dollar' }>, targetValue: number = basis.investedValue): TradeRow[] {
   return weightRows(response).map((row) => {
     const price = basis.prices[row.ticker]
     const currentShares = basis.shares[row.ticker]
     const currentValue = row.current * basis.investedValue
-    const targetValue = row.target * basis.investedValue
-    const targetShares = targetValue / price
-    return { ...row, price, currentShares, currentValue, targetShares, targetValue, tradeShares: targetShares - currentShares, tradeValue: targetValue - currentValue }
+    const targetDollarValue = row.target * targetValue
+    const targetShares = targetDollarValue / price
+    return { ...row, price, currentShares, currentValue, targetShares, targetValue: targetDollarValue, tradeShares: targetShares - currentShares, tradeValue: targetDollarValue - currentValue }
   })
 }
 
@@ -245,7 +248,7 @@ export function tradeBasisNote(basis: TradeBasis): string {
   return "Share counts don't match the weights within 0.5 points, so trades are shown as weights only."
 }
 
-function csvNumber(value: number, decimals: number): string {
+export function csvNumber(value: number, decimals: number): string {
   return String(Number(value.toFixed(decimals)))
 }
 

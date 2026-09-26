@@ -320,8 +320,6 @@ export interface OptimizeRequest {
   allow_short: boolean
   max_short: number
   rebalance: OptimizeRebalance
-  conviction_views?: Record<string, number>
-  kappa?: number
 }
 
 export interface PinnedHolding {
@@ -354,15 +352,11 @@ export interface OptimizeResponse {
   metrics: {
     current: OptimizeMetrics | null
     optimized: OptimizeMetrics | null
-    forward_looking: OptimizeMetrics | null
   }
-  capm_expected_returns: Record<string, number> | null
   feasible: boolean
   mode: string
   rebalance: OptimizeRebalance
   lookback_days: number
-  views_applied: boolean
-  delta_mu: Record<string, number>
   rf: number
   rf_source: 'live' | 'fallback'
   warnings: string[]
@@ -409,6 +403,7 @@ export interface CapmResponse {
   current_weights: Record<string, number>
   target_weights: Record<string, number>
   metrics: { expected_return: number; expected_vol: number; expected_sharpe: number | null; portfolio_beta: number }
+  current_metrics: { expected_return: number; expected_vol: number; expected_sharpe: number | null; portfolio_beta: number }
   var_95: { daily: number; weekly: number; monthly: number; quarterly: number; annual: number }
   rf: number
   rf_source: 'live' | 'fallback' | 'manual'

@@ -4,7 +4,7 @@ import pytest
 
 from app.optimizer import (
     compute_betas, compute_capm_expected_returns, compute_drawdown, compute_equity_curve,
-    compute_forward_looking_metrics, compute_metrics, compute_portfolio_returns, compute_returns,
+    compute_metrics, compute_portfolio_returns, compute_returns,
     compute_rolling_vol, optimize_equal_weight, optimize_max_diversification,
     optimize_max_sharpe, optimize_max_sharpe_capm, optimize_max_sortino, optimize_min_cvar,
     optimize_min_variance, optimize_risk_parity, optimize_target_volatility,
@@ -93,12 +93,6 @@ def test_metrics_with_benchmark():
     assert metrics["beta"] == pytest.approx(2, abs=.01)
     assert metrics["alpha"] == pytest.approx(-.0241, abs=.01)
     assert metrics["vol"] == pytest.approx(.3191, abs=.01)
-
-
-def test_forward_looking_metrics():
-    actual = compute_forward_looking_metrics({"A": .5, "B": .5}, {"A": .08, "B": .12}, UNCORR, rf=.04)
-    assert actual == pytest.approx({"expected_return": .10, "vol": .1784, "sharpe": .3364}, abs=.01)
-    assert compute_forward_looking_metrics({}, {}, UNCORR) == {}
 
 
 @pytest.mark.parametrize(("optimizer", "expected"), [

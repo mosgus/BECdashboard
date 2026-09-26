@@ -147,18 +147,13 @@ def optimize_portfolio(body: OptimizeRequest) -> dict:
     benchmark = closes.get("SPY")
     if benchmark is None:
         benchmark = _load_stored_closes(["SPY"], required=False).get("SPY")
-    conviction_views = (
-        {ticker.strip().upper(): value for ticker, value in body.conviction_views.items()}
-        if body.conviction_views else None
-    )
     rf, rf_source = fetch_risk_free_rate_with_source()
     try:
         result = run_optimize(
             dict(zip(tickers, weights, strict=True)), closes, benchmark,
             mode=body.mode, lookback_days=body.lookback_days, max_weight=body.max_weight,
             min_weight=body.min_weight, vol_target=body.vol_target, allow_short=body.allow_short,
-            max_short=body.max_short,
-            conviction_views=conviction_views, kappa=body.kappa, rebalance=body.rebalance,
+            max_short=body.max_short, rebalance=body.rebalance,
             rf=rf,
         )
     except OptimizeInputError as exc:
@@ -175,13 +170,10 @@ def optimize_portfolio(body: OptimizeRequest) -> dict:
         "score_limited_by": result.score_limited_by,
         "curves": result.curves,
         "metrics": _safe_metrics(result.metrics),
-        "capm_expected_returns": result.capm_expected_returns,
         "feasible": result.feasible,
         "mode": result.mode,
         "rebalance": result.rebalance,
         "lookback_days": result.lookback_days,
-        "views_applied": result.views_applied,
-        "delta_mu": result.delta_mu,
         "rf": result.rf,
         "rf_source": rf_source,
         "warnings": result.warnings,
@@ -229,6 +221,7 @@ def capm_portfolio(body: CapmRequest) -> dict:
             "expected_sharpe": result.expected_sharpe,
             "portfolio_beta": result.portfolio_beta,
         },
+        "current_metrics": result.current_metrics,
         "var_95": result.var_95,
         "rf": result.rf,
         "rf_source": rf_source,

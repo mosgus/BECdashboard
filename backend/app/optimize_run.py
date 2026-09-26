@@ -11,15 +11,11 @@ import pandas as pd
 import numpy as np
 
 from app.optimizer import (
-    compute_betas,
-    compute_capm_expected_returns,
-    compute_forward_looking_metrics,
     compute_metrics,
     compute_returns,
     optimize_equal_weight,
     optimize_max_diversification,
     optimize_max_sharpe,
-    optimize_max_sharpe_capm,
     optimize_max_sortino,
     optimize_min_cvar,
     optimize_min_variance,
@@ -30,12 +26,11 @@ from app.portfolio_series import Rebalance, backtest_series
 
 
 Mode = Literal[
-    "equal_weight", "min_variance", "max_sharpe", "max_sharpe_capm", "risk_parity",
+    "equal_weight", "min_variance", "max_sharpe", "risk_parity",
     "max_sortino", "min_cvar", "max_diversification", "target_volatility",
 ]
 LOOKBACK_DAYS = (365, 730, 1095, 1825)
 PIN_GRACE_DAYS = 7
-BENCHMARK = "SPY"
 _MODES = set(Mode.__args__)
 _REBALANCES = {"none", "monthly", "quarterly", "annual"}
 
@@ -73,13 +68,10 @@ class OptimizeResult:
     score_limited_by: str | None
     curves: OptimizeCurves
     metrics: dict
-    capm_expected_returns: dict[str, float] | None
     feasible: bool
     mode: str
     rebalance: str
     lookback_days: int
-    views_applied: bool
-    delta_mu: dict[str, float]
     rf: float
     warnings: list[str]
 
@@ -96,8 +88,6 @@ def run_optimize(
     vol_target: float = 0.10,
     allow_short: bool = False,
     max_short: float = 0.30,
-    conviction_views: dict[str, float] | None = None,
-    kappa: float = 0.05,
     rebalance: Rebalance = "none",
     rf: float = 0.0427,
 ) -> OptimizeResult:
@@ -174,15 +164,6 @@ def run_optimize(
             f"— infeasible. Increase max weight.{pin_suffix}"
         )
 
-    # FLAG(custom): κ views are an ad-hoc additive bump to expected return (kappa × view / 100 per
-    # year), not Black-Litterman. In max_sharpe / max_sortino it is added to the historical daily
-    # mean; in max_sharpe_capm it is added to CAPM returns that already contain a view term.
-    views_applied = bool(conviction_views) and mode in {"max_sharpe", "max_sharpe_capm", "max_sortino"}
-    delta_mu = (
-        {ticker: float(kappa * conviction_views.get(ticker, 0.0) / 100.0) for ticker in fitted_tickers}
-        if views_applied and conviction_views else {}
-    )
-    capm_expected_returns: dict[str, float] | None = None
     feasible = True
     try:
         if mode == "equal_weight":
@@ -190,37 +171,11 @@ def run_optimize(
         elif mode == "min_variance":
             fitted_weights = optimize_min_variance(returns, max_weight=max_fit, min_weight=min_w, max_short=sleeve_short)
         elif mode == "max_sharpe":
-            bumped = returns.copy()
-            for ticker, delta in delta_mu.items():
-                bumped[ticker] = bumped[ticker] + delta / 252.0
-            fitted_weights = optimize_max_sharpe(bumped, rf=rf, max_weight=max_fit, min_weight=min_w, max_short=sleeve_short)
-        elif mode == "max_sharpe_capm":
-            if benchmark is None:
-                raise OptimizeInputError("SPY benchmark is required for CAPM optimization.")
-            capm_prices = fit_prices.join(benchmark.rename(BENCHMARK), how="outer")
-            capm_prices = capm_prices.loc[
-                (capm_prices.index >= lookback_start) & (capm_prices.index <= end)
-            ].ffill()
-            betas = compute_betas(compute_returns(capm_prices), BENCHMARK)
-            capm_views = {ticker: view / 100.0 for ticker, view in (conviction_views or {}).items()}
-            capm_expected_returns = compute_capm_expected_returns(betas, rf=rf, mrp=0.05, views=capm_views)
-            # FLAG(custom): views are counted twice here. compute_capm_expected_returns already added
-            # mrp × view, and delta_mu adds kappa × view again (0.05 + 0.05 per unit view by default).
-            # main does the same ("Also add kappa-based delta_mu on top"). Left as is pending the author's intent.
-            capm_expected_returns = {
-                ticker: float(value + delta_mu.get(ticker, 0.0))
-                for ticker, value in capm_expected_returns.items()
-            }
-            fitted_weights = optimize_max_sharpe_capm(
-                returns, capm_expected_returns, rf=rf, max_weight=max_fit, min_weight=min_w, max_short=sleeve_short
-            )
+            fitted_weights = optimize_max_sharpe(returns, rf=rf, max_weight=max_fit, min_weight=min_w, max_short=sleeve_short)
         elif mode == "risk_parity":
             fitted_weights = optimize_risk_parity(returns, max_weight=max_fit, min_weight=global_min)
         elif mode == "max_sortino":
-            bumped = returns.copy()
-            for ticker, delta in delta_mu.items():
-                bumped[ticker] = bumped[ticker] + delta / 252.0
-            fitted_weights = optimize_max_sortino(bumped, rf=rf, max_weight=max_fit, min_weight=min_w, max_short=sleeve_short)
+            fitted_weights = optimize_max_sortino(returns, rf=rf, max_weight=max_fit, min_weight=min_w, max_short=sleeve_short)
         elif mode == "min_cvar":
             fitted_weights = optimize_min_cvar(returns, max_weight=max_fit, min_weight=min_w, max_short=sleeve_short)
         elif mode == "max_diversification":
@@ -276,14 +231,9 @@ def run_optimize(
 
     current_returns = pd.Series(current_curve.total).pct_change().dropna()
     optimized_returns = pd.Series(optimized_curve.total).pct_change().dropna()
-    forward_looking = (
-        compute_forward_looking_metrics(fitted_weights, capm_expected_returns or {}, returns, rf=rf)
-        if mode == "max_sharpe_capm" else None
-    )
     metrics = {
         "current": compute_metrics(current_returns, benchmark_returns, rf=rf),
         "optimized": compute_metrics(optimized_returns, benchmark_returns, rf=rf),
-        "forward_looking": forward_looking,
     }
     return OptimizeResult(
         tickers=tickers,
@@ -302,13 +252,10 @@ def run_optimize(
             benchmark=benchmark_curve,
         ),
         metrics=metrics,
-        capm_expected_returns=capm_expected_returns,
         feasible=feasible,
         mode=mode,
         rebalance=rebalance,
         lookback_days=lookback_days,
-        views_applied=views_applied,
-        delta_mu=delta_mu,
         rf=rf,
         warnings=warnings,
     )

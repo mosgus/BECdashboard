@@ -51,6 +51,7 @@ class CapmResult:
     expected_vol: float
     expected_sharpe: float | None
     portfolio_beta: float
+    current_metrics: dict[str, float | None]
     var_95: dict[str, float]
     rf: float
     mrp: float
@@ -202,6 +203,15 @@ def run_capm(
     expected_vol = float(math.sqrt(max(weight_array @ covariance @ weight_array, 0.0)))
     expected_sharpe = (expected_return - rf) / expected_vol if expected_vol > 1e-12 else None
     portfolio_beta = float(weight_array @ beta_array)
+    current_array = np.array([current_weights[ticker] for ticker in tickers])
+    current_return = float(current_array @ return_array)
+    current_vol = float(math.sqrt(max(current_array @ covariance @ current_array, 0.0)))
+    current_metrics = {
+        "expected_return": current_return,
+        "expected_vol": current_vol,
+        "expected_sharpe": (current_return - rf) / current_vol if current_vol > 1e-12 else None,
+        "portfolio_beta": float(current_array @ beta_array),
+    }
     vols = np.sqrt(np.diag(covariance))
     z = float(norm.ppf(0.05))
     var_95 = {
@@ -233,6 +243,7 @@ def run_capm(
         expected_vol=expected_vol,
         expected_sharpe=expected_sharpe,
         portfolio_beta=portfolio_beta,
+        current_metrics=current_metrics,
         var_95=var_95,
         rf=rf,
         mrp=mrp,

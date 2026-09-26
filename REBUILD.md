@@ -1906,6 +1906,40 @@ risk-free rate to the 3-month T-bill and limits portfolios to holdable tickers.
   - Target value, trades, CSV, the CAL chart and Apply are the next contract.
   - Contract numbers are shared with a second planner session, so the Outlook contracts are not
     consecutive.
+- **CAPM results beyond weights (0119)** have these properties:
+  - The backend also returns `current_metrics`, so every run shows Current next to Target.
+  - The Target value is a planning figure only. It defaults to today's invested value, not main's
+    round-up to the next $100k, which made a do-nothing run show buys. It is not a run setting, and
+    Apply always sizes share counts to the current invested value.
+  - Trades and Apply reuse `tradeRows` / `applyPlan` through a narrowed `WeightSource` /
+    `ApplySource` type, not a second implementation.
+  - The CAL chart has no 2×/3× leverage markers, because the app is long-only.
+  - A note appears when every view is 0%. **Why:** Gunnar's first run moved 30 points from MS to XLK
+    on CAPM alone, and a +50% view on VEA put 84.4% in it. Concentration under the default 0–100%
+    limits is Gunnar's call and has not been changed.
+- **Every Outlook technique has a Help guide (0119 rework, Gunnar's request).**
+  - Its settings card has a bordered **Help** button at the top right, level with the title. It opens
+    a right-side `GuidePanel` explaining:
+    - what the technique is
+    - how it works
+    - what each setting and result means
+    - where the model is weak
+  - The copy lives as data in `lib/<technique>Guide.ts`, and its test pins the list of settings
+    terms. Adding a setting without a guide entry therefore fails the suite, the same guard as the
+    `/ticker` glossary.
+  - CAPM ships its guide in 0119. **Monte Carlo and Forecast each write their guide in their own
+    contract**, from the finished feature, not ahead of it.
+  - **Known inconsistency:** Optimize still uses the older "Optimizer guide →" link at the bottom of
+    its card, and `OptimizerGuide` / `HelpSidebar` keep their own copy of the panel shell. Moving
+    them onto `GuidePanel` / `HelpButton` is optional cleanup, not yet asked for.
+- **The old CAPM mode in `/optimize` is deleted (0120, Gunnar's decision, 2026-09-26).**
+  - Removed: `max_sharpe_capm`, `conviction_views`, `kappa`, `delta_mu`, `views_applied`, `capm_expected_returns` and `forward_looking` metrics.
+  - This also removes the double-counted view (`mrp × view` + `κ × view`) flagged in 0112.
+  - CAPM lives only in `/portfolio/capm`, which applies each view once, through `mrp × view`.
+  - The `mrp × view` `FLAG(custom)` stays: it is the documented meaning of a view in the CAPM guide.
+  - The duplicate `isValidCurrentPortfolio` in `portfolioStore.ts` is merged into `lib/portfolio.ts`.
+- **Frontend audits render the page (from 0119).** `node contracts/tools/smoke-render.mjs <tab>` loads a portfolio tab in headless Chrome with a throwaway profile and a fake portfolio, then prints any uncaught exception.
+  - **Why:** 0119 passed tests, build and lint but blanked the Outlook tab. `Tooltip` calls `Children.only`, and the Target value `Field` gave it two children.
 
 ## Open questions (not decided)
 

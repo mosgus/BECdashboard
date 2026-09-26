@@ -123,6 +123,16 @@ def test_non_convergence_is_an_input_error(monkeypatch):
         run()
 
 
+def test_current_metrics_use_current_weights():
+    result = run()
+    current = result.current_metrics
+    assert current["expected_return"] == pytest.approx(0.09, abs=1e-9)
+    assert current["expected_vol"] == pytest.approx(0.194797, abs=1e-5)
+    assert current["expected_sharpe"] == pytest.approx(0.256677, abs=1e-4)
+    assert current["portfolio_beta"] == pytest.approx(1.0, abs=1e-9)
+    assert result.expected_vol == pytest.approx(0.235240, abs=1e-4)
+
+
 def test_short_history_warns():
     weeks = [day.date() for day in pd.date_range("2024-01-05", periods=55, freq="W-FRI")]
     market = prices(m[:54], index=weeks)

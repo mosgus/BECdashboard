@@ -66,6 +66,7 @@ def test_manual_rf_and_lowercase_inputs(client, db_mode):
     assert body["market_ticker"] == "M"
     assert body["holdings"][0]["ticker"] == "A"
     assert set(body["var_95"]) == {"daily", "weekly", "monthly", "quarterly", "annual"}
+    assert set(body["current_metrics"]) == {"expected_return", "expected_vol", "expected_sharpe", "portfolio_beta"}
 
 
 def test_live_rf_when_rf_omitted(client, db_mode, monkeypatch):

@@ -95,16 +95,13 @@ def test_rate_fallback_is_reported(client, db_mode, monkeypatch):
     assert response.json()["rf_source"] == "fallback"
 
 
-def test_missing_spy_is_optional_except_for_capm(client, db_mode):
+def test_missing_spy_is_optional(client, db_mode):
     _seed(include_y=False, include_spy=False)
     ordinary = client.post("/portfolio/optimize", json={"tickers": ["A", "B"], "weights": [1, 1], "lookback_days": 365})
     assert ordinary.status_code == 200
     assert ordinary.json()["curves"]["benchmark"] is None
     assert any("SPY is not stored" in warning for warning in ordinary.json()["warnings"])
     assert "beta" not in ordinary.json()["metrics"]["current"]
-    capm = client.post("/portfolio/optimize", json={"tickers": ["A", "B"], "weights": [1, 1], "mode": "max_sharpe_capm", "lookback_days": 365})
-    assert capm.status_code == 422
-    assert "SPY" in capm.json()["detail"]
 
 
 @pytest.mark.parametrize(
@@ -115,6 +112,7 @@ def test_missing_spy_is_optional_except_for_capm(client, db_mode):
         ({"tickers": ["A", "B"], "weights": [1]}, 400),
         ({"tickers": ["A", "B"], "weights": [0, 1]}, 400),
         ({"tickers": ["A", "B"], "weights": [1, 1], "mode": "nope"}, 422),
+        ({"tickers": ["A", "B"], "weights": [1, 1], "mode": "max_sharpe_capm"}, 422),
         ({"tickers": ["A", "B"], "weights": [1, 1], "lookback_days": 400}, 422),
         ({"tickers": ["A", "B"], "weights": [1, 1], "rebalance": "weekly"}, 422),
         ({"tickers": ["A", "B", "Y"], "weights": [1, 1, 2], "lookback_days": 365, "max_weight": 0.2}, 422),

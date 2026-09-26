@@ -1,5 +1,5 @@
-import { WEIGHT_EPSILON } from './portfolio'
-import type { LegacyPortfolio, Portfolio, Position, StoredPortfolio } from './portfolio'
+import { isValidCurrentPortfolio, WEIGHT_EPSILON } from './portfolio'
+import type { LegacyPortfolio, Portfolio, StoredPortfolio } from './portfolio'
 
 export const PORTFOLIO_STORAGE_KEY = 'bec-portfolios'
 
@@ -7,46 +7,10 @@ function isFiniteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value)
 }
 
-function isValidCurrentPosition(value: unknown): value is Position {
-  if (typeof value !== 'object' || value === null) return false
-  const candidate = value as Record<string, unknown>
-  return (
-    typeof candidate.ticker === 'string' &&
-    candidate.ticker !== '' &&
-    isFiniteNumber(candidate.weight) &&
-    candidate.weight > 0 &&
-    (candidate.shares === undefined || (isFiniteNumber(candidate.shares) && candidate.shares > 0))
-  )
-}
-
 function isValidLegacyPosition(value: unknown): boolean {
   if (typeof value !== 'object' || value === null) return false
   const candidate = value as Record<string, unknown>
   return typeof candidate.ticker === 'string' && isFiniteNumber(candidate.shares)
-}
-
-function hasUniqueTickers(positions: Array<{ ticker: string }>): boolean {
-  return new Set(positions.map((position) => position.ticker)).size === positions.length
-}
-
-function isValidCurrentPortfolio(value: unknown): value is Portfolio {
-  if (typeof value !== 'object' || value === null) return false
-  const candidate = value as Record<string, unknown>
-  if ('cash' in candidate || 'totalValue' in candidate) return false
-  if (
-    typeof candidate.id !== 'string' ||
-    typeof candidate.name !== 'string' ||
-    !isFiniteNumber(candidate.cashWeight) ||
-    candidate.cashWeight < 0 ||
-    !Array.isArray(candidate.positions) ||
-    !candidate.positions.every(isValidCurrentPosition) ||
-    !hasUniqueTickers(candidate.positions as Position[]) ||
-    typeof candidate.updatedAt !== 'string'
-  ) {
-    return false
-  }
-  const total = candidate.cashWeight + (candidate.positions as Position[]).reduce((sum, position) => sum + position.weight, 0)
-  return Math.abs(total - 100) <= 0.01
 }
 
 function isValidLegacyPortfolio(value: unknown): value is LegacyPortfolio {

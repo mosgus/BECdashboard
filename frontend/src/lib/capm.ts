@@ -1,7 +1,8 @@
 import type { CapmRequest, CapmResponse } from '../api/client'
 import type { Portfolio } from './portfolio'
-import { LOOKBACK_OPTIONS } from './optimize'
-import type { TradeBasis } from './optimize'
+import { LOOKBACK_OPTIONS, applyConfirmLines, applyPlan, csvNumber, formatMoney, tradeRows } from './optimize'
+import type { ApplyPlan, TradeBasis, TradeRow, WeightSource } from './optimize'
+import { datePart, filenameSafeName, quote } from './portfolioCsv'
 
 export interface CapmSettings {
   lookbackDays: number
@@ -42,7 +43,12 @@ export interface CapmItem {
   label: string
   value: string
   tooltip: string
+  detail?: string
 }
+
+export interface CapmTradeRow extends TradeRow { frozen: boolean }
+export interface CalPoint { vol: number; ret: number }
+export interface CalChartData { rf: CalPoint; current: CalPoint; target: CalPoint; line: CalPoint[]; assets: Array<CalPoint & { ticker: string }> }
 
 export const DEFAULT_CAPM_SETTINGS: CapmSettings = {
   lookbackDays: 1825,
@@ -202,8 +208,8 @@ export function capmSummary(response: CapmResponse): string {
   return `${label} lookback · market ${response.market_ticker} · risk-free ${rfLabel(response.rf, response.rf_source)} · MRP ${formatReturn(response.mrp)} · fitted ${response.fit_start} → ${response.fit_end}`
 }
 
-export function statItems(response: CapmResponse): CapmItem[] {
-  const { metrics } = response
+export function statItems(response: CapmResponse, weights: 'current' | 'target' = 'target'): CapmItem[] {
+  const metrics = weights === 'current' ? response.current_metrics : response.metrics
   return [
     {
       label: 'Expected return',
@@ -213,7 +219,7 @@ export function statItems(response: CapmResponse): CapmItem[] {
     {
       label: 'Expected volatility',
       value: formatReturn(metrics.expected_vol),
-      tooltip: 'Annualised volatility of the Target weights, from the covariance of daily returns',
+      tooltip: `Annualised volatility of the ${weights === 'current' ? 'Current' : 'Target'} weights, from the covariance of daily returns`,
     },
     {
       label: 'Expected Sharpe',
@@ -228,7 +234,7 @@ export function statItems(response: CapmResponse): CapmItem[] {
   ]
 }
 
-export function varItems(response: CapmResponse): CapmItem[] {
+export function varItems(response: CapmResponse, targetValue: number | null = null): CapmItem[] {
   const items: Array<[string, keyof CapmResponse['var_95'], string]> = [
     ['Daily', 'daily', 'One day in 20, the return is expected to be below this'],
     ['Weekly', 'weekly', 'One week in 20, the return is expected to be below this'],
@@ -240,5 +246,83 @@ export function varItems(response: CapmResponse): CapmItem[] {
     label,
     value: formatReturn(response.var_95[key]),
     tooltip,
+    ...(targetValue === null ? {} : { detail: formatMoney(targetValue * response.var_95[key]) }),
   }))
+}
+
+export function capmWeightSource(response: CapmResponse): WeightSource {
+  return {
+    tickers: response.tickers,
+    current_weights: response.current_weights,
+    target_weights: response.target_weights,
+    implied_trades: Object.fromEntries(response.tickers.map((ticker) => [ticker, response.target_weights[ticker] - response.current_weights[ticker]])),
+    pinned: response.holdings.filter((holding) => holding.pinned).map((holding) => ({ ticker: holding.ticker })),
+  }
+}
+
+export function parseTargetValue(text: string): { ok: true; value: number | null } | { ok: false; message: string } {
+  const cleaned = text.trim().replaceAll(',', '').replace(/^\$/, '')
+  if (cleaned === '') return { ok: true, value: null }
+  const value = Number(cleaned)
+  return Number.isFinite(value) && value > 0
+    ? { ok: true, value }
+    : { ok: false, message: 'Target value must be a dollar amount above $0, or blank.' }
+}
+
+export function defaultTargetValue(basis: TradeBasis): string {
+  return basis.kind === 'dollar' ? basis.investedValue.toFixed(2) : ''
+}
+
+export function capmTradeRows(response: CapmResponse, basis: Extract<TradeBasis, { kind: 'dollar' }>, targetValue: number): CapmTradeRow[] {
+  const frozen = new Set(response.holdings.filter((holding) => holding.frozen).map((holding) => holding.ticker))
+  return tradeRows(capmWeightSource(response), basis, targetValue).map((row) => ({ ...row, frozen: frozen.has(row.ticker) }))
+}
+
+export function allViewsZero(response: CapmResponse): boolean {
+  return response.holdings.every((holding) => holding.view === 0)
+}
+
+export function capmCsv(response: CapmResponse, basis: TradeBasis, targetValue: number | null): string {
+  const header = 'ticker,beta,capm_return_pct,view_pct,expected_return_pct,vol_pct,current_pct,target_pct,change_pp,frozen,pinned'
+  const weights = response.holdings.map((holding) => [
+    holding.ticker, csvNumber(holding.beta, 4), csvNumber(holding.capm_return * 100, 2), csvNumber(holding.view * 100, 2),
+    csvNumber(holding.expected_return * 100, 2), csvNumber(holding.vol * 100, 2), csvNumber(holding.current_weight * 100, 2),
+    csvNumber(holding.target_weight * 100, 2), csvNumber((holding.target_weight - holding.current_weight) * 100, 2), String(holding.frozen), String(holding.pinned),
+  ])
+  if (basis.kind !== 'dollar' || targetValue === null) return [header, ...weights.map((row) => row.map(quote).join(','))].join('\n') + '\n'
+  const trades = new Map(capmTradeRows(response, basis, targetValue).map((row) => [row.ticker, row]))
+  const dollarHeader = `${header},price,current_shares,current_value,target_shares,target_value,trade_shares,trade_value`
+  const rows = weights.map((row) => {
+    const trade = trades.get(row[0])!
+    return [...row, csvNumber(trade.price, 4), csvNumber(trade.currentShares, 6), csvNumber(trade.currentValue, 2), csvNumber(trade.targetShares, 6), csvNumber(trade.targetValue, 2), csvNumber(trade.tradeShares, 6), csvNumber(trade.tradeValue, 2)].map(quote).join(',')
+  })
+  return [dollarHeader, ...rows].join('\n') + '\n'
+}
+
+export function capmCsvFilename(portfolioName: string, now: Date): string {
+  return `${filenameSafeName(portfolioName.trim()) || 'portfolio'}-capm-${datePart(now)}.csv`
+}
+
+export function capmApplyPlan(portfolio: Portfolio, response: CapmResponse, lastCloseByTicker: ReadonlyMap<string, number | null>): ApplyPlan {
+  return applyPlan(portfolio, { tickers: response.tickers, target_weights: response.target_weights, feasible: true }, lastCloseByTicker)
+}
+
+export function capmApplyLines(plan: Extract<ApplyPlan, { ok: true }>, basis: TradeBasis, targetValue: number | null): string[] {
+  const lines = applyConfirmLines(plan, 'Target')
+  if (basis.kind === 'dollar' && targetValue !== null && plan.sharesMode === 'recomputed' && Math.abs(targetValue - basis.investedValue) >= 0.005) {
+    lines.splice(-1, 0, `Share counts are sized to the current invested value (${formatMoney(basis.investedValue)}), not the ${formatMoney(targetValue)} Target value.`)
+  }
+  return lines
+}
+
+export function calChartData(response: CapmResponse): CalChartData {
+  const rf = { vol: 0, ret: response.rf * 100 }
+  const target = { vol: response.metrics.expected_vol * 100, ret: response.metrics.expected_return * 100 }
+  const current = { vol: response.current_metrics.expected_vol * 100, ret: response.current_metrics.expected_return * 100 }
+  const assets = response.holdings.map((holding) => ({ ticker: holding.ticker, vol: holding.vol * 100, ret: holding.expected_return * 100 }))
+  const line = target.vol <= 1e-12 ? [] : [rf, (() => {
+    const vol = 1.1 * Math.max(...assets.map((asset) => asset.vol), target.vol, current.vol)
+    return { vol, ret: rf.ret + ((target.ret - rf.ret) / target.vol) * vol }
+  })()]
+  return { rf, current, target, line, assets }
 }

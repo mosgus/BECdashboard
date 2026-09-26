@@ -1,15 +1,16 @@
 """Portfolio analytics: returns, metrics, equity curve, optimizers.
 
-Nine optimization modes:
+Eight optimization modes (run_optimize):
   - equal_weight        : 1/N — simplest baseline
   - min_variance        : minimize portfolio variance (fully invested; long-only unless shorting is enabled)
   - max_sharpe          : historical returns-based max Sharpe (SLSQP)
-  - max_sharpe_capm     : CAPM expected returns + analyst views, per-asset bounds
   - risk_parity         : equal risk contribution (ERC) portfolio
   - max_sortino         : maximise Sortino ratio (excess return / downside deviation below rf)
   - min_cvar            : minimise CVaR at 95% confidence (Expected Shortfall)
   - max_diversification : maximise diversification ratio (w·σ_i / σ_p)
   - target_volatility   : maximise return subject to portfolio vol ≤ vol_target
+
+optimize_max_sharpe_capm is not a run_optimize mode; capm_run uses it for the Outlook CAPM tab.
 
 Ported from main's portfolio module. Risk parity uses variance as its
 ERC target, and near-zero volatility produces a None Sharpe ratio.
@@ -95,28 +96,9 @@ def compute_betas(returns: pd.DataFrame, market_ticker: str) -> dict[str, float]
     return betas
 
 
-def compute_forward_looking_metrics(
-    weights: dict[str, float], expected_returns: dict[str, float], returns: pd.DataFrame, rf: float = 0.04
-) -> dict:
-    tickers = [t for t in weights if t in expected_returns and t in returns.columns]
-    if not tickers:
-        return {}
-    w = np.array([weights[t] for t in tickers], dtype=float)
-    if w.sum() == 0:
-        return {}
-    w = w / w.sum()
-    exp_ret = np.array([expected_returns[t] for t in tickers], dtype=float)
-    cov_annual = returns[tickers].cov().values * 252
-    portfolio_return = float(np.dot(w, exp_ret))
-    portfolio_vol = float(np.sqrt(max(w @ cov_annual @ w, 0.0)))
-    portfolio_sharpe = (portfolio_return - rf) / portfolio_vol if portfolio_vol > 0 else 0.0
-    return {"expected_return": round(portfolio_return, 6), "vol": round(portfolio_vol, 6), "sharpe": round(portfolio_sharpe, 6)}
-
-
 # FLAG(custom): the `mrp * view` term is not part of CAPM or Black-Litterman. It adds a flat
 # return bump per unit of conviction (view 0.20 → +1.0% at mrp 5%). Ported unchanged from main;
-# intent to be confirmed with its author before changing. run_optimize adds a second κ bump on
-# top of this in max_sharpe_capm mode — see the FLAG there.
+# intent to be confirmed with its author before changing.
 def compute_capm_expected_returns(
     betas: dict[str, float], rf: float = 0.04, mrp: float = 0.05, views: Optional[dict[str, float]] = None
 ) -> dict[str, float]:

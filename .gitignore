@@ -38,3 +38,6 @@ logs/
 
 # Local secrets
 /secrets/
+
+# Reference snapshot
+/reference files/

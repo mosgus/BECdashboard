@@ -43,10 +43,9 @@ const RESPONSE: OptimizeResponse = {
   metrics: {
     current: { cagr: 0.1234, vol: 0.2071, sharpe: 0.5958, max_dd: -0.1826, beta: 1.1, alpha: -0.0123 },
     optimized: { cagr: 0.15, vol: 0.19, sharpe: null, max_dd: -0.1 },
-    forward_looking: null,
   },
-  capm_expected_returns: null, feasible: true, mode: 'min_variance', rebalance: 'none',
-  lookback_days: 1825, views_applied: false, delta_mu: {},
+  feasible: true, mode: 'min_variance', rebalance: 'none',
+  lookback_days: 1825,
   rf: 0.0427,
   rf_source: 'live',
   warnings: ['In-sample: the optimized weights were chosen using the same prices they are scored on.'],
@@ -70,8 +69,6 @@ describe('buildOptimizeRequest', () => {
       lookback_days: 365, max_weight: 1, min_weight: 0, vol_target: 0.1,
       allow_short: false, max_short: 0.3, rebalance: 'none',
     })
-    expect('kappa' in req).toBe(false)
-    expect('conviction_views' in req).toBe(false)
   })
 
   it('scales percentages and honours allow_short for min_weight', () => {
@@ -230,7 +227,9 @@ describe('trades and exports', () => {
   })
 
   it('exports the dollar table shape', () => {
-    expect(optimizeCsv(RESPONSE, DOLLAR_BASIS)).toBe('ticker,price,current_shares,current_value,current_pct,target_shares,target_value,target_pct,trade_shares,trade_value,change_pp,pinned\nAAA,45,10,450,50,12.4,558,62,2.4,108,12,false\nBBB,13.5,20,270,30,12,162,18,-8,-108,-12,false\nYNG,45,4,180,20,4,180,20,0,0,0,true\n')
+    expect(optimizeCsv(RESPONSE, DOLLAR_BASIS)).toBe(
+      'ticker,price,current_shares,current_value,current_pct,target_shares,target_value,target_pct,trade_shares,trade_value,change_pp,pinned\nAAA,45,10,450,50,12.4,558,62,2.4,108,12,false\nBBB,13.5,20,270,30,12,162,18,-8,-108,-12,false\nYNG,45,4,180,20,4,180,20,0,0,0,true\n',
+    )
   })
 
   it('exports the weights table shape', () => {
@@ -371,6 +370,6 @@ describe('runSummary', () => {
   })
 
   it('falls back to the raw mode string when unlisted', () => {
-    expect(modeLabel('max_sharpe_capm')).toBe('max_sharpe_capm')
+    expect(modeLabel('not_a_mode')).toBe('not_a_mode')
   })
 })
