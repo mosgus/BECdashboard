@@ -122,7 +122,7 @@ function Briefing({ summary, now }: { summary: NewsSummary; now: Date }): JSX.El
           {relativeTime(summary.created_at, now)}
         </span>
       </div>
-      <p className="font-briefing text-xl leading-relaxed">{summary.text}</p>
+      <p className="font-briefing text-xl leading-relaxed text-justify">{summary.text}</p>
     </div>
   )
 }

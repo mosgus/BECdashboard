@@ -132,7 +132,7 @@ export function PortfolioCharts({ portfolio }: { portfolio: Portfolio }): JSX.El
           <div className="divide-y divide-brand-border">
             {data.signals.map((signal) => {
               const reading = signalReading(signal)
-              return <div key={signal.signal} className="px-4 py-4 flex flex-wrap items-start gap-4">
+              return <div key={signal.signal} className="px-4 py-4 grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_12rem] items-start gap-x-4 gap-y-2">
                 <div className="min-w-48 max-w-md"><p className="text-sm font-semibold">{signal.label}</p><p className="text-xs text-[var(--color-muted)] mt-1">{SIGNAL_DESCRIPTIONS[signal.signal] ?? ''}</p></div>
                 <div className="space-y-1"><SignalBadge state={signal.state} />{reading !== null && <p className="text-xs text-[var(--color-muted)]">{reading}</p>}{signal.last_trigger_date !== null && <p className="text-xs text-[var(--color-muted)]">Last trigger {signal.last_trigger_date}</p>}</div>
               </div>

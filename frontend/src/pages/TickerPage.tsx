@@ -216,7 +216,7 @@ export function TickerPage(): JSX.Element {
                 {signalData.signals.map((signal) => {
                   const reading = valueLabel(signal)
                   return (
-                    <div key={signal.signal} className="px-4 py-4 flex flex-wrap items-start gap-4">
+                    <div key={signal.signal} className="px-4 py-4 grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_12rem] items-start gap-x-4 gap-y-2">
                       <div className="min-w-48 max-w-md">
                         <p className="text-sm font-semibold">{signal.label}</p>
                         <p className="text-xs text-[var(--color-muted)] mt-1">{SIGNAL_DESCRIPTIONS[signal.signal] ?? ''}</p>
