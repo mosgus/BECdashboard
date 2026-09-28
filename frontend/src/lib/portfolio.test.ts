@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { UniverseEntry } from '../api/client'
-import { addPositionDiluting, cashFromPositions, impliedPortfolioValue, migrateLegacyPortfolio, summariseDraft, weightFromShares } from './portfolio'
-import type { Portfolio } from './portfolio'
+import { addPositionDiluting, cashFromPositions, impliedPortfolioValue, migrateLegacyPortfolio, summariseDraft, switchEntryMode, weightFromShares } from './portfolio'
+import type { DraftRow, DraftSummary, ModeSwitch, Portfolio } from './portfolio'
 
 function portfolio(cashWeight: number, positions: Portfolio['positions']): Portfolio {
   return { id: 'portfolio', name: 'Portfolio', cashWeight, positions, updatedAt: '2026-09-21T00:00:00Z' }
@@ -15,6 +15,260 @@ function entry(price: number | null): UniverseEntry {
     bar_count: 0, first_bar: null, last_bar: null, fetched_at: null, added_at: '',
   }
 }
+
+describe('switchEntryMode', () => {
+  const weightRows: DraftRow[] = [
+    { id: 'first', ticker: 'AAPL', shares: '', weight: '60' },
+    { id: 'second', ticker: 'MSFT', shares: '', weight: '40' },
+  ]
+  const weightSummary: DraftSummary = {
+    rows: [
+      { id: 'first', ticker: 'AAPL', shares: null, weight: 55 },
+      { id: 'second', ticker: 'MSFT', shares: null, weight: 45 },
+    ],
+    cashWeight: 5,
+    allocatedPercent: 100,
+    remainderPercent: 0,
+    canCreate: true,
+    problem: null,
+  }
+  const sharesSummary: DraftSummary = {
+    rows: [
+      { id: 'first', ticker: 'AAPL', shares: 12, weight: 60 },
+      { id: 'second', ticker: 'MSFT', shares: 8, weight: 40 },
+    ],
+    cashWeight: 0,
+    allocatedPercent: 100,
+    remainderPercent: 0,
+    canCreate: true,
+    problem: null,
+  }
+
+  it('keeps blank shares and clears cash when switching weights to shares', () => {
+    const original = { cash: '0', rows: structuredClone(weightRows) }
+    const result = switchEntryMode({ mode: 'weight', ...original }, 'shares', weightSummary, null, new Map())
+
+    expect(result.fields).toEqual({
+      cash: '',
+      rows: [
+        { id: 'first', ticker: 'AAPL', shares: '', weight: '60' },
+        { id: 'second', ticker: 'MSFT', shares: '', weight: '40' },
+      ],
+    })
+    expect(result.lastSwitch?.from).toBe('weight')
+  })
+
+  it('restores the exact weight draft after switching back without edits', () => {
+    const original = { cash: '0', rows: structuredClone(weightRows) }
+    const toShares = switchEntryMode({ mode: 'weight', ...original }, 'shares', weightSummary, null, new Map())
+    const result = switchEntryMode(
+      { mode: 'shares', ...toShares.fields },
+      'weight',
+      sharesSummary,
+      toShares.lastSwitch,
+      new Map(),
+    )
+
+    expect(result.fields).toEqual(original)
+    expect(result.lastSwitch).toBeNull()
+  })
+
+  it('converts from the current summary when shares-mode fields were edited', () => {
+    const toShares = switchEntryMode(
+      { mode: 'weight', cash: '0', rows: structuredClone(weightRows) },
+      'shares',
+      weightSummary,
+      null,
+      new Map(),
+    )
+    const editedRows = toShares.fields.rows.map((row, index) =>
+      index === 0 ? { ...row, ticker: 'NVDA' } : row,
+    )
+    const result = switchEntryMode(
+      { mode: 'shares', cash: toShares.fields.cash, rows: editedRows },
+      'weight',
+      weightSummary,
+      toShares.lastSwitch,
+      new Map(),
+    )
+
+    expect(result.fields).toEqual({
+      cash: '5',
+      rows: [
+        { id: 'first', ticker: 'NVDA', shares: '', weight: '55' },
+        { id: 'second', ticker: 'MSFT', shares: '', weight: '45' },
+      ],
+    })
+    expect(result.lastSwitch).not.toBeNull()
+  })
+
+  it('restores shares and cash dollars after switching modes without edits', () => {
+    const original = {
+      cash: '125.50',
+      rows: [
+        { id: 'first', ticker: 'AAPL', shares: '12.250', weight: '' },
+        { id: 'second', ticker: 'MSFT', shares: '8', weight: '' },
+      ],
+    }
+    const toWeight = switchEntryMode({ mode: 'shares', ...original }, 'weight', sharesSummary, null, new Map())
+    const result = switchEntryMode(
+      { mode: 'weight', ...toWeight.fields },
+      'shares',
+      weightSummary,
+      toWeight.lastSwitch,
+      new Map(),
+    )
+
+    expect(result.fields).toEqual(original)
+    expect(result.lastSwitch).toBeNull()
+  })
+
+  it('returns the same-mode fields and last switch unchanged', () => {
+    const fields = { cash: '0', rows: structuredClone(weightRows) }
+    const lastSwitch: ModeSwitch = {
+      from: 'shares',
+      before: { cash: '0', rows: structuredClone(weightRows) },
+      after: structuredClone(fields),
+    }
+    const result = switchEntryMode(
+      { mode: 'weight', ...fields },
+      'weight',
+      weightSummary,
+      lastSwitch,
+      new Map(),
+    )
+
+    expect(result.fields).toEqual(fields)
+    expect(result.lastSwitch).toBe(lastSwitch)
+  })
+
+  it('does not restore when the recorded source mode differs from the target mode', () => {
+    const current = { cash: '', rows: structuredClone(weightRows) }
+    const lastSwitch: ModeSwitch = {
+      from: 'shares',
+      before: { cash: '0', rows: structuredClone(weightRows) },
+      after: structuredClone(current),
+    }
+    const result = switchEntryMode(
+      { mode: 'shares', ...current },
+      'weight',
+      weightSummary,
+      lastSwitch,
+      new Map(),
+    )
+
+    expect(result.fields).toEqual({
+      cash: '5',
+      rows: [
+        { id: 'first', ticker: 'AAPL', shares: '', weight: '55' },
+        { id: 'second', ticker: 'MSFT', shares: '', weight: '45' },
+      ],
+    })
+  })
+
+  it('does not mutate the draft rows or their row objects', () => {
+    const rows = structuredClone(weightRows)
+    const before = structuredClone(rows)
+    switchEntryMode({ mode: 'weight', cash: '0', rows }, 'shares', weightSummary, null, new Map())
+
+    expect(rows).toEqual(before)
+  })
+
+  it('keeps imported shares and derives zero cash when cash weight is zero', () => {
+    const rows = [
+      { id: 'first', ticker: 'AAPL', shares: '1', weight: '60' },
+      { id: 'second', ticker: 'MSFT', shares: '2', weight: '40' },
+    ]
+    const result = switchEntryMode(
+      { mode: 'weight', cash: '0', rows },
+      'shares',
+      { ...weightSummary, cashWeight: 0 },
+      null,
+      new Map([['AAPL', { ...entry(300), ticker: 'AAPL' }], ['MSFT', { ...entry(100), ticker: 'MSFT' }]]),
+    )
+
+    expect(result.fields).toEqual({ cash: '0', rows })
+  })
+
+  it('derives cash dollars from imported shares and the cash weight', () => {
+    const rows = [
+      { id: 'first', ticker: 'AAPL', shares: '1', weight: '48' },
+      { id: 'second', ticker: 'MSFT', shares: '2', weight: '32' },
+    ]
+    const result = switchEntryMode(
+      { mode: 'weight', cash: '20', rows },
+      'shares',
+      { ...weightSummary, cashWeight: 20 },
+      null,
+      new Map([['AAPL', { ...entry(300), ticker: 'AAPL' }], ['MSFT', { ...entry(100), ticker: 'MSFT' }]]),
+    )
+
+    expect(result.fields).toEqual({ cash: '125', rows })
+  })
+
+  it('keeps available shares and leaves cash blank when one row has no shares', () => {
+    const rows = [
+      { id: 'first', ticker: 'AAPL', shares: '', weight: '60' },
+      { id: 'second', ticker: 'MSFT', shares: '2', weight: '40' },
+    ]
+    const result = switchEntryMode(
+      { mode: 'weight', cash: '20', rows },
+      'shares',
+      { ...weightSummary, cashWeight: 20 },
+      null,
+      new Map([['AAPL', { ...entry(300), ticker: 'AAPL' }], ['MSFT', { ...entry(100), ticker: 'MSFT' }]]),
+    )
+
+    expect(result.fields).toEqual({ cash: '', rows })
+  })
+
+  it('keeps imported shares and leaves cash blank when a row has no price', () => {
+    const rows = [
+      { id: 'first', ticker: 'AAPL', shares: '1', weight: '60' },
+      { id: 'second', ticker: 'MSFT', shares: '2', weight: '40' },
+    ]
+    const result = switchEntryMode(
+      { mode: 'weight', cash: '20', rows },
+      'shares',
+      { ...weightSummary, cashWeight: 20 },
+      null,
+      new Map([['AAPL', { ...entry(300), ticker: 'AAPL' }], ['MSFT', { ...entry(null), ticker: 'MSFT' }]]),
+    )
+
+    expect(result.fields).toEqual({ cash: '', rows })
+  })
+
+  it('restores the original weight draft after the imported shares switch is untouched', () => {
+    const original = {
+      cash: '0',
+      rows: [
+        { id: 'first', ticker: 'AAPL', shares: '1', weight: '60' },
+        { id: 'second', ticker: 'MSFT', shares: '2', weight: '40' },
+      ],
+    }
+    const byTicker = new Map([
+      ['AAPL', { ...entry(300), ticker: 'AAPL' }],
+      ['MSFT', { ...entry(100), ticker: 'MSFT' }],
+    ])
+    const toShares = switchEntryMode(
+      { mode: 'weight', ...original },
+      'shares',
+      { ...weightSummary, cashWeight: 0 },
+      null,
+      byTicker,
+    )
+    const result = switchEntryMode(
+      { mode: 'shares', ...toShares.fields },
+      'weight',
+      sharesSummary,
+      toShares.lastSwitch,
+      byTicker,
+    )
+
+    expect(result.fields).toEqual(original)
+    expect(result.lastSwitch).toBeNull()
+  })
+})
 
 const GUNNAR_WEIGHTS = [
   73.40490607218531,

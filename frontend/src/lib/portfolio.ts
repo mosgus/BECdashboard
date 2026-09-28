@@ -407,3 +407,92 @@ export function summariseDraft(
     problem,
   }
 }
+
+/** The mode-dependent part of a composer draft: what a mode switch rewrites. */
+export interface DraftFields {
+  cash: string
+  rows: DraftRow[]
+}
+
+/** The last mode switch, kept so an untouched switch back can be undone exactly. */
+export interface ModeSwitch {
+  from: EntryMode
+  before: DraftFields
+  after: DraftFields
+}
+
+function sameDraftFields(left: DraftFields, right: DraftFields): boolean {
+  return (
+    left.cash === right.cash &&
+    left.rows.length === right.rows.length &&
+    left.rows.every((row, index) => {
+      const other = right.rows[index]
+      return (
+        row.id === other.id &&
+        row.ticker === other.ticker &&
+        row.shares === other.shares &&
+        row.weight === other.weight
+      )
+    })
+  )
+}
+
+/** Switch the composer's entry mode, restoring fields after an untouched round trip. Switching
+ * to shares keeps existing share counts and derives cash dollars only from a complete, priced
+ * share set. */
+export function switchEntryMode(
+  draft: { mode: EntryMode; cash: string; rows: DraftRow[] },
+  nextMode: EntryMode,
+  summary: DraftSummary,
+  lastSwitch: ModeSwitch | null,
+  byTicker: Map<string, UniverseEntry>,
+): { fields: DraftFields; lastSwitch: ModeSwitch | null } {
+  const currentFields = { cash: draft.cash, rows: draft.rows }
+  if (nextMode === draft.mode) return { fields: currentFields, lastSwitch }
+
+  if (
+    lastSwitch !== null &&
+    lastSwitch.from === nextMode &&
+    sameDraftFields(currentFields, lastSwitch.after)
+  ) {
+    return { fields: lastSwitch.before, lastSwitch: null }
+  }
+
+  let fields: DraftFields
+  if (nextMode === 'weight') {
+    fields = {
+      cash: summary.cashWeight !== null ? toFieldText(summary.cashWeight, 2) : '',
+      rows: draft.rows.map((row) => {
+        const weight = summary.rows.find((candidate) => candidate.id === row.id)?.weight
+        return { ...row, weight: weight !== null && weight !== undefined ? toFieldText(weight, 4) : '' }
+      }),
+    }
+  } else {
+    let positionsValue = 0
+    let completePricedSet = draft.rows.length > 0
+    for (const row of draft.rows) {
+      const shares = parseFinitePositive(row.shares)
+      const price = positionPrice(byTicker.get(row.ticker))
+      if (shares === null || !isFinitePositive(price)) {
+        completePricedSet = false
+        break
+      }
+      positionsValue += shares * price
+    }
+    const cashWeight = summary.cashWeight
+    const cash = completePricedSet && cashWeight !== null && cashWeight >= 0 && cashWeight < 100 &&
+      Number.isFinite(positionsValue) && positionsValue > 0
+      ? toFieldText(positionsValue * cashWeight / (100 - cashWeight), 2)
+      : ''
+    fields = { cash, rows: draft.rows.map((row) => ({ ...row })) }
+  }
+
+  return {
+    fields,
+    lastSwitch: {
+      from: draft.mode,
+      before: currentFields,
+      after: fields,
+    },
+  }
+}

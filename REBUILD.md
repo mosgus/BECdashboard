@@ -1359,6 +1359,8 @@ fresh while the table did not.
   clock-dependent on an empty database, which is why tests assert `isinstance(..., bool)` rather
   than `False`.
 
+**Weight → Shares keeps share counts that already exist (contract 0124).** Contract 0059 cleared shares on that switch so the composer would never invent a share count from a weight. That aim stands. But a CSV carrying both weights and shares seeds weight mode with real share counts, and clearing them hid the user's own data. The switch now keeps every row's existing `shares` and never creates one. Cash dollars are derived — `positionsValue × c / (100 − c)` at current prices — only when every row has shares and a usable price, because an empty shares-mode cash field means $0 and would silently drop the file's cash weight. Otherwise cash stays blank for the user to fill.
+
 **`Update all data N` is now `Refresh prices`** and posts to `POST /universe/quotes/refresh`, forcing
 an intraday quote fetch only. It no longer walks tickers. `POST /{ticker}/refresh` and
 `client.ts`'s `refreshTicker` both still exist and are called by nothing — deliberately kept as the

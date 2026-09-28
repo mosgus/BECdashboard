@@ -3,8 +3,8 @@ import type { ChangeEvent, JSX } from 'react'
 import { Link } from 'react-router-dom'
 import type { UniverseEntry } from '../api/client'
 import { formatPercent } from '../lib/format'
-import { summariseDraft, toFieldText } from '../lib/portfolio'
-import type { DraftRow, EntryMode, Portfolio, Position } from '../lib/portfolio'
+import { summariseDraft, switchEntryMode } from '../lib/portfolio'
+import type { DraftRow, EntryMode, ModeSwitch, Portfolio, Position } from '../lib/portfolio'
 import { parsePortfolioCsv, portfolioNameFromFilename as nameFromFilename } from '../lib/portfolioCsv'
 import type { DraftSeed, DroppedRow, TargetAdjustment } from '../lib/portfolioCsv'
 import { PRESETS } from '../lib/presets'
@@ -27,6 +27,7 @@ function emptyRow(): DraftRow {
 export function NewPortfolioDialog({ universe, onCancel, onCreate }: NewPortfolioDialogProps): JSX.Element {
   const [name, setName] = useState('')
   const [mode, setMode] = useState<EntryMode>('weight')
+  const [lastSwitch, setLastSwitch] = useState<ModeSwitch | null>(null)
   const [cashText, setCashText] = useState('')
   const [rows, setRows] = useState<DraftRow[]>([])
   const [importError, setImportError] = useState<string | null>(null)
@@ -51,6 +52,7 @@ export function NewPortfolioDialog({ universe, onCancel, onCreate }: NewPortfoli
   /** Apply a parsed CSV (or a future catalog selection) to the dialog's draft state. The only path
    *  by which a DraftSeed becomes an editable draft. */
   function applySeed(seed: DraftSeed): void {
+    setLastSwitch(null)
     setName(seed.name)
     setMode(seed.mode)
     setCashText(seed.cash)
@@ -113,19 +115,10 @@ export function NewPortfolioDialog({ universe, onCancel, onCreate }: NewPortfoli
 
   function handleModeChange(nextMode: EntryMode): void {
     if (nextMode === mode) return
-
-    if (nextMode === 'weight') {
-      setCashText(summary.cashWeight !== null ? toFieldText(summary.cashWeight, 2) : '')
-      setRows((previous) =>
-        previous.map((row) => {
-          const derived = summary.rows.find((candidate) => candidate.id === row.id)
-          return { ...row, weight: derived?.weight !== null && derived?.weight !== undefined ? toFieldText(derived.weight, 4) : '' }
-        }),
-      )
-    } else {
-      setCashText('')
-      setRows((previous) => previous.map((row) => ({ ...row, shares: '' })))
-    }
+    const result = switchEntryMode({ mode, cash: cashText, rows }, nextMode, summary, lastSwitch, byTicker)
+    setCashText(result.fields.cash)
+    setRows(result.fields.rows)
+    setLastSwitch(result.lastSwitch)
     setMode(nextMode)
   }
 
