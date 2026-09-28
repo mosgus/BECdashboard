@@ -120,6 +120,60 @@ Honest list, all recorded with detail in `REBUILD.md`:
 - `REBUILD.md` is the decision log and the continuity mechanism across sessions. A decision that only
   exists in one session's context is lost the moment that context is.
 
+## Running locally
+
+Two terminals, both from the repo root. Backend on `:8000`, frontend on `:5173`.
+
+**One-time setup**
+
+```bash
+brew install python@3.13
+./backend/install.sh                     # creates backend/.venv, installs requirements-dev.txt
+(cd frontend && npm install)
+```
+
+`backend/.env` holds `DATABASE_URL` (Render's **External** URL — the Internal one fails DNS off
+Render), and optionally `GEMINI_KEY` / `GEMINI_MODEL`. `frontend/.env.local` needs
+`VITE_API_URL=http://localhost:8000`; on a fresh clone, create it with:
+
+```bash
+[ -f frontend/.env.local ] || echo 'VITE_API_URL=http://localhost:8000' > frontend/.env.local
+```
+
+**Heads up: `backend/.env` points at the production database.** A local backend reads and writes the
+same shared universe the deployed app does. To run with no database at all (in-process cache only),
+prefix the backend command with `DATABASE_URL=""`.
+
+**Backend** (terminal 1)
+
+```bash
+cd backend && PATH="$PWD/.venv/bin:$PATH" uvicorn app.main:app --reload --port 8000
+```
+
+**Frontend** (terminal 2)
+
+```bash
+cd frontend && npm run dev
+```
+
+Open http://localhost:5173.
+
+**Migrations** — only needed against a fresh database, or after a contract adds one:
+
+```bash
+cd backend && PATH="$PWD/.venv/bin:$PATH" alembic upgrade head
+```
+
+**Checks**
+
+```bash
+(cd backend && PATH="$PWD/.venv/bin:$PATH" pytest)
+(cd frontend && npx tsc -p tsconfig.app.json --noEmit && npm run test && npm run build)
+```
+
+If the backend refuses to start with `Environment variable X is set in your shell and differs from
+backend/.env`, a stale export is shadowing `.env` — `unset X` and retry.
+
 ## Troubleshooting
 
 **Port already in use error**

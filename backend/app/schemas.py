@@ -321,6 +321,16 @@ class OpsUniverseStatus(BaseModel):
     active_tickers: int
     total_bars: int
     newest_bar_date: date | None
+    sweep_active: bool
+
+
+class ForceRefreshStarted(BaseModel):
+    started: bool
+    started_at: datetime
+
+
+class SweepStatus(BaseModel):
+    active: bool
 
 
 class OpsNewsStatus(BaseModel):

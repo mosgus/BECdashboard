@@ -461,6 +461,7 @@ export interface OpsUniverseStatus {
   active_tickers: number
   total_bars: number
   newest_bar_date: string | null
+  sweep_active: boolean
 }
 
 export interface OpsNewsStatus {
@@ -506,6 +507,23 @@ export interface JobRunsResponse {
 
 export async function getOpsStatus(): Promise<OpsStatus> {
   return request<OpsStatus>('/ops/status')
+}
+
+export interface ForceRefreshStarted {
+  started: boolean
+  started_at: string
+}
+
+export interface SweepStatus {
+  active: boolean
+}
+
+export async function forceUniverseRefresh(): Promise<ForceRefreshStarted> {
+  return request<ForceRefreshStarted>('/ops/universe/refresh', { method: 'POST' })
+}
+
+export async function getSweepStatus(): Promise<SweepStatus> {
+  return request<SweepStatus>('/universe/sweep_status')
 }
 
 export async function getJobRuns(limit: number): Promise<JobRunsResponse> {

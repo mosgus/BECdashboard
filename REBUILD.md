@@ -1335,6 +1335,30 @@ stored as a completed close (the AAPL null-close incident, contract 0024).
 lock and the contract says so. Not rolling back on error means a failing sweep waits for the next
 window instead of retrying on every page load — which is how you get rate-limited.
 
+**A forced sweep exists for one case: a claimed window whose work was lost.** Decided 2026-09-28,
+Gunnar, contracts 0121/0122. The trigger was a false alarm. `/universe` showed Coverage 9/25 at
+~16:48 ET on 9/28, and nothing was broken. The 16:00 sweep had started at 16:46:56, fetched all 26
+tickers serially in **145 s**, and was still running. News finished in 11 s, so the briefing looked
+fresh while the table did not.
+
+- **Two separate fixes.** 0122 makes `/universe` show a running sweep and reload once when it ends;
+  that addresses what was actually seen. 0121 adds `POST /ops/universe/refresh`, for the real hole
+  the incident exposed. The claim is written first and never rolled back, so a Render
+  restart or redeploy mid-sweep leaves the window claimed with the work lost. After 16:00 that
+  means nothing retries until 09:30 the next morning.
+- **The forced sweep never passes `force=True`.** It walks `refresh(ticker)` exactly like the
+  scheduled sweep. It also clears `_last_session_cache` and forces one quote batch. A click on
+  current data therefore costs two Yahoo requests, not 26 history downloads. That is what keeps an
+  unauthenticated button compatible with "No write gate". **Do not "improve" it by adding
+  `force=True`.**
+- **A manual run claims the window if the window is due, and otherwise leaves the claim alone.**
+  Without that, the automatic task that lost the race for `_LOCK` returns unclaimed, and
+  `sweep_status` would report a sweep that never comes.
+- **`sweep_active` = lock held OR window due-and-unclaimed.** The second term covers the gap between
+  the strip scheduling the sweep and the task acquiring the lock. It makes the value
+  clock-dependent on an empty database, which is why tests assert `isinstance(..., bool)` rather
+  than `False`.
+
 **`Update all data N` is now `Refresh prices`** and posts to `POST /universe/quotes/refresh`, forcing
 an intraday quote fetch only. It no longer walks tickers. `POST /{ticker}/refresh` and
 `client.ts`'s `refreshTicker` both still exist and are called by nothing — deliberately kept as the
@@ -1948,6 +1972,21 @@ risk-free rate to the 3-month T-bill and limits portfolios to holdable tickers.
   - It deliberately **ignores filters** (contract 0015) — hence the count in the label, so "all 9" while three rows show is unambiguous rather than a lie.
   - Unmount must **break the loop**, not merely suppress `setState`; otherwise navigating away leaves every remaining ticker's request in flight. Caught in the 0014 audit, since a "no console warnings" test passes while the requests keep firing.
 - **Bulk refresh cost at scale.** Still open, one level up: sequential refresh over 50+ tickers is slow by design, with no cancel control and no progress persistence across a reload. Do not parallelise it; if this becomes painful the answer is a server-side job, not concurrency from the browser.
+- **Is a close stored at 16:00:xx ET final?** Raised 2026-09-28, unmeasured. `last_completed_session`
+  admits today's bar from 16:00 ET, so a visit at 16:00:30 can store Yahoo's daily bar before the
+  closing auction settles. Nothing revisits it: the drift check's newest anchor is the newest stored
+  bar, and the next day's fetch starts *after* it. If Yahoo revises that close, the pre-auction
+  value is permanent. **Measure before fixing.** Record `yf.download` daily close for SPY plus ~5
+  universe tickers at 16:01, 16:10 and 16:30 ET on a trading day, and compare. If they differ, the
+  fix is a later last window or cutoff (16:15–16:30), which is *raising* the cutoff and is safe.
+  The rule above forbids only *lowering* it. The fix is **not** `force=True` on the `/ops`
+  button; Gunnar rejected that on 2026-09-28 as 26 downloads per click on a public surface.
+  **Evidence so far, 2026-09-28, suggestive but not conclusive:** production sweeps ran at
+  16:03:08 ET on 09-18 and 16:07:51 ET on 09-22. For SPY, AAPL, MSFT and NVDA, the stored closes
+  on both dates match Yahoo's current closes to the cent. The caveat is that a later drift-triggered
+  full re-download would also produce a match, and job details don't separate an append from a
+  re-download. Neither sweep ran inside the first minute, and that minute is the riskiest one.
+  The live measurement is still the real test.
 - **Result caching for analysis/optimization output.** Not yet justified by an actual performance problem — don't build it speculatively.
 - **CSV upload scope.** Written when portfolio initialization was the first feature; that changed. Manual ticker entry is what the Universe ships with. Whether CSV import arrives for the *universe* (bulk-adding tickers), for *portfolios* (positions), or neither, is undecided.
 - **Universe filtering is built (contract 0015) but holds nothing back.** Client-side search plus six filters in a dialog. Still open, and deliberately not built: **sorting** (the list is ticker-ordered), **persisting filter state in the URL** — `/universe?sector=Technology` would be shareable and survive a reload now that the router exists — and **negative P/E**, where a "max 25" filter silently includes an unprofitable company at −40. None are present in the current nine tickers.

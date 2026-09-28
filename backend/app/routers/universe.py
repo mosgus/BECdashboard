@@ -8,7 +8,7 @@ import pandas as pd
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Response
 from sqlalchemy import select
 
-from app.autorefresh import active_universe_tickers, run_auto_refresh_if_due
+from app.autorefresh import active_universe_tickers, is_sweep_active, run_auto_refresh_if_due
 from app.bars import adjust_bars
 from app.cache import get_cached, store_quotes
 from app.db import is_enabled, session
@@ -25,6 +25,7 @@ from app.schemas import (
     ReturnsResponse,
     SignalsResponse,
     StripResponse,
+    SweepStatus,
     UniverseDetail,
     UniverseEntry,
 )
@@ -272,6 +273,12 @@ def refresh_quotes_endpoint() -> dict:
     if quotes:
         store_quotes(quotes, now_utc)
     return {"refreshed": len(quotes), "fetched_at": now_utc if quotes else None}
+
+
+@router.get("/sweep_status", response_model=SweepStatus)
+def get_sweep_status() -> dict:
+    _require_database()
+    return {"active": is_sweep_active(datetime.now(ZoneInfo("America/New_York")))}
 
 
 @router.get("/{ticker}", response_model=UniverseDetail)

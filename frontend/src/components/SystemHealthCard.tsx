@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { JSX, ReactNode } from 'react'
-import { ApiError, getOpsStatus } from '../api/client'
+import { ApiError, forceUniverseRefresh, getOpsStatus } from '../api/client'
 import type { OpsStatus } from '../api/client'
 import { relativeTime } from '../lib/relativeTime'
+import { watchSweep } from '../lib/sweepWatch'
 import { Tooltip } from './Tooltip'
 
 type State =
@@ -26,9 +27,13 @@ function relativeOrClosed(iso: string | null, now: Date, whenNull: string): stri
   return iso === null ? whenNull : relativeTime(iso, now)
 }
 
-export function SystemHealthCard(): JSX.Element {
+export function SystemHealthCard({ onSweepFinished }: { onSweepFinished?: () => void }): JSX.Element {
   const [state, setState] = useState<State>({ status: 'loading' })
   const [refreshing, setRefreshing] = useState(false)
+  const [watching, setWatching] = useState(false)
+  const [forceError, setForceError] = useState<string | null>(null)
+  const cancelWatch = useRef<(() => void) | null>(null)
+  const mounted = useRef(false)
 
   // No synchronous setState before this — called directly inside the mount effect below, and
   // a setState synchronous with an effect's execution is exactly what oxlint's
@@ -48,12 +53,55 @@ export function SystemHealthCard(): JSX.Element {
   }
 
   useEffect(() => {
+    mounted.current = true
     load()
+    return () => {
+      mounted.current = false
+      cancelWatch.current?.()
+    }
   }, [])
 
   function handleRefreshClick(): void {
     setRefreshing(true)
     load()
+  }
+
+  function beginWatching(): void {
+    setForceError(null)
+    setWatching(true)
+    cancelWatch.current?.()
+    cancelWatch.current = watchSweep({
+      poll: getOpsStatus,
+      isActive: (status) => status.universe.sweep_active,
+      onUpdate: (data) => setState({ status: 'ready', data }),
+      onFinished: () => {
+        setWatching(false)
+        onSweepFinished?.()
+      },
+      onTimeout: () => {
+        setWatching(false)
+        setForceError('Still running — check Job history shortly.')
+      },
+      intervalMs: 5000,
+      timeoutMs: 600000,
+    })
+  }
+
+  function handleForceUpdateClick(): void {
+    setForceError(null)
+    forceUniverseRefresh().then(
+      () => {
+        if (mounted.current) beginWatching()
+      },
+      (err: unknown) => {
+        if (!mounted.current) return
+        if (err instanceof ApiError && err.status === 409) {
+          beginWatching()
+          return
+        }
+        setForceError(err instanceof ApiError ? err.message : 'Failed to start universe update.')
+      },
+    )
   }
 
   const now = new Date()
@@ -62,16 +110,28 @@ export function SystemHealthCard(): JSX.Element {
     <div className={CARD}>
       <div className="flex items-center justify-between gap-3 mb-4">
         <h2 className="text-[17px] font-semibold text-foreground">System Health</h2>
-        <Tooltip label="Re-read system status">
-          <button
-            type="button"
-            onClick={handleRefreshClick}
-            disabled={refreshing || state.status === 'loading'}
-            className="text-xs font-medium px-3 py-1.5 rounded-[var(--radius-btn)] bg-brand-surface border border-brand-border text-[var(--color-muted)] hover:bg-brand-border hover:text-foreground disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            Refresh
-          </button>
-        </Tooltip>
+        <div className="flex items-center gap-2">
+          <Tooltip label="Bring every universe ticker's price history and quotes up to date now, without waiting for the next refresh window">
+            <button
+              type="button"
+              onClick={handleForceUpdateClick}
+              disabled={watching || state.status === 'loading'}
+              className="text-xs font-medium px-3 py-1.5 rounded-[var(--radius-btn)] bg-brand-surface border border-brand-border text-[var(--color-muted)] hover:bg-brand-border hover:text-foreground disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {watching ? 'Updating…' : 'Force update'}
+            </button>
+          </Tooltip>
+          <Tooltip label="Re-read system status">
+            <button
+              type="button"
+              onClick={handleRefreshClick}
+              disabled={refreshing || state.status === 'loading'}
+              className="text-xs font-medium px-3 py-1.5 rounded-[var(--radius-btn)] bg-brand-surface border border-brand-border text-[var(--color-muted)] hover:bg-brand-border hover:text-foreground disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Refresh
+            </button>
+          </Tooltip>
+        </div>
       </div>
 
       {state.status === 'loading' && <p className="text-sm text-[var(--color-muted)]">Loading…</p>}
@@ -81,6 +141,7 @@ export function SystemHealthCard(): JSX.Element {
           page that silently renders nothing when the backend is unwell is useless exactly
           when it is needed. */}
       {state.status === 'error' && <p className="text-sm text-brand-negative">{state.message}</p>}
+      {forceError && <p className="text-sm text-brand-negative">{forceError}</p>}
 
       {state.status === 'ready' && (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-5">

@@ -1,14 +1,15 @@
-import { Suspense, lazy, useEffect, useState } from 'react'
+import { Suspense, lazy, useEffect, useRef, useState } from 'react'
 import type { JSX } from 'react'
 import { AddTickerForm } from '../components/AddTickerForm'
 import { UniverseTable } from '../components/UniverseTable'
 import { FilterDialog } from '../components/FilterDialog'
 import { DownloadIcon } from '../components/DownloadIcon'
 import { Tooltip } from '../components/Tooltip'
-import { ApiError, getUniverse } from '../api/client'
+import { ApiError, getSweepStatus, getUniverse } from '../api/client'
 import type { UniverseEntry } from '../api/client'
 import { activeFilterCount, applyFilters, EMPTY_FILTERS } from '../lib/filters'
 import type { FilterState } from '../lib/filters'
+import { watchSweep } from '../lib/sweepWatch'
 
 type State =
   | { status: 'loading' }
@@ -28,6 +29,8 @@ const CARD = 'bg-brand-surface border border-brand-border rounded-[var(--radius-
 export function UniversePage(): JSX.Element {
   const messages = ['Loading universe…', 'Loading takes <60s…', 'Still loading…']
   const [state, setState] = useState<State>({ status: 'loading' })
+  const [sweeping, setSweeping] = useState(false)
+  const requestSeq = useRef(0)
   const [messageIndex, setMessageIndex] = useState(0)
   const [filters, setFilters] = useState<FilterState>(EMPTY_FILTERS)
   const [filterDialogOpen, setFilterDialogOpen] = useState(false)
@@ -39,9 +42,13 @@ export function UniversePage(): JSX.Element {
 
   function load(): void {
     setState({ status: 'loading' })
+    const seq = ++requestSeq.current
     getUniverse()
-      .then((entries) => setState({ status: 'ready', entries }))
+      .then((entries) => {
+        if (seq === requestSeq.current) setState({ status: 'ready', entries })
+      })
       .catch((err: unknown) => {
+        if (seq !== requestSeq.current) return
         if (err instanceof ApiError && err.status === 503) {
           setState({
             status: 'error',
@@ -56,8 +63,39 @@ export function UniversePage(): JSX.Element {
       })
   }
 
+  function reloadSilently(): void {
+    const seq = ++requestSeq.current
+    getUniverse().then(
+      (entries) => {
+        if (seq === requestSeq.current) setState({ status: 'ready', entries })
+      },
+      () => {},
+    )
+  }
+
   useEffect(() => {
     load()
+  }, [])
+
+  useEffect(() => {
+    let unmounted = false
+    const cancel = watchSweep({
+      poll: getSweepStatus,
+      isActive: (s) => s.active,
+      onUpdate: (s) => setSweeping(s.active),
+      onFinished: (_s, polls) => {
+        setSweeping(false)
+        if (polls > 1 && !unmounted) reloadSilently()
+      },
+      onTimeout: () => setSweeping(false),
+      intervalMs: 10000,
+      timeoutMs: 600000,
+    })
+    return () => {
+      unmounted = true
+      requestSeq.current += 1
+      cancel()
+    }
   }, [])
 
   // Warm the lazy chart chunk in the background once the table is on screen. Without this the
@@ -87,6 +125,11 @@ export function UniversePage(): JSX.Element {
             <p className="text-[0.9375rem] font-light text-[var(--color-muted)] mt-1.5">
               Securities tracked for analysis. Data is shared and persists across sessions.
             </p>
+            {sweeping && (
+              <p className="text-xs text-[var(--color-muted)] mt-1">
+                Updating universe data — the table will refresh when it finishes.
+              </p>
+            )}
           </div>
           {/* The form normally lives in the controls row below, but that row only renders once
               the universe has entries — without this fallback an empty universe would have no

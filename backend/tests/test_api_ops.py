@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from fastapi.testclient import TestClient
 
+from app.autorefresh import _LOCK
 from app.db import get_engine, session
 from app.main import app
 from app.models import Base, JobRun
@@ -53,7 +54,9 @@ def test_get_ops_status_200_on_an_empty_database(db_mode, client):
     body = response.json()
 
     assert body["database"]["connected"] is True
-    assert body["universe"] == {"active_tickers": 0, "total_bars": 0, "newest_bar_date": None}
+    universe = dict(body["universe"])
+    assert isinstance(universe.pop("sweep_active"), bool)
+    assert universe == {"active_tickers": 0, "total_bars": 0, "newest_bar_date": None}
     assert body["news"] == {"article_count": 0, "newest_fetched_at": None}
     assert body["briefing"] == {"exists": False, "model": None, "created_at": None}
     assert isinstance(body["gemini_key_configured"], bool)
@@ -114,3 +117,48 @@ def test_get_ops_job_runs_limit_clamps_below_1(db_mode, client):
     response = client.get("/ops/job_runs?limit=0")
     assert response.status_code == 200
     assert len(response.json()["job_runs"]) == 1
+
+
+# --- POST /ops/universe/refresh and GET /universe/sweep_status ------------------------------
+
+
+def test_force_universe_refresh_starts_a_background_sweep(db_mode, client, monkeypatch):
+    called = []
+
+    def fake_run(now_utc, now_et):
+        called.append((now_utc, now_et))
+        _LOCK.release()
+
+    monkeypatch.setattr("app.routers.ops.run_manual_refresh", fake_run)
+
+    response = client.post("/ops/universe/refresh")
+
+    assert response.status_code == 202
+    assert response.json()["started"] is True
+    assert len(called) == 1
+    assert _LOCK.locked() is False
+
+
+def test_force_universe_refresh_conflicts_while_a_sweep_is_running(db_mode, client):
+    assert _LOCK.acquire(blocking=False)
+    try:
+        response = client.post("/ops/universe/refresh")
+    finally:
+        _LOCK.release()
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "A universe refresh is already running"
+
+
+def test_force_universe_refresh_is_unavailable_without_a_database(client):
+    response = client.post("/ops/universe/refresh")
+
+    assert response.status_code == 503
+    assert _LOCK.locked() is False
+
+
+def test_sweep_status_route_returns_a_boolean_active_value(db_mode, client):
+    response = client.get("/universe/sweep_status")
+
+    assert response.status_code == 200
+    assert isinstance(response.json()["active"], bool)

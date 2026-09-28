@@ -63,7 +63,9 @@ def test_system_health_on_an_empty_database_returns_nulls_and_zeroes(db_mode):
 
     assert health["database"]["connected"] is True
     assert health["database"]["revision"] is None  # no alembic_version table in test databases
-    assert health["universe"] == {"active_tickers": 0, "total_bars": 0, "newest_bar_date": None}
+    universe = dict(health["universe"])
+    assert isinstance(universe.pop("sweep_active"), bool)
+    assert universe == {"active_tickers": 0, "total_bars": 0, "newest_bar_date": None}
     assert health["news"] == {"article_count": 0, "newest_fetched_at": None}
     assert health["briefing"] == {"exists": False, "model": None, "created_at": None}
     assert isinstance(health["gemini_key_configured"], bool)

@@ -39,6 +39,12 @@ _last_session_cache: TTLCache = TTLCache(maxsize=8, ttl=3600)
 _earliest_session_cache: TTLCache = TTLCache(maxsize=8, ttl=86400)
 
 
+def clear_last_session_cache() -> None:
+    """Empty _last_session_cache so the next lookup re-derives the completed session from
+    a fresh reference-ticker download."""
+    _last_session_cache.clear()
+
+
 class UpstreamUnavailable(RuntimeError):
     """Yahoo was reachable but refused the request — not a statement about the symbol.
 

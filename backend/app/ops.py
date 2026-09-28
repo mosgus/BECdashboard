@@ -19,6 +19,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import func, select, text
 
 from app.config import Settings
+from app.autorefresh import is_sweep_active
 from app.db import is_enabled, session
 from app.models import AppState, JobRun, NewsArticle, NewsSummary, PriceBar, UniverseTicker
 from app.schedule import current_window_start
@@ -60,7 +61,7 @@ def system_health() -> dict:
     if not is_enabled():
         return {
             "database": {"connected": False, "revision": None},
-            "universe": {"active_tickers": 0, "total_bars": 0, "newest_bar_date": None},
+            "universe": {"active_tickers": 0, "total_bars": 0, "newest_bar_date": None, "sweep_active": False},
             "news": {"article_count": 0, "newest_fetched_at": None},
             "briefing": {"exists": False, "model": None, "created_at": None},
             "gemini_key_configured": settings.gemini_key is not None,
@@ -110,6 +111,7 @@ def system_health() -> dict:
             "active_tickers": active_tickers or 0,
             "total_bars": total_bars or 0,
             "newest_bar_date": newest_bar_date,
+            "sweep_active": is_sweep_active(now_et),
         },
         "news": {
             "article_count": article_count or 0,
