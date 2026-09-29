@@ -82,7 +82,27 @@ export function canOptimize(portfolio: Portfolio): boolean {
 export type WeightSource = Pick<OptimizeResponse, 'tickers' | 'current_weights' | 'target_weights' | 'implied_trades'> & { pinned: ReadonlyArray<{ ticker: string }> }
 export type ApplySource = Pick<OptimizeResponse, 'tickers' | 'target_weights' | 'feasible'>
 
-export function applyPlan(portfolio: Portfolio, response: ApplySource, lastCloseByTicker: ReadonlyMap<string, number | null>): ApplyPlan {
+export function cashAfterDeploy(cashWeight: number, deployPct: number): number {
+  if (deployPct >= 100) return 0
+  return cashWeight * (1 - Math.max(0, deployPct) / 100)
+}
+
+export function deployedInvestedValue(investedValue: number, cashWeight: number, cashAfter: number): number {
+  if (cashAfter === cashWeight) return investedValue
+  return investedValue * (100 - cashAfter) / (100 - cashWeight)
+}
+
+export function portfolioShareRows<T extends WeightRow>(rows: T[], cashWeight: number, cashAfter: number): T[] {
+  return rows.map((row) => ({
+    ...row,
+    current: row.current * (100 - cashWeight) / 100,
+    target: row.target * (100 - cashAfter) / 100,
+    change: row.target * (100 - cashAfter) / 100 - row.current * (100 - cashWeight) / 100,
+  }))
+}
+
+export function applyPlan(portfolio: Portfolio, response: ApplySource, lastCloseByTicker: ReadonlyMap<string, number | null>, cashAfter: number = portfolio.cashWeight): ApplyPlan {
+  if (!Number.isFinite(cashAfter) || cashAfter < 0 || cashAfter > portfolio.cashWeight) return { ok: false, reason: 'invalid' }
   const portfolioTickers = portfolio.positions.map((position) => position.ticker).sort()
   const responseTickers = [...response.tickers].sort()
   if (portfolioTickers.length !== responseTickers.length || portfolioTickers.some((ticker, index) => ticker !== responseTickers[index])) return { ok: false, reason: 'tickers-changed' }
@@ -108,12 +128,12 @@ export function applyPlan(portfolio: Portfolio, response: ApplySource, lastClose
     : 0
   const positions = kept.map((position) => {
     const fraction = response.target_weights[position.ticker] / targetTotal
-    const weight = fraction * (100 - portfolio.cashWeight)
+    const weight = fraction * (100 - cashAfter)
     return sharesMode === 'recomputed'
-      ? { ticker: position.ticker, weight, shares: fraction * investedValue / prices[position.ticker] }
+      ? { ticker: position.ticker, weight, shares: fraction * deployedInvestedValue(investedValue, portfolio.cashWeight, cashAfter) / prices[position.ticker] }
       : { ticker: position.ticker, weight }
   })
-  const next: Portfolio = { id: portfolio.id, name: portfolio.name, cashWeight: portfolio.cashWeight, positions, updatedAt: portfolio.updatedAt }
+  const next: Portfolio = { id: portfolio.id, name: portfolio.name, cashWeight: cashAfter, positions, updatedAt: portfolio.updatedAt }
   if (!isValidCurrentPortfolio(next)) return { ok: false, reason: 'invalid' }
   return { ok: true, portfolio: next, sharesMode, removed }
 }
@@ -126,8 +146,10 @@ export function applyBlockedText(reason: ApplyBlockedReason): string {
   return "These weights don't make a valid portfolio, so they can't be applied."
 }
 
-export function applyConfirmLines(plan: Extract<ApplyPlan, { ok: true }>, column: string = 'Optimized'): string[] {
-  const lines = [`Holdings weights will be replaced by the ${column} column. Cash stays at ${plan.portfolio.cashWeight.toFixed(1)}%.`]
+export function applyConfirmLines(plan: Extract<ApplyPlan, { ok: true }>, column: string = 'Optimized', cashBefore?: number): string[] {
+  const lines = [cashBefore !== undefined && Math.abs(cashBefore - plan.portfolio.cashWeight) >= 0.05
+    ? `Holdings weights will be replaced by the ${column} column, scaled up to use cash. Cash goes from ${cashBefore.toFixed(1)}% to ${plan.portfolio.cashWeight.toFixed(1)}%.`
+    : `Holdings weights will be replaced by the ${column} column. Cash stays at ${plan.portfolio.cashWeight.toFixed(1)}%.`]
   if (plan.sharesMode === 'recomputed') lines.push("Share counts will be recalculated from each holding's last stored close, as fractional shares.")
   if (plan.sharesMode === 'cleared') lines.push('Only some holdings have share counts, so all share counts will be removed.')
   if (plan.removed.length > 0) {
@@ -241,8 +263,11 @@ export function formatSignedShares(value: number): string {
   return `${value > 0 ? '+' : '-'}${formatShares(Math.abs(value))}`
 }
 
-export function tradeBasisNote(basis: TradeBasis): string {
-  if (basis.kind === 'dollar') return `Trades use each holding's last stored close and fractional shares, on ${formatMoney(basis.investedValue)} invested. Cash is left as it is.`
+export function tradeBasisNote(basis: TradeBasis, deployedDollars: number = 0): string {
+  if (basis.kind === 'dollar') {
+    if (deployedDollars >= 0.005) return `Trades use each holding's last stored close and fractional shares, on ${formatMoney(basis.investedValue)} invested plus ${formatMoney(deployedDollars)} of cash.`
+    return `Trades use each holding's last stored close and fractional shares, on ${formatMoney(basis.investedValue)} invested. Cash is left as it is.`
+  }
   if (basis.reason === 'no-shares') return 'Add a share count to every holding to see share and dollar trades.'
   if (basis.reason === 'no-price') return 'A holding has no stored closing price, so trades are shown as weights only.'
   return "Share counts don't match the weights within 0.5 points, so trades are shown as weights only."
@@ -252,14 +277,21 @@ export function csvNumber(value: number, decimals: number): string {
   return String(Number(value.toFixed(decimals)))
 }
 
-export function optimizeCsv(response: OptimizeResponse, basis: TradeBasis): string {
+export function optimizeCsv(response: OptimizeResponse, basis: TradeBasis, cashWeight: number = 0, cashAfter: number = cashWeight): string {
   if (basis.kind === 'dollar') {
     const header = 'ticker,price,current_shares,current_value,current_pct,target_shares,target_value,target_pct,trade_shares,trade_value,change_pp,pinned'
-    const rows = tradeRows(response, basis).map((row) => [row.ticker, csvNumber(row.price, 4), csvNumber(row.currentShares, 6), csvNumber(row.currentValue, 2), csvNumber(row.current * 100, 2), csvNumber(row.targetShares, 6), csvNumber(row.targetValue, 2), csvNumber(row.target * 100, 2), csvNumber(row.tradeShares, 6), csvNumber(row.tradeValue, 2), csvNumber(row.change * 100, 2), String(row.pinned)].map(quote).join(','))
+    const rows = portfolioShareRows(
+      tradeRows(response, basis, deployedInvestedValue(basis.investedValue, cashWeight, cashAfter)), cashWeight, cashAfter,
+    ).map((row) => [
+      row.ticker, csvNumber(row.price, 4), csvNumber(row.currentShares, 6), csvNumber(row.currentValue, 2),
+      csvNumber(row.current * 100, 2), csvNumber(row.targetShares, 6), csvNumber(row.targetValue, 2),
+      csvNumber(row.target * 100, 2), csvNumber(row.tradeShares, 6), csvNumber(row.tradeValue, 2),
+      csvNumber(row.change * 100, 2), String(row.pinned),
+    ].map(quote).join(','))
     return [header, ...rows].join('\n') + '\n'
   }
   const header = 'ticker,current_pct,target_pct,change_pp,pinned'
-  const rows = weightRows(response).map((row) => [row.ticker, csvNumber(row.current * 100, 2), csvNumber(row.target * 100, 2), csvNumber(row.change * 100, 2), String(row.pinned)].map(quote).join(','))
+  const rows = portfolioShareRows(weightRows(response), cashWeight, cashAfter).map((row) => [row.ticker, csvNumber(row.current * 100, 2), csvNumber(row.target * 100, 2), csvNumber(row.change * 100, 2), String(row.pinned)].map(quote).join(','))
   return [header, ...rows].join('\n') + '\n'
 }
 

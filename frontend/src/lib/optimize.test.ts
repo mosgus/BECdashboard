@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { OptimizeResponse } from '../api/client'
 import type { Portfolio } from './portfolio'
+import { parsePortfolioCsv } from './portfolioCsv'
 import {
   DEFAULT_SETTINGS,
   applyBlockedText,
@@ -8,7 +9,9 @@ import {
   applyPlan,
   buildOptimizeRequest,
   canOptimize,
+  cashAfterDeploy,
   curveRows,
+  deployedInvestedValue,
   formatChangePp,
   formatMoney,
   formatSignedMoney,
@@ -26,6 +29,7 @@ import {
   weightRows,
   optimizeCsv,
   optimizeCsvFilename,
+  portfolioShareRows,
 } from './optimize'
 
 const RESPONSE: OptimizeResponse = {
@@ -371,5 +375,70 @@ describe('runSummary', () => {
 
   it('falls back to the raw mode string when unlisted', () => {
     expect(modeLabel('not_a_mode')).toBe('not_a_mode')
+  })
+})
+
+describe('cash deployment', () => {
+  it('clamps cash deployment and scales invested value', () => {
+    expect(cashAfterDeploy(10, 0)).toBe(10)
+    expect(cashAfterDeploy(10, 50)).toBeCloseTo(5, 6)
+    expect(cashAfterDeploy(10, 100)).toBe(0)
+    expect(cashAfterDeploy(10, 150)).toBe(0)
+    expect(cashAfterDeploy(10, -5)).toBe(10)
+    expect(deployedInvestedValue(900, 10, 0)).toBeCloseTo(1000, 6)
+    expect(deployedInvestedValue(900, 10, 5)).toBeCloseTo(950, 6)
+    expect(deployedInvestedValue(900, 10, 10)).toBe(900)
+  })
+
+  it('applies deployed cash to weights and shares', () => {
+    const allCash = applyPlan(PORTFOLIO, RESPONSE, CLOSES, 0)
+    if (!allCash.ok) throw new Error(allCash.reason)
+    allCash.portfolio.positions.forEach((position, index) => expect(position.weight).toBeCloseTo([62, 18, 20][index], 6))
+    expect(allCash.portfolio.cashWeight).toBe(0)
+
+    const dollarAllCash = applyPlan(DOLLAR_PORTFOLIO, RESPONSE, CLOSES, 0)
+    if (!dollarAllCash.ok) throw new Error(dollarAllCash.reason)
+    dollarAllCash.portfolio.positions.forEach((position, index) => expect(position.shares).toBeCloseTo([12.4, 12, 4][index] * 1000 / 900, 6))
+
+    const halfCash = applyPlan(PORTFOLIO, RESPONSE, CLOSES, 5)
+    if (!halfCash.ok) throw new Error(halfCash.reason)
+    halfCash.portfolio.positions.forEach((position, index) => expect(position.weight).toBeCloseTo([0.62, 0.18, 0.2][index] * 95, 6))
+    expect(halfCash.portfolio.cashWeight).toBe(5)
+
+    expect(applyPlan(PORTFOLIO, RESPONSE, CLOSES, 11)).toEqual({ ok: false, reason: 'invalid' })
+    expect(applyPlan(PORTFOLIO, RESPONSE, CLOSES, -1)).toEqual({ ok: false, reason: 'invalid' })
+  })
+
+  it('explains cash deployment in the confirmation and trade note', () => {
+    const plan = applyPlan(PORTFOLIO, RESPONSE, CLOSES, 0)
+    if (!plan.ok) throw new Error(plan.reason)
+    expect(applyConfirmLines(plan, 'Optimized', 10)[0]).toBe('Holdings weights will be replaced by the Optimized column, scaled up to use cash. Cash goes from 10.0% to 0.0%.')
+    expect(applyConfirmLines(plan, 'Optimized', 0)[0]).toBe('Holdings weights will be replaced by the Optimized column. Cash stays at 0.0%.')
+    expect(tradeBasisNote(DOLLAR_BASIS, 100)).toBe('Trades use each holding\'s last stored close and fractional shares, on $900.00 invested plus $100.00 of cash.')
+  })
+
+  it('exports whole-portfolio shares and preserves cash on import', () => {
+    const weightsCsv = optimizeCsv(RESPONSE, { kind: 'weights', reason: 'no-shares' }, 10, 10)
+    expect(weightsCsv.split('\n')[1]).toBe('AAA,45,55.8,10.8,false')
+    const dollarCsv = optimizeCsv(RESPONSE, DOLLAR_BASIS, 10, 0)
+    expect(dollarCsv.split('\n')[1]).toBe('AAA,45,10,450,45,13.777778,620,62,3.777778,170,17,false')
+
+    const universe = new Set(['AAA', 'BBB', 'YNG'])
+    const weightsImport = parsePortfolioCsv(weightsCsv, universe)
+    const dollarImport = parsePortfolioCsv(dollarCsv, universe)
+    if (!weightsImport.ok || !dollarImport.ok) throw new Error('expected imports')
+    expect(Number(weightsImport.seed.cash)).toBeCloseTo(10, 6)
+    expect(Number(dollarImport.seed.cash)).toBeCloseTo(0, 6)
+  })
+
+  it('returns new whole-portfolio rows without mutating inputs', () => {
+    const input = weightRows(RESPONSE)
+    const before = structuredClone(input)
+    const output = portfolioShareRows(input, 10, 5)
+    expect(input).toEqual(before)
+    expect(output).not.toBe(input)
+    expect(output[0].current).toBeCloseTo(0.45, 6)
+    expect(output[0].target).toBeCloseTo(0.589, 6)
+    expect(output[0].change).toBeCloseTo(0.139, 6)
   })
 })

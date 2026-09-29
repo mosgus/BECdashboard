@@ -11,6 +11,8 @@ import {
   applyBlockedText,
   applyConfirmLines,
   applyPlan,
+  cashAfterDeploy,
+  deployedInvestedValue,
   LOOKBACK_OPTIONS,
   OPTIMIZE_MODES,
   REBALANCE_OPTIONS,
@@ -31,6 +33,7 @@ import {
   tradeBasis,
   tradeBasisNote,
   tradeRows,
+  portfolioShareRows,
   weightRows,
   optimizeCsv,
   optimizeCsvFilename,
@@ -72,6 +75,7 @@ export function OptimizePage(): JSX.Element | null {
   const [prices, setPrices] = useState<PricesState>({ status: 'loading' })
   const [applyOpen, setApplyOpen] = useState(false)
   const [applyError, setApplyError] = useState<string | null>(null)
+  const [cashDeployPct, setCashDeployPct] = useState(0)
   const mountedRef = useRef(true)
 
   useEffect(() => {
@@ -97,9 +101,10 @@ export function OptimizePage(): JSX.Element | null {
 
   if (current === null) return null
 
+  const cashAfter = cashAfterDeploy(current.cashWeight, cashDeployPct)
   const runnable = canOptimize(current)
   const plan = run.status === 'ready'
-    ? applyPlan(current, run.response, prices.status === 'ready' ? prices.lastClose : new Map())
+    ? applyPlan(current, run.response, prices.status === 'ready' ? prices.lastClose : new Map(), cashAfter)
     : null
 
   function handleRun(): void {
@@ -129,6 +134,7 @@ export function OptimizePage(): JSX.Element | null {
     } else {
       setRun({ ...run, applied: true })
       setApplyError(null)
+      setCashDeployPct(0)
     }
     setApplyOpen(false)
   }
@@ -303,7 +309,11 @@ export function OptimizePage(): JSX.Element | null {
       </div>
 
       {run.status === 'ready' && (
-        <OptimizeResults response={run.response} settings={run.settings} liveSettings={settings} portfolio={current} basis={run.basis} plan={plan!} applied={run.applied} applyError={applyError} onOpenApply={() => setApplyOpen(true)} />
+        <OptimizeResults
+          response={run.response} settings={run.settings} liveSettings={settings} portfolio={current} basis={run.basis}
+          plan={plan!} applied={run.applied} applyError={applyError} cashDeployPct={cashDeployPct}
+          onCashDeployChange={setCashDeployPct} cashAfter={cashAfter} onOpenApply={() => setApplyOpen(true)}
+        />
       )}
 
       {guideOpen && <OptimizerGuide onClose={() => setGuideOpen(false)} />}
@@ -318,7 +328,7 @@ export function OptimizePage(): JSX.Element | null {
           <div role="dialog" aria-modal="true" aria-labelledby="apply-portfolio-heading" className="bg-brand-surface border border-brand-border rounded-[var(--radius-card)] p-4 w-full max-w-sm shadow-xl">
             <h2 id="apply-portfolio-heading" className="font-heading font-bold text-lg text-foreground mb-2">Apply to {current.name}?</h2>
             <div className="space-y-2 mb-4">
-              {applyConfirmLines(plan).map((line) => <p key={line} className="text-sm text-[var(--color-muted)] leading-relaxed">{line}</p>)}
+              {applyConfirmLines(plan, 'Optimized', current.cashWeight).map((line) => <p key={line} className="text-sm text-[var(--color-muted)] leading-relaxed">{line}</p>)}
             </div>
             <div className="flex justify-end gap-2">
               <button type="button" autoFocus onClick={() => setApplyOpen(false)} className="text-sm font-medium px-4 py-2 rounded-[var(--radius-btn)] bg-brand-surface border border-brand-border text-[var(--color-muted)] hover:bg-brand-border hover:text-foreground">Cancel</button>
@@ -340,6 +350,9 @@ function OptimizeResults({
   plan,
   applied,
   applyError,
+  cashDeployPct,
+  onCashDeployChange,
+  cashAfter,
   onOpenApply,
 }: {
   response: OptimizeResponse
@@ -350,10 +363,16 @@ function OptimizeResults({
   plan: ApplyPlan
   applied: boolean
   applyError: string | null
+  cashDeployPct: number
+  onCashDeployChange: (cashDeployPct: number) => void
+  cashAfter: number
   onOpenApply: () => void
 }): JSX.Element {
-  const rows = weightRows(response)
-  const dollarRows = basis.kind === 'dollar' ? tradeRows(response, basis) : null
+  const rows = portfolioShareRows(weightRows(response), portfolio.cashWeight, cashAfter)
+  const total = basis.kind === 'dollar' ? basis.investedValue / ((100 - portfolio.cashWeight) / 100) : null
+  const dollarRows = basis.kind === 'dollar'
+    ? portfolioShareRows(tradeRows(response, basis, deployedInvestedValue(basis.investedValue, portfolio.cashWeight, cashAfter)), portfolio.cashWeight, cashAfter)
+    : null
   const note = scoreWindowNote(response)
 
   return (
@@ -387,8 +406,7 @@ function OptimizeResults({
         ))}
 
         <p className="text-sm text-[var(--color-muted)]">
-          Weights are constant-mix: chosen as if held at these proportions every day. Invested holdings only.
-          {portfolio.cashWeight > 0 && ` Cash (${portfolio.cashWeight.toFixed(1)}%) is left out and stays as it is.`}
+          Weights are constant-mix: chosen as if held at these proportions every day. The optimizer and backtest use invested holdings only; the table shows each holding's share of the whole portfolio, cash included.
         </p>
       </div>
 
@@ -399,7 +417,7 @@ function OptimizeResults({
             <Tooltip label="Download this table as a CSV">
               <button
                 type="button"
-                onClick={() => downloadTextFile(optimizeCsvFilename(portfolio.name, response.mode, new Date()), optimizeCsv(response, basis), 'text/csv;charset=utf-8')}
+                onClick={() => downloadTextFile(optimizeCsvFilename(portfolio.name, response.mode, new Date()), optimizeCsv(response, basis, portfolio.cashWeight, cashAfter), 'text/csv;charset=utf-8')}
                 className="inline-flex items-center gap-2 text-sm font-medium px-4 py-2 rounded-[var(--radius-btn)] bg-brand-surface border border-brand-border text-[var(--color-muted)] hover:bg-brand-border hover:text-foreground"
               >
                 <DownloadIcon />
@@ -411,6 +429,24 @@ function OptimizeResults({
             </Tooltip>
           </div>
         </div>
+        {portfolio.cashWeight > 0 && (
+          <Tooltip block label="Move this share of the portfolio's cash into the holdings, keeping the Optimized proportions. Updates the table, Export CSV and Apply to portfolio. No re-run needed.">
+            <div className="mb-3">
+              <label className="mb-1 block text-xs font-medium text-[var(--color-muted)]">
+                {`Cash to deploy: ${cashDeployPct}% · cash ${portfolio.cashWeight.toFixed(1)}% → ${cashAfter.toFixed(1)}%`}
+              </label>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                step={5}
+                value={cashDeployPct}
+                onChange={(event) => onCashDeployChange(Number(event.target.value))}
+                className="w-full accent-[var(--color-primary)]"
+              />
+            </div>
+          </Tooltip>
+        )}
         {applied && <p className="text-sm text-brand-positive mb-3">Applied. Holdings now use the Optimized weights. Run again to compare against them.</p>}
         <div className="overflow-x-auto">
           <table className="w-full border-collapse text-sm">
@@ -420,7 +456,7 @@ function OptimizeResults({
                 <tbody>{rows.map((row) => {
                   const changeText = formatChangePp(row.change)
                   return <tr key={row.ticker}><TickerCell row={row} /><td className={`${TD} text-right tabular-nums whitespace-nowrap`}>{formatWeight(row.current)}</td><td className={`${TD} text-right tabular-nums whitespace-nowrap`}>{formatWeight(row.target)}</td><td className={`${TD} text-right tabular-nums whitespace-nowrap ${changeColor(changeText)}`}>{changeText}</td></tr>
-                })}</tbody>
+                })}{portfolio.cashWeight > 0 && <WeightCashRow cashWeight={portfolio.cashWeight} cashAfter={cashAfter} />}</tbody>
               </>
             ) : (
               <>
@@ -430,12 +466,12 @@ function OptimizeResults({
                   const tradeSharesText = formatSignedShares(row.tradeShares)
                   const tradeMoneyText = formatSignedMoney(row.tradeValue)
                   return <tr key={row.ticker}><TickerCell row={row} /><td className={`${TD} text-right tabular-nums whitespace-nowrap`}>{formatPrice(row.price)}</td><td className={`${TD} text-right tabular-nums whitespace-nowrap`}>{formatShares(row.currentShares)}</td><td className={`${TD} text-right tabular-nums whitespace-nowrap`}>{formatMoney(row.currentValue)}</td><td className={`${TD} text-right tabular-nums whitespace-nowrap`}>{formatWeight(row.current)}</td><td className={`${TD} text-right tabular-nums whitespace-nowrap`}>{formatShares(row.targetShares)}</td><td className={`${TD} text-right tabular-nums whitespace-nowrap`}>{formatMoney(row.targetValue)}</td><td className={`${TD} text-right tabular-nums whitespace-nowrap`}>{formatWeight(row.target)}</td><td className={`${TD} text-right tabular-nums whitespace-nowrap ${changeColor(tradeSharesText)}`}>{tradeSharesText}</td><td className={`${TD} text-right tabular-nums whitespace-nowrap ${changeColor(tradeMoneyText)}`}>{tradeMoneyText}</td><td className={`${TD} text-right tabular-nums whitespace-nowrap ${changeColor(changeText)}`}>{changeText}</td></tr>
-                })}</tbody>
+                })}{portfolio.cashWeight > 0 && total !== null && <DollarCashRow cashWeight={portfolio.cashWeight} cashAfter={cashAfter} total={total} />}</tbody>
               </>
             )}
           </table>
         </div>
-        <p className="mt-3 text-xs text-[var(--color-muted)]">{tradeBasisNote(basis)}</p>
+        <p className="mt-3 text-xs text-[var(--color-muted)]">{tradeBasisNote(basis, basis.kind === 'dollar' && total !== null ? total * (portfolio.cashWeight - cashAfter) / 100 : 0)}</p>
         {applyError !== null && <p className="mt-3 text-sm text-brand-negative">{applyError}</p>}
       </div>
 
@@ -470,6 +506,38 @@ function OptimizeResults({
         </div>
       </div>
     </div>
+  )
+}
+
+function WeightCashRow({ cashWeight, cashAfter }: { cashWeight: number; cashAfter: number }): JSX.Element {
+  const changeText = formatChangePp((cashAfter - cashWeight) / 100)
+  return (
+    <tr>
+      <td className={`${TD} font-mono text-xs font-semibold whitespace-nowrap`}>Cash</td>
+      <td className={`${TD} text-right tabular-nums whitespace-nowrap`}>{formatWeight(cashWeight / 100)}</td>
+      <td className={`${TD} text-right tabular-nums whitespace-nowrap`}>{formatWeight(cashAfter / 100)}</td>
+      <td className={`${TD} text-right tabular-nums whitespace-nowrap ${changeColor(changeText)}`}>{changeText}</td>
+    </tr>
+  )
+}
+
+function DollarCashRow({ cashWeight, cashAfter, total }: { cashWeight: number; cashAfter: number; total: number }): JSX.Element {
+  const tradeMoneyText = formatSignedMoney(total * (cashAfter - cashWeight) / 100)
+  const changeText = formatChangePp((cashAfter - cashWeight) / 100)
+  return (
+    <tr>
+      <td className={`${TD} font-mono text-xs font-semibold whitespace-nowrap`}>Cash</td>
+      <td className={`${TD} text-right tabular-nums whitespace-nowrap`}>—</td>
+      <td className={`${TD} text-right tabular-nums whitespace-nowrap`}>—</td>
+      <td className={`${TD} text-right tabular-nums whitespace-nowrap`}>{formatMoney(total * cashWeight / 100)}</td>
+      <td className={`${TD} text-right tabular-nums whitespace-nowrap`}>{formatWeight(cashWeight / 100)}</td>
+      <td className={`${TD} text-right tabular-nums whitespace-nowrap`}>—</td>
+      <td className={`${TD} text-right tabular-nums whitespace-nowrap`}>{formatMoney(total * cashAfter / 100)}</td>
+      <td className={`${TD} text-right tabular-nums whitespace-nowrap`}>{formatWeight(cashAfter / 100)}</td>
+      <td className={`${TD} text-right tabular-nums whitespace-nowrap`}>—</td>
+      <td className={`${TD} text-right tabular-nums whitespace-nowrap ${changeColor(tradeMoneyText)}`}>{tradeMoneyText}</td>
+      <td className={`${TD} text-right tabular-nums whitespace-nowrap ${changeColor(changeText)}`}>{changeText}</td>
+    </tr>
   )
 }
 

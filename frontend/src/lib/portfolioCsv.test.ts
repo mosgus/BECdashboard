@@ -187,6 +187,74 @@ describe('portfolio CSV seeding modes', () => {
   })
 })
 
+describe('shares-only CSV cash', () => {
+  it('reads CASH shares as dollars', () => {
+    const result = successful('ticker,shares\nAAPL,10\nCASH,5000\n')
+    expect(result.seed).toEqual({
+      name: '', mode: 'shares', cash: '5000', rows: [{ ticker: 'AAPL', weight: '', shares: '10' }],
+    })
+    expect(result.dropped).toEqual([])
+  })
+
+  it('accepts zero dollars', () => {
+    const result = successful('ticker,shares\nAAPL,10\nCASH,0\n')
+    expect(result.seed.cash).toBe('0')
+  })
+
+  it('keeps dollars out of percentage total checks', () => {
+    const result = successful('ticker,shares\nAAPL,10\nCASH,250\n')
+    expect(result.seed.cash).toBe('250')
+  })
+
+  it.each([
+    'ticker,quantity\nAAPL,10\nCASH,\n',
+    'ticker,shares\nAAPL,10\nCASH,-5\n',
+    'ticker,shares\nAAPL,10\nCASH,abc\n',
+  ])('rejects invalid CASH dollar amount in %s', (csv) => {
+    expect(parsePortfolioCsv(csv, universe)).toEqual({
+      ok: false,
+      error: 'CASH needs a dollar amount of zero or greater in the shares column',
+      line: 3,
+    })
+  })
+
+  it('accepts a cash-only shares file', () => {
+    expect(parsePortfolioCsv('ticker,shares\nCASH,5000\n', universe)).toEqual({
+      ok: true, seed: { name: '', mode: 'shares', cash: '5000', rows: [] }, dropped: [],
+    })
+  })
+
+  it('keeps cash when dropping an off-universe ticker', () => {
+    const result = successful('ticker,shares\nAAPL,10\nZZZ,5\nCASH,100\n')
+    expect(result.seed.cash).toBe('100')
+    expect(result.seed.rows).toEqual([{ ticker: 'AAPL', weight: '', shares: '10' }])
+    expect(result.dropped).toEqual([{ ticker: 'ZZZ', weightPct: null }])
+  })
+
+  it('rejects duplicate CASH rows', () => {
+    expect(parsePortfolioCsv('ticker,shares\nAAPL,10\nCASH,100\nCASH,200\n', universe)).toMatchObject({
+      ok: false, error: 'Duplicate ticker: CASH', line: 4,
+    })
+  })
+
+  it('keeps CASH weight validation for files with a weight column', () => {
+    expect(parsePortfolioCsv('ticker,weight_pct,shares\nAAPL,60,2\nCASH,,5000\n', universe)).toMatchObject({
+      ok: false, error: 'CASH needs a finite weight of zero or greater', line: 3,
+    })
+  })
+
+  it('uses dollar cash in the dialog summary math', () => {
+    const result = successful('ticker,shares\nAAPL,10\nCASH,5000\n')
+    const summary = summariseDraft(
+      toDraft({ ...result.seed, name: 'X' }),
+      new Map([['AAPL', { ...entry('AAPL'), current_price: 100 }]]),
+    )
+    expect(summary.canCreate).toBe(true)
+    expect(summary.cashWeight).toBeCloseTo(83.333333, 4)
+    expect(summary.rows[0].weight).toBeCloseTo(16.666667, 4)
+  })
+})
+
 describe('portfolio CSV whole-file rejections', () => {
   it('rejects empty and oversized input', () => {
     expect(parsePortfolioCsv('', universe)).toMatchObject({ ok: false, line: null })

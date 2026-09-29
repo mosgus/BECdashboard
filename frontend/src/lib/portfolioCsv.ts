@@ -216,6 +216,7 @@ export function parsePortfolioCsv(text: string, universeTickers: ReadonlySet<str
   const seen = new Set<string>()
   const positions: ParsedPosition[] = []
   let statedCash: { raw: string; value: number; line: number } | null = null
+  let cashDollars: string | null = null
   let positionWeightTotal = 0
   const zeroTargets: string[] = []
 
@@ -235,6 +236,15 @@ export function parsePortfolioCsv(text: string, universeTickers: ReadonlySet<str
     }
     if (seen.has(ticker)) return failure(`Duplicate ticker: ${ticker}`, row.line)
     seen.add(ticker)
+
+    if (mode === 'shares' && ticker === 'CASH') {
+      const dollars = Number(shares)
+      if (shares.trim() === '' || !Number.isFinite(dollars) || dollars < 0) {
+        return failure('CASH needs a dollar amount of zero or greater in the shares column', row.line)
+      }
+      cashDollars = shares.trim()
+      continue
+    }
 
     let weightPct: number | null = null
     if (sharesIndex !== null && shares.trim() !== '' && finitePositive(shares) === null) {
@@ -279,6 +289,9 @@ export function parsePortfolioCsv(text: string, universeTickers: ReadonlySet<str
     return false
   })
   if (positions.length === 0) {
+    if (mode === 'shares') {
+      return { ok: true, seed: { name, mode: 'shares', cash: cashDollars ?? '', rows: [] }, dropped: [] }
+    }
     return {
       ok: true,
       seed: { name, mode: 'weight', cash: targetWeights ? '0' : statedCash?.raw ?? '', rows: [] },
@@ -300,7 +313,7 @@ export function parsePortfolioCsv(text: string, universeTickers: ReadonlySet<str
   if (mode === 'shares') {
     return {
       ok: true,
-      seed: { name, mode, cash: '', rows: surviving.map((position) => ({ ticker: position.ticker, shares: position.shares, weight: '' })) },
+      seed: { name, mode, cash: cashDollars ?? '', rows: surviving.map((position) => ({ ticker: position.ticker, shares: position.shares, weight: '' })) },
       dropped,
     }
   }
