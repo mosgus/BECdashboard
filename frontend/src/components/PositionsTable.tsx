@@ -1,6 +1,7 @@
 import type { JSX } from 'react'
 import type { ValuedPortfolio } from '../lib/portfolio'
 import { formatPercent, formatShares } from '../lib/format'
+import { formatMoney } from '../lib/optimize'
 import { Tooltip } from './Tooltip'
 
 interface PositionsTableProps {
@@ -54,7 +55,13 @@ export function PositionsTable({ valued, onRemove }: PositionsTableProps): JSX.E
             <tr className="bg-brand-positive/10">
               <td className={`${TD} whitespace-nowrap`}>Cash</td>
               <td className={TD} />
-              <td className={TD} />
+              <td className={valued.cashDollars === null ? TD : `${TD} text-right tabular-nums`}>
+                {valued.cashDollars === null ? null : (
+                  <Tooltip label="Estimated from your share counts at current prices: cash is this portfolio's cash weight of its implied total value. It moves with prices; it isn't the amount you originally typed.">
+                    <span>{formatMoney(valued.cashDollars)}</span>
+                  </Tooltip>
+                )}
+              </td>
               <td className={`${TD} text-right tabular-nums`}>{formatPercent(valued.cashWeight)}</td>
               <td className={TD} />
             </tr>

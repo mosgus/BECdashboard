@@ -9,6 +9,7 @@ import { Tooltip } from '../../components/Tooltip'
 import HelpSidebar from '../../components/HelpSidebar'
 import { priceChange } from '../../lib/change'
 import { formatPercent, formatPrice, formatShares } from '../../lib/format'
+import { formatMoney } from '../../lib/optimize'
 import { positionPrice, valuePortfolio } from '../../lib/portfolio'
 import { isLegacyPortfolio, listPortfolios } from '../../lib/portfolioStore'
 
@@ -96,7 +97,8 @@ export function HoldingsPage(): JSX.Element {
           .flatMap((entry) => entry.signals)
           .find((signal) => signal.signal === selectedSignal)?.label ?? selectedOption.label
       : selectedOption.label
-  const rows = valuePortfolio(current, universeByTicker).rows
+  const valued = valuePortfolio(current, universeByTicker)
+  const rows = valued.rows
     .slice()
     .sort((left, right) => right.weight - left.weight)
 
@@ -205,11 +207,19 @@ export function HoldingsPage(): JSX.Element {
                   </tr>
                 )
               })}
-              <tr className="border-t-2 border-brand-border">
+              <tr className="border-t-2 border-brand-border bg-brand-positive/10">
                 <td className={`${TD} font-mono text-xs font-semibold whitespace-nowrap`}>CASH</td>
                 <td className={`${TD} ${MUTED}`}>—</td>
                 <td className={`${TD} text-right tabular-nums whitespace-nowrap`}>{formatPercent(current.cashWeight)}</td>
-                <td className={`${TD} text-right ${MUTED}`}>—</td>
+                {valued.cashDollars === null ? (
+                  <td className={`${TD} text-right ${MUTED}`}>—</td>
+                ) : (
+                  <td className={`${TD} text-right tabular-nums whitespace-nowrap`}>
+                    <Tooltip label="Estimated from your share counts at current prices: cash is this portfolio's cash weight of its implied total value. It moves with prices; it isn't the amount you originally typed.">
+                      <span>{formatMoney(valued.cashDollars)}</span>
+                    </Tooltip>
+                  </td>
+                )}
                 <td className={`${TD} text-right ${MUTED}`}>—</td>
                 <td className={`${TD} text-right ${MUTED}`}>—</td>
                 <td className={`${TD} text-right ${MUTED}`}>—</td>

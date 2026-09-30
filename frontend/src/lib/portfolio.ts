@@ -40,6 +40,9 @@ export interface ValuedRow {
 export interface ValuedPortfolio {
   rows: ValuedRow[]
   cashWeight: number
+  /** Estimated at current prices: impliedPortfolioValue × cashWeight / 100. Null unless every
+   *  position has shares and a usable price. Presentation only — never saved. */
+  cashDollars: number | null
   missingTickers: string[]
 }
 
@@ -165,7 +168,9 @@ export function valuePortfolio(portfolio: Portfolio, byTicker: Map<string, Unive
     }
   })
 
-  return { rows, cashWeight: portfolio.cashWeight, missingTickers }
+  const implied = impliedPortfolioValue(portfolio, byTicker)
+  const cashDollars = implied === null ? null : implied * portfolio.cashWeight / 100
+  return { rows, cashWeight: portfolio.cashWeight, cashDollars, missingTickers }
 }
 
 function isValidCurrentPosition(value: unknown): value is Position {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { UniverseEntry } from '../api/client'
-import { addPositionDiluting, cashFromPositions, impliedPortfolioValue, migrateLegacyPortfolio, summariseDraft, switchEntryMode, weightFromShares } from './portfolio'
+import { addPositionDiluting, cashFromPositions, impliedPortfolioValue, migrateLegacyPortfolio, summariseDraft, switchEntryMode, valuePortfolio, weightFromShares } from './portfolio'
 import type { DraftRow, DraftSummary, ModeSwitch, Portfolio } from './portfolio'
 
 function portfolio(cashWeight: number, positions: Portfolio['positions']): Portfolio {
@@ -15,6 +15,40 @@ function entry(price: number | null): UniverseEntry {
     bar_count: 0, first_bar: null, last_bar: null, fetched_at: null, added_at: '',
   }
 }
+
+describe('valuePortfolio cash dollars', () => {
+  const positions = [
+    { ticker: 'AAA', weight: 45, shares: 10 },
+    { ticker: 'BBB', weight: 45, shares: 30 },
+  ]
+  const byTicker = new Map([
+    ['AAA', { ...entry(45), ticker: 'AAA', short_name: 'AAA' }],
+    ['BBB', { ...entry(15), ticker: 'BBB', short_name: 'BBB' }],
+  ])
+
+  it('derives cash dollars from the implied total value', () => {
+    expect(valuePortfolio(portfolio(10, positions), byTicker).cashDollars).toBeCloseTo(100, 6)
+  })
+
+  it('returns null when a position has no shares', () => {
+    expect(valuePortfolio(portfolio(10, [{ ...positions[0] }, { ticker: 'BBB', weight: 45 }]), byTicker).cashDollars).toBeNull()
+  })
+
+  it('returns null when a position has no usable price', () => {
+    const noPrice = new Map([...byTicker, ['BBB', { ...entry(null), ticker: 'BBB', short_name: 'BBB' }]])
+    expect(valuePortfolio(portfolio(10, positions), noPrice).cashDollars).toBeNull()
+  })
+
+  it('returns zero when cash weight is zero', () => {
+    expect(valuePortfolio(portfolio(0, positions.map((position) => ({ ...position, weight: 50 }))), byTicker).cashDollars).toBeCloseTo(0, 6)
+  })
+
+  it('returns null and reports a missing ticker', () => {
+    const valued = valuePortfolio(portfolio(10, positions), new Map([['AAA', byTicker.get('AAA')!]]))
+    expect(valued.cashDollars).toBeNull()
+    expect(valued.missingTickers).toEqual(['BBB'])
+  })
+})
 
 describe('switchEntryMode', () => {
   const weightRows: DraftRow[] = [
