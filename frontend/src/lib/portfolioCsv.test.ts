@@ -91,6 +91,17 @@ describe('portfolio CSV serialization', () => {
     expect(portfolioCsvFilename(portfolio, new Date(2026, 8, 18))).toBe('Core Equity-2026-09-18.csv')
   })
 
+  it('writes and reads shares-based portfolios with fixed cash', () => {
+    const portfolio: Portfolio = {
+      id: '1', name: 'Shares', cashWeight: 10, cashDollars: 100, updatedAt: '',
+      positions: [{ ticker: 'AAA', weight: 45, shares: 10 }, { ticker: 'BBB', weight: 45, shares: 30 }],
+    }
+    const csv = serializePortfolioCsv(portfolio)
+    expect(csv).toBe('ticker,shares\nAAA,10\nBBB,30\nCASH,100\n')
+    const result = successful(csv, new Set(['AAA', 'BBB']))
+    expect(result.seed).toMatchObject({ mode: 'shares', cash: '100', rows: [{ shares: '10' }, { shares: '30' }] })
+  })
+
   it('round-trips GunnPort’s name and exact weights through its filename', () => {
     const portfolio: Portfolio = {
       id: 'gunnport', name: 'GunnPort', cashWeight: 0, updatedAt: '',

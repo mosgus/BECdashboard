@@ -55,12 +55,20 @@ describe('preset portfolios', () => {
     expect(summary.problem).toBeNull()
   })
 
-  it('contains no share counts', () => {
-    for (const preset of PRESETS) {
-      const result = parsePortfolioCsv(preset.csv, tickersOf(preset))
-      expect(result.ok).toBe(true)
-      if (result.ok) expect(result.seed.rows.every((row) => row.shares === '')).toBe(true)
-    }
+  it('keeps Gunnar Preset weights-only', () => {
+    const result = parsePortfolioCsv(PRESETS[0].csv, tickersOf(PRESETS[0]))
+    expect(result.ok).toBe(true)
+    if (result.ok) expect(result.seed.rows.every((row) => row.shares === '')).toBe(true)
+  })
+
+  it('ships the BEC preset as shares with fixed cash dollars', () => {
+    const result = parsePortfolioCsv(PRESETS[1].csv, tickersOf(PRESETS[1]))
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.seed.mode).toBe('shares')
+    expect(result.seed.cash).toBe('292406.58')
+    expect(result.seed.rows).toHaveLength(8)
+    expect(result.seed.rows.every((row) => row.shares !== '')).toBe(true)
   })
 
   it('drops only off-universe holdings through the normal parser path', () => {

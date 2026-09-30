@@ -57,7 +57,11 @@ export function PositionsTable({ valued, onRemove }: PositionsTableProps): JSX.E
               <td className={TD} />
               <td className={valued.cashDollars === null ? TD : `${TD} text-right tabular-nums`}>
                 {valued.cashDollars === null ? null : (
-                  <Tooltip label="Estimated from your share counts at current prices: cash is this portfolio's cash weight of its implied total value. It moves with prices; it isn't the amount you originally typed.">
+                  <Tooltip
+                    label={valued.cashFixed
+                      ? 'Cash in dollars, saved with this portfolio. It stays fixed while holding weights move with prices.'
+                      : "Estimated from your share counts at current prices: cash is this portfolio's cash weight of its implied total value. It moves with prices; it isn't the amount you originally typed."}
+                  >
                     <span>{formatMoney(valued.cashDollars)}</span>
                   </Tooltip>
                 )}

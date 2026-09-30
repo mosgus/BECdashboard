@@ -27,7 +27,7 @@ const ChartDialog = lazy(() =>
 const CARD = 'bg-brand-surface border border-brand-border rounded-[var(--radius-card)]'
 
 export function UniversePage(): JSX.Element {
-  const messages = ['Loading universe…', 'Loading takes <60s…', 'Still loading…']
+  const messages = ['Loading universe…', 'Loading takes ~60s…', 'Still loading…']
   const [state, setState] = useState<State>({ status: 'loading' })
   const [sweeping, setSweeping] = useState(false)
   const requestSeq = useRef(0)

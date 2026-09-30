@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { UniverseEntry } from '../api/client'
-import { addPositionDiluting, cashFromPositions, impliedPortfolioValue, migrateLegacyPortfolio, summariseDraft, switchEntryMode, valuePortfolio, weightFromShares } from './portfolio'
+import { addPositionDiluting, cashFromPositions, creationCashDollars, impliedPortfolioValue, isValidCurrentPortfolio, migrateLegacyPortfolio, remarkPortfolio, removePositionToCash, summariseDraft, switchEntryMode, valuePortfolio, weightFromShares } from './portfolio'
 import type { DraftRow, DraftSummary, ModeSwitch, Portfolio } from './portfolio'
 
 function portfolio(cashWeight: number, positions: Portfolio['positions']): Portfolio {
@@ -48,6 +48,71 @@ describe('valuePortfolio cash dollars', () => {
     expect(valued.cashDollars).toBeNull()
     expect(valued.missingTickers).toEqual(['BBB'])
   })
+
+  it('uses fixed cash without prices', () => {
+    const valued = valuePortfolio({ ...portfolio(10, positions), cashDollars: 100 }, new Map())
+    expect(valued.cashDollars).toBe(100)
+    expect(valued.cashFixed).toBe(true)
+    expect(valuePortfolio(portfolio(10, positions), new Map()).cashFixed).toBe(false)
+  })
+})
+
+describe('shares-based portfolios', () => {
+  const base: Portfolio = {
+    ...portfolio(10, [{ ticker: 'AAA', weight: 45, shares: 10 }, { ticker: 'BBB', weight: 45, shares: 30 }]),
+    cashDollars: 100,
+  }
+  const prices = new Map([['AAA', { ...entry(45), ticker: 'AAA' }], ['BBB', { ...entry(15), ticker: 'BBB' }]])
+
+  it('re-marks saved weights without mutating the input', () => {
+    const before = structuredClone(base)
+    const remarked = remarkPortfolio(base, prices)
+    expect(remarked).not.toBeNull()
+    expect(remarked?.positions[0].weight).toBeCloseTo(45, 6)
+    expect(remarked?.positions[1].weight).toBeCloseTo(45, 6)
+    expect(remarked?.cashWeight).toBeCloseTo(10, 6)
+    expect(remarked?.cashDollars).toBe(100)
+    expect(remarked?.updatedAt).toBe(base.updatedAt)
+    expect(base).toEqual(before)
+  })
+
+  it('re-marks changed prices and rejects incomplete inputs', () => {
+    const changed = remarkPortfolio(base, new Map([...prices, ['AAA', { ...entry(55), ticker: 'AAA' }]]))
+    expect(changed?.positions[0].weight).toBeCloseTo(50, 6)
+    expect(changed?.positions[1].weight).toBeCloseTo(40.909091, 6)
+    expect(changed?.cashWeight).toBeCloseTo(9.090909, 6)
+    expect(remarkPortfolio({ ...base, cashDollars: undefined }, prices)).toBeNull()
+    expect(remarkPortfolio({ ...base, positions: [base.positions[0], { ticker: 'BBB', weight: 45 }] }, prices)).toBeNull()
+    expect(remarkPortfolio(base, new Map([...prices, ['BBB', { ...entry(null), ticker: 'BBB' }]]))).toBeNull()
+    expect(remarkPortfolio({ ...base, cashWeight: 100, positions: [] }, prices)).toBeNull()
+  })
+
+  it('validates cash dollars and drops them when editing weights', () => {
+    expect(isValidCurrentPortfolio({ ...base, cashDollars: -1 })).toBe(false)
+    expect(isValidCurrentPortfolio({ ...base, cashDollars: Number.NaN })).toBe(false)
+    expect(isValidCurrentPortfolio({ ...base, cashDollars: 0 })).toBe(true)
+    const { cashDollars: _cashDollars, ...weightBased } = base
+    expect(isValidCurrentPortfolio(weightBased)).toBe(true)
+    expect('cashDollars' in addPositionDiluting(base, { ticker: 'CCC', weight: 5 })!).toBe(false)
+    expect('cashDollars' in removePositionToCash(base, 'AAA')!).toBe(false)
+  })
+
+  it('sets creation cash only for complete shares portfolios', () => {
+    expect(creationCashDollars('shares', 292406.58, base, prices)).toBe(292406.58)
+    expect(creationCashDollars('shares', null, base, prices)).toBeUndefined()
+    expect(creationCashDollars('weight', null, { ...base, cashDollars: undefined }, prices)).toBeCloseTo(100, 6)
+    expect(creationCashDollars('weight', null, { ...base, cashDollars: undefined, positions: [base.positions[0], { ticker: 'BBB', weight: 45 }] }, prices)).toBeUndefined()
+  })
+})
+
+describe('summariseDraft cash dollars', () => {
+  const rows: DraftRow[] = [{ id: 'AAA', ticker: 'AAA', shares: '10', weight: '' }]
+  const prices = new Map([['AAA', { ...entry(25), ticker: 'AAA' }]])
+
+  it('reports parsed shares cash and null for weight mode', () => {
+    expect(summariseDraft({ name: 'Shares', mode: 'shares', cash: '250', rows }, prices).cashDollars).toBe(250)
+    expect(summariseDraft({ name: 'Weight', mode: 'weight', cash: '50', rows: [{ ...rows[0], shares: '', weight: '50' }] }, prices).cashDollars).toBeNull()
+  })
 })
 
 describe('switchEntryMode', () => {
@@ -61,6 +126,7 @@ describe('switchEntryMode', () => {
       { id: 'second', ticker: 'MSFT', shares: null, weight: 45 },
     ],
     cashWeight: 5,
+    cashDollars: null,
     allocatedPercent: 100,
     remainderPercent: 0,
     canCreate: true,
@@ -72,6 +138,7 @@ describe('switchEntryMode', () => {
       { id: 'second', ticker: 'MSFT', shares: 8, weight: 40 },
     ],
     cashWeight: 0,
+    cashDollars: null,
     allocatedPercent: 100,
     remainderPercent: 0,
     canCreate: true,

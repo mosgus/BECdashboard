@@ -1,4 +1,4 @@
-import { WEIGHT_EPSILON } from './portfolio'
+import { isSharesBased, WEIGHT_EPSILON } from './portfolio'
 import type { EntryMode, Portfolio } from './portfolio'
 
 export interface SeedRow {
@@ -346,6 +346,11 @@ export function parsePortfolioCsv(text: string, universeTickers: ReadonlySet<str
 }
 
 export function serializePortfolioCsv(portfolio: Portfolio): string {
+  if (isSharesBased(portfolio)) {
+    const rows = portfolio.positions.map((position) => [position.ticker, String(position.shares)])
+    rows.push(['CASH', String(portfolio.cashDollars)])
+    return ['ticker,shares', ...rows.map((row) => row.map(quote).join(','))].join('\n') + '\n'
+  }
   const rows = portfolio.positions.map((position) => [position.ticker, String(position.weight), position.shares === undefined ? '' : String(position.shares)])
   rows.push(['CASH', String(portfolio.cashWeight), ''])
   return ['ticker,weight_pct,shares', ...rows.map((row) => row.map(quote).join(','))].join('\n') + '\n'

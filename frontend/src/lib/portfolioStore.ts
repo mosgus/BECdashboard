@@ -1,5 +1,6 @@
-import { isValidCurrentPortfolio, WEIGHT_EPSILON } from './portfolio'
+import { isValidCurrentPortfolio, remarkPortfolio, WEIGHT_EPSILON } from './portfolio'
 import type { LegacyPortfolio, Portfolio, StoredPortfolio } from './portfolio'
+import type { UniverseEntry } from '../api/client'
 
 export const PORTFOLIO_STORAGE_KEY = 'bec-portfolios'
 
@@ -63,6 +64,7 @@ export function savePortfolio(portfolio: Portfolio): void {
       cashWeight: portfolio.cashWeight,
       positions: portfolio.positions,
       updatedAt: new Date().toISOString(),
+      ...(portfolio.cashDollars === undefined ? {} : { cashDollars: portfolio.cashDollars }),
     }
     const existing = listPortfolios()
     const index = existing.findIndex((candidate) => candidate.id === stamped.id)
@@ -70,6 +72,23 @@ export function savePortfolio(portfolio: Portfolio): void {
     localStorage.setItem(PORTFOLIO_STORAGE_KEY, JSON.stringify(next))
   } catch {
     // Storage unavailable — the caller's state still reflects the change for this session.
+  }
+}
+
+/** Re-mark every shares-based portfolio against freshly loaded prices (contract 0129). */
+export function remarkStoredPortfolios(entries: UniverseEntry[]): void {
+  try {
+    const byTicker = new Map(entries.map((entry) => [entry.ticker, entry]))
+    let remarked = false
+    const next = listPortfolios().map((portfolio) => {
+      if (isLegacyPortfolio(portfolio)) return portfolio
+      const nextPortfolio = remarkPortfolio(portfolio, byTicker)
+      if (nextPortfolio !== null) remarked = true
+      return nextPortfolio ?? portfolio
+    })
+    if (remarked) replacePortfolios(next)
+  } catch {
+    // A re-mark must never prevent a Universe load.
   }
 }
 

@@ -109,7 +109,8 @@ export function PortfoliosPage(): JSX.Element {
         return
       }
       setCashProblem(null)
-      persist({ ...current, cashWeight: 100, positions: [] })
+      const { cashDollars: _cashDollars, ...base } = current
+      persist({ ...base, cashWeight: 100, positions: [] })
       return
     }
 
@@ -135,7 +136,8 @@ export function PortfoliosPage(): JSX.Element {
       return
     }
     setCashProblem(null)
-    persist({ ...current, cashWeight: parsed, positions })
+    const { cashDollars: _cashDollars, ...base } = current
+    persist({ ...base, cashWeight: parsed, positions })
   }
 
   function handleAddPosition(position: Position): void {

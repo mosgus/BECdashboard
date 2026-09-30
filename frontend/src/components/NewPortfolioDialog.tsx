@@ -3,7 +3,7 @@ import type { ChangeEvent, JSX } from 'react'
 import { Link } from 'react-router-dom'
 import type { UniverseEntry } from '../api/client'
 import { formatPercent } from '../lib/format'
-import { summariseDraft, switchEntryMode } from '../lib/portfolio'
+import { creationCashDollars, summariseDraft, switchEntryMode } from '../lib/portfolio'
 import type { DraftRow, EntryMode, ModeSwitch, Portfolio, Position } from '../lib/portfolio'
 import { parsePortfolioCsv, portfolioNameFromFilename as nameFromFilename } from '../lib/portfolioCsv'
 import type { DraftSeed, DroppedRow, TargetAdjustment } from '../lib/portfolioCsv'
@@ -153,13 +153,15 @@ export function NewPortfolioDialog({ universe, onCancel, onCreate }: NewPortfoli
           : { ticker: row.ticker, weight: row.weight as number },
       )
 
-    onCreate({
+    const portfolio: Portfolio = {
       id: crypto.randomUUID(),
       name: name.trim(),
       cashWeight: summary.cashWeight,
       positions,
       updatedAt: new Date().toISOString(),
-    })
+    }
+    const cashDollars = creationCashDollars(mode, summary.cashDollars, portfolio, byTicker)
+    onCreate(cashDollars === undefined ? portfolio : { ...portfolio, cashDollars })
   }
 
   return (

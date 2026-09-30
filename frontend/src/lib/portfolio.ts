@@ -12,6 +12,9 @@ export interface Portfolio {
   cashWeight: number
   positions: Position[]
   updatedAt: string
+  /** Fixed cash in dollars. Present only on shares-based portfolios (contract 0129); weights are then
+   *  a snapshot re-marked from shares × price whenever the Universe loads. */
+  cashDollars?: number
 }
 
 export interface LegacyPosition {
@@ -43,6 +46,7 @@ export interface ValuedPortfolio {
   /** Estimated at current prices: impliedPortfolioValue × cashWeight / 100. Null unless every
    *  position has shares and a usable price. Presentation only — never saved. */
   cashDollars: number | null
+  cashFixed: boolean
   missingTickers: string[]
 }
 
@@ -169,8 +173,10 @@ export function valuePortfolio(portfolio: Portfolio, byTicker: Map<string, Unive
   })
 
   const implied = impliedPortfolioValue(portfolio, byTicker)
-  const cashDollars = implied === null ? null : implied * portfolio.cashWeight / 100
-  return { rows, cashWeight: portfolio.cashWeight, cashDollars, missingTickers }
+  const cashDollars = portfolio.cashDollars === undefined
+    ? implied === null ? null : implied * portfolio.cashWeight / 100
+    : portfolio.cashDollars
+  return { rows, cashWeight: portfolio.cashWeight, cashDollars, cashFixed: portfolio.cashDollars !== undefined, missingTickers }
 }
 
 function isValidCurrentPosition(value: unknown): value is Position {
@@ -198,7 +204,8 @@ export function isValidCurrentPortfolio(value: unknown): value is Portfolio {
     candidate.cashWeight < 0 ||
     !Array.isArray(candidate.positions) ||
     !candidate.positions.every(isValidCurrentPosition) ||
-    typeof candidate.updatedAt !== 'string'
+    typeof candidate.updatedAt !== 'string' ||
+    (candidate.cashDollars !== undefined && !isFiniteNonNegative(candidate.cashDollars))
   ) {
     return false
   }
@@ -206,6 +213,39 @@ export function isValidCurrentPortfolio(value: unknown): value is Portfolio {
   if (new Set(positions.map((position) => position.ticker)).size !== positions.length) return false
   const total = candidate.cashWeight + positions.reduce((sum, position) => sum + position.weight, 0)
   return Math.abs(total - 100) <= 0.01
+}
+
+/** Shares are the truth: cash dollars are saved and every position has a share count. */
+export function isSharesBased(portfolio: Portfolio): boolean {
+  return portfolio.cashDollars !== undefined && portfolio.positions.every((position) => isFinitePositive(position.shares))
+}
+
+/** Recalculate weights from shares × current price and the fixed cash. */
+export function remarkPortfolio(portfolio: Portfolio, byTicker: Map<string, UniverseEntry>): Portfolio | null {
+  if (!isValidCurrentPortfolio(portfolio) || !isSharesBased(portfolio) || portfolio.positions.length === 0) return null
+  const cashDollars = portfolio.cashDollars
+  if (cashDollars === undefined) return null
+
+  const valued = [] as Array<{ position: Position; value: number }>
+  for (const position of portfolio.positions) {
+    const price = positionPrice(byTicker.get(position.ticker))
+    if (!isFinitePositive(price)) return null
+    const value = position.shares! * price
+    if (!isFinitePositive(value)) return null
+    valued.push({ position, value })
+  }
+  const total = valued.reduce((sum, item) => sum + item.value, 0) + cashDollars
+  if (!isFinitePositive(total)) return null
+
+  const remarked: Portfolio = {
+    id: portfolio.id,
+    name: portfolio.name,
+    cashWeight: cashDollars / total * 100,
+    positions: valued.map(({ position, value }) => ({ ...position, weight: value / total * 100 })),
+    updatedAt: portfolio.updatedAt,
+    cashDollars,
+  }
+  return isValidCurrentPortfolio(remarked) ? remarked : null
 }
 
 /** Derive total value from a fully specified shares portfolio without making it allocation truth. */
@@ -336,6 +376,7 @@ export interface DraftSummary {
     weight: number | null
   }>
   cashWeight: number | null
+  cashDollars: number | null
   allocatedPercent: number | null
   remainderPercent: number | null
   canCreate: boolean
@@ -370,6 +411,7 @@ export function summariseDraft(
     return {
       rows,
       cashWeight,
+      cashDollars: null,
       allocatedPercent,
       remainderPercent,
       canCreate: problem === null,
@@ -406,11 +448,25 @@ export function summariseDraft(
   return {
     rows,
     cashWeight,
+    cashDollars,
     allocatedPercent,
     remainderPercent: allocatedPercent === null ? null : 100 - allocatedPercent,
     canCreate: problem === null,
     problem,
   }
+}
+
+/** cashDollars to save when a portfolio is created, or undefined for a weight-based one. */
+export function creationCashDollars(
+  mode: EntryMode,
+  summaryCashDollars: number | null,
+  portfolio: Portfolio,
+  byTicker: Map<string, UniverseEntry>,
+): number | undefined {
+  if (mode === 'shares') return summaryCashDollars !== null && summaryCashDollars >= 0 ? summaryCashDollars : undefined
+  if (!portfolio.positions.every((position) => isFinitePositive(position.shares))) return undefined
+  const implied = impliedPortfolioValue(portfolio, byTicker)
+  return implied === null ? undefined : implied * portfolio.cashWeight / 100
 }
 
 /** The mode-dependent part of a composer draft: what a mode switch rewrites. */

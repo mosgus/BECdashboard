@@ -139,7 +139,11 @@ export function HoldingsPage(): JSX.Element {
                 <th className={TH}>Ticker</th>
                 <th className={TH}>Name</th>
                 <th className={`${TH} text-right`}>
-                  <Tooltip label="The saved allocation. It does not change as prices move.">
+                  <Tooltip
+                    label={valued.cashFixed
+                      ? "Each holding's share of the portfolio at the last loaded prices. Share counts and cash dollars are fixed; weights move with prices."
+                      : 'The saved allocation. It does not change as prices move.'}
+                  >
                     <span>Weight %</span>
                   </Tooltip>
                 </th>
@@ -215,7 +219,11 @@ export function HoldingsPage(): JSX.Element {
                   <td className={`${TD} text-right ${MUTED}`}>—</td>
                 ) : (
                   <td className={`${TD} text-right tabular-nums whitespace-nowrap`}>
-                    <Tooltip label="Estimated from your share counts at current prices: cash is this portfolio's cash weight of its implied total value. It moves with prices; it isn't the amount you originally typed.">
+                    <Tooltip
+                      label={valued.cashFixed
+                        ? 'Cash in dollars, saved with this portfolio. It stays fixed while holding weights move with prices.'
+                        : "Estimated from your share counts at current prices: cash is this portfolio's cash weight of its implied total value. It moves with prices; it isn't the amount you originally typed."}
+                    >
                       <span>{formatMoney(valued.cashDollars)}</span>
                     </Tooltip>
                   </td>

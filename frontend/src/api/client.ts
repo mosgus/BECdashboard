@@ -1,3 +1,5 @@
+import { remarkStoredPortfolios } from '../lib/portfolioStore'
+
 export interface HealthResponse {
   status: string
   python: string
@@ -266,7 +268,9 @@ export async function getHealth(): Promise<HealthResponse> {
 }
 
 export async function getUniverse(): Promise<UniverseEntry[]> {
-  return request<UniverseEntry[]>('/universe')
+  const entries = await request<UniverseEntry[]>('/universe')
+  remarkStoredPortfolios(entries)
+  return entries
 }
 
 export async function addTicker(ticker: string): Promise<UniverseDetail> {

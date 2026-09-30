@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Portfolio } from './portfolio'
-import { listPortfolios, PORTFOLIO_STORAGE_KEY, savePortfolio } from './portfolioStore'
+import { listPortfolios, PORTFOLIO_STORAGE_KEY, remarkStoredPortfolios, savePortfolio } from './portfolioStore'
 
 function storedPortfolio(cashWeight: number): Portfolio {
   return {
@@ -67,5 +67,34 @@ describe('listPortfolios', () => {
 
     savePortfolio({ ...storedPortfolio(0), id: 'first' })
     expect(JSON.parse(stored).every((portfolio: Record<string, unknown>) => !('basisDate' in portfolio))).toBe(true)
+  })
+})
+
+describe('shares-based storage', () => {
+  it('preserves fixed cash when saving', () => {
+    const storage = stubStorage([])
+    savePortfolio({ ...storedPortfolio(10), cashDollars: 100 })
+    expect(JSON.parse(storage.setItem.mock.calls[0][1])[0].cashDollars).toBe(100)
+  })
+
+  it('re-marks shares portfolios without touching weight-based siblings', () => {
+    const shares = { ...storedPortfolio(10), id: 'shares', cashDollars: 100, positions: [{ ticker: 'AAA', weight: 45, shares: 10 }, { ticker: 'BBB', weight: 45, shares: 30 }] }
+    const weight = { ...storedPortfolio(100), id: 'weight', positions: [] }
+    const storage = stubStorage([shares, weight])
+    remarkStoredPortfolios([
+      { ticker: 'AAA', current_price: 55 },
+      { ticker: 'BBB', current_price: 15 },
+    ] as never)
+    expect(storage.setItem).toHaveBeenCalledTimes(1)
+    const saved = JSON.parse(storage.setItem.mock.calls[0][1])
+    expect(saved[0].positions[0].weight).toBeCloseTo(50, 6)
+    expect(saved[0].updatedAt).toBe(shares.updatedAt)
+    expect(saved[1]).toEqual(weight)
+  })
+
+  it('does not write when no portfolio can be re-marked', () => {
+    const storage = stubStorage([storedPortfolio(100)])
+    remarkStoredPortfolios([])
+    expect(storage.setItem).not.toHaveBeenCalled()
   })
 })

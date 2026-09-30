@@ -285,10 +285,11 @@ export button, 0063 the import UI.
   numeric round-tripping — all for free. A JSON preset format would need every one of those rebuilt,
   and a preset that cannot pass the parser is a preset that would have produced an invalid portfolio.
   `applySeed` is the single entry point, shared with CSV import.
-- **A preset never carries share counts.** A preset is an *allocation*; share counts are metadata
-  about one person's specific position. Shipping someone else's shares asserts a portfolio value the
-  user does not have and that nothing in the app reconciles. Weights carry the whole meaning. The
-  `shares` column stays present and empty so the text is still canonical CSV.
+- **~~A preset never carries share counts.~~ Reversed by Gunnar's decision in contract 0129 (2026-09-30).** The original
+  worry stands: a preset with shares states a real book at a real size. Gunnar accepted that for the
+  BEC preset, which now ships Blue Eagle's share counts and fixed cash dollars (`ticker,shares` +
+  `CASH,<dollars>`) and is re-marked like any shares-based portfolio. It goes stale whenever BEC
+  trades, and only Gunnar updates it. Gunnar Preset stays weights-only.
 - **Coding agents never author an allocation.** Preset content comes from Gunnar. Contract 0070 pins
   `PRESETS.length` in a test specifically so a later agent cannot helpfully add a 60/40 or a
   conservative/balanced/aggressive ladder nobody asked for.
@@ -323,7 +324,7 @@ export button, 0063 the import UI.
   about a user typing shares and a separate target weight into the composer, with no convention
   for which one wins. A file that carries both has an obvious winner, the weights, and it is the
   format the app itself writes. Disagreement between the two is handled by the existing 0.5-point
-  dollar-display rule. Presets still never carry shares (see the preset rule earlier in this
+  dollar-display rule. Presets carried no shares until contract 0129 (see the preset rule earlier in this
   section). A person's own share counts arrive by importing their own file.
 - **Optimizer exports import as portfolios: target columns replace, shorts are rejected, and a
   rounding overshoot is trimmed visibly.** Contract 0111, 2026-09-24. Everything below applies only
@@ -1363,7 +1364,9 @@ fresh while the table did not.
 
 **Optimize can deploy cash without a re-run (contract 0126).** The optimizer fits invested holdings only, so its target weights are a mix, not an allocation. A "Cash to deploy" slider (0–100% of current cash) sets cash after to `c × (1 − p)` and scales every holding to `fraction × (100 − c′)`, keeping the Optimized proportions. The backtest and metrics are unaffected because they never saw cash. The Weights table and CSV now show shares of the **whole** portfolio with a Cash row in the table. This also fixed a silent loss: `target_pct` used to be invested-only and summed to 100, so re-importing an export of a portfolio holding cash set cash to 0. The export deliberately has no CASH row; the importer derives cash as `100 − Σ target_pct`. CAPM's Apply and export are unchanged.
 
-**Cash rows show an estimated dollar figure (contracts 0127, 0128).** When every position has shares and a usable price, the Cash row's Shares cell shows `impliedPortfolioValue × cashWeight / 100`. This is the same derivation as Optimize's Cash row. It is display-only and moves with prices, because cash dollars are still not persisted. The tooltip says so. This applies both on `/portfolios` (PositionsTable) and on the analysis Holdings tab (HoldingsPage), which has its own table; both Cash rows share the green tint. The CSV export deliberately leaves the CASH shares cell empty: a `CASH,x,0` row would fail the weight-mode import check. Storing real cash dollars would touch every mutation path and remains a separate, unmade decision.
+**Cash rows show an estimated dollar figure (contracts 0127, 0128).** When every position has shares and a usable price, the Cash row's Shares cell shows `impliedPortfolioValue × cashWeight / 100`. This is the same derivation as Optimize's Cash row. It is display-only and moves with prices, because cash dollars are still not persisted. The tooltip says so. This applies both on `/portfolios` (PositionsTable) and on the analysis Holdings tab (HoldingsPage), which has its own table; both Cash rows share the green tint. For weight-based portfolios, the weight-format CSV export still leaves the CASH shares cell empty: a `CASH,x,0` row would fail the weight-mode import check. Contract 0129 later made storing real cash dollars the rule for shares-based portfolios.
+
+**Shares-based portfolios: shares and cash dollars are the truth, and weights are re-marked (contract 0129).** This partly reverses 0059. A portfolio is shares-based when it carries `cashDollars` and every position has shares. It gets `cashDollars` at creation: the typed dollars in shares mode, or cash frozen at creation-day prices when a weight-mode draft has shares on every row. Whenever `getUniverse` resolves, `remarkStoredPortfolios` rewrites each shares-based portfolio's saved `weight`s and `cashWeight` from shares × price plus the fixed cash, and does not re-stamp `updatedAt`. It skips any portfolio with a missing price, which keeps its last snapshot. Saved weights are therefore a snapshot as of the last Universe load, and every reader (Optimize, CAPM, Risk, charts, both tables) keeps reading them unchanged. We rejected recalculating on each page because it touches about 14 files and lets tabs disagree. Shares-based exports are `ticker,shares` + `CASH,<dollars>` with no weights. **Piece 1 limitation:** add or remove position, the cash-% editor and Optimize/CAPM Apply drop `cashDollars`, which reverts the portfolio to weight-based. Piece 2 should make them trade shares and cash dollars instead. Existing portfolios aren't migrated. There is one known race: an Apply built from a pre-re-mark copy can overwrite a re-mark, and the next Universe load heals it.
 
 **In a shares-only CSV, `CASH`'s `shares` cell is dollars (contract 0125, decided 2026-09-29).** A file with a shares column and no weight column already seeded shares mode, whose cash field is in dollars. But the parser only read `CASH` from the weight column, so a brokerage-style `ticker,shares` file was rejected on its cash line. Cash is now treated as $1 per share. That fits how holdings files already list money-market cash, and it needs no new column. Rejected: a `value` column read only on the `CASH` row, which would add a column to the format we own to serve one row. The cost we accept is that one column's unit depends on the row. That's why it is confined to shares-only files: any file with a weight column still reads `CASH` as a percentage and rejects a `CASH` row with no weight. Dollars never enter the 100% checks. `$` signs and thousands separators are still rejected, deliberately — the same no-format-guessing rule as the CSV decision above.
 
