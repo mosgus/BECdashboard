@@ -41,7 +41,7 @@ export function PositionsTable({ valued, onRemove }: PositionsTableProps): JSX.E
                 <td className={`${TD} text-right tabular-nums`}>{formatPercent(row.weight)}</td>
                 <td className={`${TD} text-right`}>
                   <Tooltip label={valued.cashFixed
-                    ? `Sell some or all of ${row.ticker} at its current price; the proceeds go to cash.`
+                    ? `Sell some or all of ${row.ticker} at its last close; the proceeds go to cash.`
                     : `Remove ${row.ticker} from this portfolio`}
                   >
                     <button
@@ -63,7 +63,7 @@ export function PositionsTable({ valued, onRemove }: PositionsTableProps): JSX.E
                   <Tooltip
                     label={valued.cashFixed
                       ? 'Cash in dollars, saved with this portfolio. It stays fixed while holding weights move with prices.'
-                      : "Estimated from your share counts at current prices: cash is this portfolio's cash weight of its implied total value. It moves with prices; it isn't the amount you originally typed."}
+                      : "Estimated from your share counts at last closing prices: cash is this portfolio's cash weight of its implied total value. It moves with prices; it isn't the amount you originally typed."}
                   >
                     <span>{formatMoney(valued.cashDollars)}</span>
                   </Tooltip>

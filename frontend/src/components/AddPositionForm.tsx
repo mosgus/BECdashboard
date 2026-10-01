@@ -68,8 +68,8 @@ export function AddPositionForm({ universe, portfolio, sharesBased, onAdd, onBuy
     : buy.ok ? `${heldPosition === undefined ? '' : `Buys ${formatShares(Number(shares))} more; you'll hold ${formatShares(heldPosition.shares! + Number(shares))}. `}Costs ${formatMoney(buy.cost)} of ${formatMoney(portfolio.cashDollars!)} cash; ${formatMoney(buy.portfolio.cashDollars!)} left.`
       : buy.reason === 'insufficient-cash'
         ? `Not enough cash: ${formatMoney(portfolio.cashDollars!)} buys at most ${formatShares(portfolio.cashDollars! / positionPrice(allByTicker.get(ticker))!)} shares of ${ticker}.`
-        : buy.reason === 'no-price' ? 'Add by shares needs a usable current price for the selected ticker.'
-          : buy.reason === 'unpriced-holding' ? 'Every holding needs a current price before buying, so the weights can be re-marked.'
+        : buy.reason === 'no-price' ? 'Add by shares needs a usable last close for the selected ticker.'
+          : buy.reason === 'unpriced-holding' ? 'Every holding needs a last close before buying, so the weights can be re-marked.'
             : 'Enter a share count greater than 0.'
   const weightDisabled =
     ticker === '' ||
@@ -123,7 +123,7 @@ export function AddPositionForm({ universe, portfolio, sharesBased, onAdd, onBuy
           </datalist>
         </div>
       </Tooltip>
-      <Tooltip label={sharesBased ? 'This portfolio is shares-based: enter a share count. The weight follows from shares and current prices.' : 'Percentage of the portfolio allocated to this security.'}>
+      <Tooltip label={sharesBased ? 'This portfolio is shares-based: enter a share count. The weight follows from shares and last closing prices.' : 'Percentage of the portfolio allocated to this security.'}>
         <input
           type="number"
           inputMode="decimal"
@@ -149,7 +149,7 @@ export function AddPositionForm({ universe, portfolio, sharesBased, onAdd, onBuy
         />
       </Tooltip>
       {(sharesBased ? buy?.ok : showingDerivedWeight) && (
-        <Tooltip label={sharesBased ? 'Weight of this holding after the buy, from shares and current prices' : 'Weight derived from the share count and current prices'}>
+        <Tooltip label={sharesBased ? 'Weight of this holding after the buy, from shares and last closing prices' : 'Weight derived from the share count and last closing prices'}>
           <input
             type="text"
             readOnly
@@ -176,7 +176,7 @@ export function AddPositionForm({ universe, portfolio, sharesBased, onAdd, onBuy
       )}
       {!sharesBased && showingDerivedWeight && impliedValue !== null && !hasUsableSelectedPrice && (
         <p className="basis-full text-xs text-[var(--color-muted)]">
-          Add by shares needs a usable current price for the selected ticker.
+          Add by shares needs a usable last close for the selected ticker.
         </p>
       )}
       {!sharesBased && effectiveWeight !== null && Number.isFinite(effectiveWeight) && effectiveWeight > portfolio.cashWeight && (

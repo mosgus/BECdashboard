@@ -347,7 +347,6 @@ def get_indicators(ticker: str, include: str = "") -> dict:
     if not requested:
         return {"ticker": ticker.upper(), "dates": [], "series": []}
 
-    today = datetime.now(ZoneInfo("America/New_York")).date()
     with session() as db:
         bar_rows = db.execute(
             select(
@@ -358,10 +357,7 @@ def get_indicators(ticker: str, include: str = "") -> dict:
                 PriceBar.adj_close,
                 PriceBar.volume,
             )
-            .where(
-                PriceBar.ticker == ticker.upper(),
-                PriceBar.date >= today - timedelta(days=SIGNAL_WINDOW_DAYS),
-            )
+            .where(PriceBar.ticker == ticker.upper())
             .order_by(PriceBar.date)
         ).all()
 

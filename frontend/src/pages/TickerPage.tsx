@@ -11,7 +11,7 @@ import { INDICATOR_GROUPS, SIGNAL_DESCRIPTIONS } from '../lib/indicators'
 
 const SeriesChart = lazy(() => import('../components/SeriesChart'))
 
-const ALWAYS_ON_INDICATORS = ['sma', 'rsi', 'macd'] as const
+const ALWAYS_ON_INDICATORS = ['sma', 'rsi', 'macd', 'adx', 'stochastic', 'obv'] as const
 
 type LoadState<T> =
   | { status: 'loading' }
@@ -168,7 +168,7 @@ export function TickerPage(): JSX.Element {
                   <span className="text-xs font-medium text-[var(--color-muted)]">Indicators</span>
                 </Tooltip>
                 <div className="flex flex-wrap gap-x-4 gap-y-2 mt-2">
-                  {INDICATOR_GROUPS.map((group) => (
+                  {INDICATOR_GROUPS.filter((group) => !['adx', 'stochastic', 'obv'].includes(group.key)).map((group) => (
                     <Tooltip key={group.key} label={INDICATOR_TOOLTIPS[group.key] ?? 'Draw this indicator on the chart'}>
                       <label className="inline-flex items-center gap-2 text-sm cursor-pointer">
                         <input

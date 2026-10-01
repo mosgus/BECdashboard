@@ -43,18 +43,19 @@ export interface ValuedRow {
 export interface ValuedPortfolio {
   rows: ValuedRow[]
   cashWeight: number
-  /** Estimated at current prices: impliedPortfolioValue × cashWeight / 100. Null unless every
+  /** Estimated at last closing prices: impliedPortfolioValue × cashWeight / 100. Null unless every
    *  position has shares and a usable price. Presentation only — never saved. */
   cashDollars: number | null
   cashFixed: boolean
   missingTickers: string[]
 }
 
-/** current_price ?? last_close ?? regular_market_price — the same fallback chain
- * UniverseTable.tsx uses. This remains useful only when converting a legacy shares model. */
+/** The one price every Portfolios valuation and trade uses: the last completed session's close,
+ *  the same field Optimize and CAPM size trades on (decision 2026-10-01, contract 0139).
+ *  Deliberately no fallback to a live quote — a fallback would reintroduce a second price. */
 export function positionPrice(entry: UniverseEntry | undefined): number | null {
   if (entry === undefined) return null
-  return entry.current_price ?? entry.last_close ?? entry.regular_market_price
+  return entry.last_close
 }
 
 function isFinitePositive(value: unknown): value is number {
@@ -220,7 +221,7 @@ export function isSharesBased(portfolio: Portfolio): boolean {
   return portfolio.cashDollars !== undefined && portfolio.positions.every((position) => isFinitePositive(position.shares))
 }
 
-/** Recalculate weights from shares × current price and the fixed cash. */
+/** Recalculate weights from shares × last close and the fixed cash. */
 export function remarkPortfolio(portfolio: Portfolio, byTicker: Map<string, UniverseEntry>): Portfolio | null {
   if (!isValidCurrentPortfolio(portfolio) || !isSharesBased(portfolio) || portfolio.positions.length === 0) return null
   const cashDollars = portfolio.cashDollars
@@ -345,7 +346,7 @@ export function removePositionToCash(portfolio: Portfolio, ticker: string): Port
   }
 }
 
-/** Sell a shares-based holding at its current price into fixed cash, then re-mark (contract 0131).
+/** Sell a shares-based holding at its last close into fixed cash, then re-mark (contract 0131).
  *  Null when the portfolio isn't shares-based, the ticker isn't held, or a needed price is unusable. */
 export function removePositionSelling(
   portfolio: Portfolio,
@@ -376,7 +377,7 @@ export type SellResult =
   | { ok: true; portfolio: Portfolio; sharesSold: number; proceeds: number; soldAll: boolean; holdingWeight: number }
   | { ok: false; reason: 'invalid' | 'no-price' | 'unpriced-holding' }
 
-/** Sell `sellWeight` points of portfolio weight of a shares-based holding at current prices into
+/** Sell `sellWeight` points of portfolio weight of a shares-based holding at last closing prices into
  *  fixed cash, then re-mark. At or above the holding's weight, sells all of it (contract 0137). */
 export function sellPositionWeight(
   portfolio: Portfolio,
@@ -556,7 +557,7 @@ export function summariseDraft(
   else if (draft.rows.some((row) => row.ticker === '')) problem = 'Choose a ticker for every asset'
   else if (cashDollars === null) problem = 'Cash must be a non-negative number'
   else if (draft.rows.some((row) => parseFinitePositive(row.shares) === null)) problem = 'Every asset needs a strictly-positive share count'
-  else if (draft.rows.some((row) => !isFinitePositive(positionPrice(byTicker.get(row.ticker))))) problem = 'Every asset needs a usable current price'
+  else if (draft.rows.some((row) => !isFinitePositive(positionPrice(byTicker.get(row.ticker))))) problem = 'Every asset needs a usable last close'
   else if (!(totalValue > 0) || !Number.isFinite(totalValue)) problem = 'The initial allocation must be greater than zero'
 
   return {

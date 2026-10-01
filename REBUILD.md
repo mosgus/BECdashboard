@@ -1387,6 +1387,17 @@ Weight-based portfolios keep the dilute-to-make-room form.
 
 **Removing a shares-based holding sells it into cash dollars (contract 0131).** On `/portfolios`, Remove on a shares-based portfolio calls `removePositionSelling`, which adds shares × the last-loaded Universe price to `cashDollars` and re-marks the portfolio, so it stays shares-based. The sale price is the price from the last Universe load, not a real fill. There is still no confirmation step, as before. While prices are loading, Remove is refused with a notice. If the sold holding or any remaining holding has no price (for example "No longer in Universe"), the removal falls back to the old by-weight path and reverts the portfolio to weight-based, with a red notice. Blocking would have made an unpriceable holding impossible to remove. The notice clears only when the selected portfolio changes (contract 0132): 0131 first put that clear in the cash reseed effect, and the flip to weight-based wiped the notice as soon as it appeared.
 
+**Every price in Portfolios is the last completed session's close (Gunnar's decision, 2026-10-01; contract 0139).** `positionPrice()` returns `entry.last_close` and nothing else. That is the same field Optimize and CAPM have always sized trades on. Re-marking, the Cash editor, Add/buy, Sell, shares-mode creation and legacy migration all read it. **Rule: live for display, close for computation.** The only place a live quote appears in Portfolios is the Holdings tab's **Price** cell and **Day %** column, which are display-only. That tab's Weight %, cash estimate and charts are computed, so they use the close. Gunnar's refinement, the same day: he wants the intraday price visible on Holdings.
+  - **Why:** before this, shares-based edits traded at `current_price` while Optimize and CAPM priced at `last_close`. The two prices cost real money in the record and cause a silent display failure:
+    - Apply sold and bought at yesterday's close, while the portfolio was valued live. An intraday gain on a holding Apply sold vanished from the record.
+    - `tradeBasis` and `chartMode` recompute weights at close and compare them to the stored weights, which were live-marked, with a 0.5-point tolerance. A 50% holding moving about 3% intraday tripped it. The Optimize and CAPM trade tables and the Holdings dollar chart then silently fell back to weights-only during market hours.
+  - **Rejected:**
+    - Keeping last close only in Optimize/CAPM, which was Gunnar's first instinct, for consistency across the two portfolio modes. It made the modes match by splitting shares-based portfolios across two prices, and the modes only differ in a way that matters for shares-based portfolios.
+    - Moving Optimize to live prices. Optimize's model is built on closes, and a run would stop being repeatable within a session.
+  - **No fallback to a live quote** when `last_close` is missing: a fallback reintroduces the second price in exactly the case nobody tests. A ticker with no stored close can't be optimized either.
+  - **Trades (Add, Sell, Cash edits on `/portfolios`) are computation, not display.** They write the shares and cash dollars that every analysis tab reads. If they priced live, Apply would again trade at a different price than Sell does.
+  - **Cost, accepted:** on Holdings, intraday, Price × Shares ≠ Weight %. The Weight and Price tooltips say which price each one uses.
+
 **In a shares-only CSV, `CASH`'s `shares` cell is dollars (contract 0125, decided 2026-09-29).** A file with a shares column and no weight column already seeded shares mode, whose cash field is in dollars. But the parser only read `CASH` from the weight column, so a brokerage-style `ticker,shares` file was rejected on its cash line. Cash is now treated as $1 per share. That fits how holdings files already list money-market cash, and it needs no new column. Rejected: a `value` column read only on the `CASH` row, which would add a column to the format we own to serve one row. The cost we accept is that one column's unit depends on the row. That's why it is confined to shares-only files: any file with a weight column still reads `CASH` as a percentage and rejects a `CASH` row with no weight. Dollars never enter the 100% checks. `$` signs and thousands separators are still rejected, deliberately — the same no-format-guessing rule as the CSV decision above.
 
 **`Update all data N` is now `Refresh prices`** and posts to `POST /universe/quotes/refresh`, forcing
@@ -2090,6 +2101,13 @@ Two data decisions that are easy to get wrong and invisible when you do:
 - **`bar_window_start` is the wrong window for signals.** It bounds to ~52 sessions; a 20/50 SMA
   crossover needs 50 sessions *plus* history before them to detect a cross, so in early January it
   would silently return `state: null` for everything. Signals use their own `SIGNAL_WINDOW_DAYS = 400`.
+- **…and `SIGNAL_WINDOW_DAYS` is the wrong window for chart overlays (contract 0141, 2026-10-01).**
+  `GET /universe/{ticker}/indicators` had borrowed it. But the ticker page fetches full history once
+  and filters on the client, so any start date over ~400 days back showed a price line with no
+  indicators on it. The overlays endpoint now reads every stored bar. That also gives every start date
+  correct warm-up. The cost: payload grows with stored history (~1,700 bars since 2020 per series).
+  Revisit with server-side slicing *after* computing, never before, only if that payload becomes a
+  measured problem.
 
 **RSI saturates at 100 on a flat series, which is wrong.** Found in the 0082 audit, 2026-09-22:
 `compute_rsi(pd.Series([50.0] * 30))` returns `100.0`, so `signal_rsi_threshold` reports

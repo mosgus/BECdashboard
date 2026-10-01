@@ -258,7 +258,7 @@ describe('shares-only CSV cash', () => {
     const result = successful('ticker,shares\nAAPL,10\nCASH,5000\n')
     const summary = summariseDraft(
       toDraft({ ...result.seed, name: 'X' }),
-      new Map([['AAPL', { ...entry('AAPL'), current_price: 100 }]]),
+      new Map([['AAPL', { ...entry('AAPL'), last_close: 100 }]]),
     )
     expect(summary.canCreate).toBe(true)
     expect(summary.cashWeight).toBeCloseTo(83.333333, 4)

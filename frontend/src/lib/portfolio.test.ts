@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { UniverseEntry } from '../api/client'
+import { tradeBasis } from './optimize'
 import {
   addPositionBuying,
   addPositionDiluting,
@@ -8,6 +9,7 @@ import {
   impliedPortfolioValue,
   isValidCurrentPortfolio,
   migrateLegacyPortfolio,
+  positionPrice,
   remarkPortfolio,
   removePositionSelling,
   removePositionToCash,
@@ -28,7 +30,7 @@ function portfolio(cashWeight: number, positions: Portfolio['positions']): Portf
 function entry(price: number | null): UniverseEntry {
   return {
     ticker: 'unused', short_name: null, sector: null, quote_type: null,
-    current_price: price, last_close: null, regular_market_price: null, prior_close: null,
+    current_price: null, last_close: price, regular_market_price: null, prior_close: null,
     quote_fetched_at: null, market_cap: null, trailing_pe: null, dividend_yield: null,
     bar_count: 0, first_bar: null, last_bar: null, fetched_at: null, added_at: '',
   }
@@ -903,7 +905,7 @@ describe('summariseDraft universe membership', () => {
       { name: 'Draft', mode: 'shares', cash: '0', rows: [{ id: '1', ticker: 'ZZZZ', shares: '1', weight: '' }] },
       validUniverse,
     )
-    expect(summary.problem).toBe('Every asset needs a usable current price')
+    expect(summary.problem).toBe('Every asset needs a usable last close')
   })
 })
 
@@ -941,5 +943,43 @@ describe('summariseDraft weight mode carries imported shares', () => {
     expect(summary.canCreate).toBe(true)
     expect(summary.rows.map((row) => row.weight)).toEqual([60, 40])
     expect(summary.rows[0].shares).toBeNull()
+  })
+})
+
+describe('Portfolios price at the last close (decision 2026-10-01)', () => {
+  const base: Portfolio = {
+    ...portfolio(10, [{ ticker: 'AAA', weight: 45, shares: 10 }, { ticker: 'BBB', weight: 45, shares: 30 }]),
+    cashDollars: 100,
+  }
+  const byTicker = new Map([
+    ['AAA', { ...entry(45), ticker: 'AAA', current_price: 60, regular_market_price: 61 }],
+    ['BBB', { ...entry(15), ticker: 'BBB', current_price: 20, regular_market_price: 21 }],
+  ])
+
+  it('positionPrice returns last_close even when a live quote differs', () => {
+    expect(positionPrice(byTicker.get('AAA'))).toBe(45)
+  })
+
+  it('positionPrice does not fall back to a live quote when last_close is missing', () => {
+    expect(positionPrice({ ...entry(null), current_price: 60, regular_market_price: 61 })).toBeNull()
+  })
+
+  it('re-marks at the last close, so the trade table keeps its dollar basis intraday', () => {
+    const remarked = remarkPortfolio(base, byTicker)
+    expect(remarked?.positions[0].weight).toBeCloseTo(45, 6)
+    expect(remarked?.positions[1].weight).toBeCloseTo(45, 6)
+    expect(remarked?.cashWeight).toBeCloseTo(10, 6)
+    expect(tradeBasis(remarked!, new Map([['AAA', 45], ['BBB', 15]])).kind).toBe('dollar')
+  })
+
+  it('sells at the last close, not the live quote', () => {
+    expect(removePositionSelling(base, 'AAA', byTicker)?.cashDollars).toBeCloseTo(550, 6)
+  })
+
+  it('buys at the last close, not the live quote', () => {
+    const result = addPositionBuying(base, 'BBB', 2, byTicker)
+    if (!result.ok) throw new Error(result.reason)
+    expect(result.cost).toBeCloseTo(30, 6)
+    expect(result.portfolio.cashDollars).toBeCloseTo(70, 6)
   })
 })

@@ -10,7 +10,7 @@ import HelpSidebar from '../../components/HelpSidebar'
 import { priceChange } from '../../lib/change'
 import { formatPercent, formatPrice, formatShares } from '../../lib/format'
 import { formatMoney } from '../../lib/optimize'
-import { positionPrice, valuePortfolio } from '../../lib/portfolio'
+import { valuePortfolio } from '../../lib/portfolio'
 import { isLegacyPortfolio, listPortfolios } from '../../lib/portfolioStore'
 
 type LoadState<T> =
@@ -141,14 +141,18 @@ export function HoldingsPage(): JSX.Element {
                 <th className={`${TH} text-right`}>
                   <Tooltip
                     label={valued.cashFixed
-                      ? "Each holding's share of the portfolio at the last loaded prices. Share counts and cash dollars are fixed; weights move with prices."
+                      ? "Each holding's share of the portfolio at the last close, the price Optimize and Outlook use. Share counts and cash dollars are fixed; weights update after each close."
                       : 'The saved allocation. It does not change as prices move.'}
                   >
                     <span>Weight %</span>
                   </Tooltip>
                 </th>
                 <th className={`${TH} text-right`}>Shares</th>
-                <th className={`${TH} text-right`}>Price</th>
+                <th className={`${TH} text-right`}>
+                  <Tooltip label="Live price during market hours, otherwise the last close. Weights and all analysis use the last close.">
+                    <span>Price</span>
+                  </Tooltip>
+                </th>
                 <th className={`${TH} text-right`}>
                   <Tooltip label="Change from the last close. When the market is closed this is the last completed session's move.">
                     <span>Day</span>
@@ -200,7 +204,7 @@ export function HoldingsPage(): JSX.Element {
                       {row.shares === null ? '—' : formatShares(row.shares)}
                     </td>
                     <td className={`${TD} text-right tabular-nums whitespace-nowrap`}>
-                      {formatPrice(positionPrice(entry))}
+                      {formatPrice(entry === undefined ? null : entry.current_price ?? entry.last_close ?? entry.regular_market_price)}
                     </td>
                     <td className={`${TD} text-right tabular-nums whitespace-nowrap ${signedColor(change.percent)}`}>
                       {day}
@@ -222,7 +226,7 @@ export function HoldingsPage(): JSX.Element {
                     <Tooltip
                       label={valued.cashFixed
                         ? 'Cash in dollars, saved with this portfolio. It stays fixed while holding weights move with prices.'
-                        : "Estimated from your share counts at current prices: cash is this portfolio's cash weight of its implied total value. It moves with prices; it isn't the amount you originally typed."}
+                        : "Estimated from your share counts at last closing prices: cash is this portfolio's cash weight of its implied total value. It moves with prices; it isn't the amount you originally typed."}
                     >
                       <span>{formatMoney(valued.cashDollars)}</span>
                     </Tooltip>

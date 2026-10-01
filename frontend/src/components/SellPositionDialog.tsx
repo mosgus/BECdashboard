@@ -92,7 +92,7 @@ export function SellPositionDialog({ portfolio, ticker, byTicker, onConfirm, onC
           <h2 className="text-[1.0625rem] font-semibold">Sell {ticker}</h2>
           {!full.ok ? (
             <>
-              <p className="text-sm text-[var(--color-muted)] mt-3">Current prices are needed to sell {ticker}.</p>
+              <p className="text-sm text-[var(--color-muted)] mt-3">Closing prices are needed to sell {ticker}.</p>
               <div className="flex justify-end gap-2 mt-5">
                 <button type="button" onClick={handleClose} className="text-sm font-medium px-4 py-2 rounded-[var(--radius-btn)] border border-brand-border text-foreground hover:bg-brand-border">
                   Cancel
@@ -140,7 +140,7 @@ export function SellPositionDialog({ portfolio, ticker, byTicker, onConfirm, onC
               />
               <p className="text-sm mt-3">
                 {!sale.ok
-                  ? 'Current prices changed; close and try again.'
+                  ? 'Prices changed while this was open; close and try again.'
                   : sale.soldAll
                     ? `Sells all ${formatShares(sale.sharesSold)} shares for ${formatMoney(sale.proceeds)}; ${ticker} leaves the portfolio.`
                     : `Sells ${formatShares(sale.sharesSold)} shares for ${formatMoney(sale.proceeds)}; ${formatPercent(full.holdingWeight - sellWeight)} of ${ticker} remains.`}

@@ -114,12 +114,12 @@ export function PortfoliosPage(): JSX.Element {
         return
       }
       if (universeState.status !== 'ready') {
-        setCashProblem('Current prices are needed to update the weights. Try again once the Universe has loaded.')
+        setCashProblem('Closing prices are needed to update the weights. Try again once the Universe has loaded.')
         return
       }
       const next = withCashDollars(current, parsed, actualByTicker)
       if (next === null) {
-        setCashProblem('Every holding needs a current price to update the weights.')
+        setCashProblem('Every holding needs a last close to update the weights.')
         return
       }
       setCashProblem(null)
@@ -185,7 +185,7 @@ export function PortfoliosPage(): JSX.Element {
       return
     }
     if (universeState.status !== 'ready') {
-      setPositionNotice(`Current prices are needed to sell ${ticker} into cash. Try again once the Universe has loaded.`)
+      setPositionNotice(`Closing prices are needed to sell ${ticker} into cash. Try again once the Universe has loaded.`)
       return
     }
     const sold = removePositionSelling(current, ticker, actualByTicker)
@@ -197,7 +197,7 @@ export function PortfoliosPage(): JSX.Element {
     const next = removePositionToCash(current, ticker)
     if (next !== null) {
       persist(next)
-      setPositionNotice(`${ticker} was removed by weight because a current price was missing, so this portfolio is now weight-based. Set its cash in dollars again by re-importing its shares.`)
+      setPositionNotice(`${ticker} was removed by weight because a last close was missing, so this portfolio is now weight-based. Set its cash in dollars again by re-importing its shares.`)
     }
   }
 
@@ -286,7 +286,7 @@ export function PortfoliosPage(): JSX.Element {
                       </Tooltip>
                     </div>
                     <p className="text-sm text-brand-negative leading-relaxed">
-                      This legacy portfolio needs current prices for every holding before its allocations can be migrated. Its saved data has not been changed.
+                      This legacy portfolio needs closing prices for every holding before its allocations can be migrated. Its saved data has not been changed.
                     </p>
                   </div>
                 ) : valued && current ? (
@@ -341,7 +341,7 @@ export function PortfoliosPage(): JSX.Element {
                         <span className="text-sm text-[var(--color-muted)]">Cash</span>
                         {sharesBased && <span className="text-sm text-[var(--color-muted)]">$</span>}
                         <Tooltip label={sharesBased
-                          ? 'Cash held in dollars. Holding weights are recalculated from share counts and current prices.'
+                          ? 'Cash held in dollars. Holding weights are recalculated from share counts and last closing prices.'
                           : 'Share of this allocation kept in cash.'}
                         >
                           <input

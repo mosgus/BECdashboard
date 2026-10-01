@@ -82,8 +82,8 @@ describe('shares-based storage', () => {
     const weight = { ...storedPortfolio(100), id: 'weight', positions: [] }
     const storage = stubStorage([shares, weight])
     remarkStoredPortfolios([
-      { ticker: 'AAA', current_price: 55 },
-      { ticker: 'BBB', current_price: 15 },
+      { ticker: 'AAA', last_close: 55 },
+      { ticker: 'BBB', last_close: 15 },
     ] as never)
     expect(storage.setItem).toHaveBeenCalledTimes(1)
     const saved = JSON.parse(storage.setItem.mock.calls[0][1])

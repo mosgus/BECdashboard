@@ -997,6 +997,25 @@ def test_get_indicators_serves_donchian_mid_and_parallel_reference_series(db_mod
     assert all(len(entry["points"]) == len(body["dates"]) for entry in body["series"])
 
 
+def test_get_indicators_covers_bars_older_than_the_signal_window(db_mode, client):
+    start = date.today() - timedelta(days=600)
+    bars = [
+        (start + timedelta(days=index), 102.0 + index, 98.0 + index, 100.0 + index, 100.0 + index, 100)
+        for index in range(25)
+    ]
+    _add_indicator_bars("OLD", bars)
+
+    response = client.get("/universe/OLD/indicators?include=bollinger")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["dates"][0] == start.isoformat()
+    assert len(body["dates"]) == 25
+    middle = next(series for series in body["series"] if series["key"] == "bollinger_middle")
+    assert middle["points"][18] is None
+    assert middle["points"][19] == pytest.approx(109.5)
+
+
 # --- conftest.py's block_network fixture (contract 0043) ------------------------------------
 #
 # These live here rather than in conftest.py because pytest only collects test functions from

@@ -254,7 +254,7 @@ export function NewPortfolioDialog({ universe, onCancel, onCreate }: NewPortfoli
                 By weight
               </button>
             </Tooltip>
-            <Tooltip label="Enter shares held; current prices calculate the initial allocation once.">
+            <Tooltip label="Enter shares held; last closing prices calculate the initial allocation once.">
               <button
                 type="button"
                 aria-pressed={mode === 'shares'}
