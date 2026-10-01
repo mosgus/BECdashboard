@@ -12,9 +12,9 @@ import {
 import type { JSX } from 'react'
 import type { CurveRow } from '../lib/optimize'
 
-export default function OptimizeChart({ rows, hasBenchmark }: { rows: CurveRow[]; hasBenchmark: boolean }): JSX.Element {
+export default function OptimizeChart({ rows, hasBenchmark, size = 'inline' }: { rows: CurveRow[]; hasBenchmark: boolean; size?: 'inline' | 'expanded' }): JSX.Element {
   return (
-    <div className="h-[22rem]">
+    <div className={size === 'expanded' ? 'h-[70vh]' : 'h-[22rem]'}>
       <ResponsiveContainer width="100%" height="100%">
         <LineChart data={rows}>
           <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />

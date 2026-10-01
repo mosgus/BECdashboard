@@ -1597,6 +1597,23 @@ And `UniversePage` warms the chunk with a bare `void import(...)` after mount �
 row click waits on a ~103 kB download behind `fallback={null}`, which reads as the click doing
 nothing. The preload sits in `UniversePage`, never in `App`, so `/` stays clean.
 
+**Analysis charts expand into a dialog through an explicit button (contract 0142, 2026-10-01).**
+`ExpandableChart` takes a render prop, `(expanded) => chart`, and renders the same lazy chart
+component twice: inline, and in a portaled dialog. That way it never imports recharts itself. The
+dialog re-renders from live props, so it's view-only and never refetches. Rejected: click-anywhere on
+the plot. It can't be seen, can't be reached by keyboard, and steals the tap that reads a recharts
+tooltip on touch screens. The expanded `SeriesChart` downsamples to `EXPANDED_CHART_POINTS = 1200`
+rather than 400. Otherwise a bigger chart would only stretch the same points. Known debt: this makes
+the fifth hand-rolled modal shell. Extracting a shared one is its own contract.
+
+**Corrected by contract 0143: the expandable unit is a pane, not a component.** 0142 wrapped the
+whole `SeriesChart`, so one button opened all of its stacked panes at once: price, RSI, MACD, ADX,
+Stochastic and OBV. That was a planning error. `SeriesChart` is up to six charts, and only
+`SeriesChart` knows where they start and end, so expansion now lives inside it, with one
+`ExpandableChart` per pane. Its `size` prop is gone. `OptimizeChart` and `CapmChart` are genuinely
+single charts and keep the call-site wrapper. The lesson for future contracts: count what the user
+sees as separate charts, not React components.
+
 **`reference files/` is read-only.** It is a snapshot of other working software — the old yfinance
 script, the Streamlit news section — kept so its behaviour can be compared against this rebuild.
 Read it freely; never edit, move, rename or reformat anything under it, including to fix an obvious
@@ -2005,6 +2022,13 @@ risk-free rate to the 3-month T-bill and limits portfolios to holdable tickers.
   - The duplicate `isValidCurrentPortfolio` in `portfolioStore.ts` is merged into `lib/portfolio.ts`.
 - **Frontend audits render the page (from 0119).** `node contracts/tools/smoke-render.mjs <tab>` loads a portfolio tab in headless Chrome with a throwaway profile and a fake portfolio, then prints any uncaught exception.
   - **Why:** 0119 passed tests, build and lint but blanked the Outlook tab. `Tooltip` calls `Children.only`, and the Target value `Field` gave it two children.
+- **Monte Carlo backend is `POST /portfolio/montecarlo` over the pure `app/montecarlo_run.py`** (0143, 2026-10-01). It differs from `main` in these ways:
+  - It takes `tickers`, `weights` and `cash` in the body. Cash is part of the portfolio and earns 0%, as in `/portfolio/series`; `main` dropped cash.
+  - There are two models. **`bootstrap` (the default)** resamples the portfolio's own historical daily returns, which keeps the real crash days. `normal` is `main`'s fitted normal and stays for comparison.
+  - Both simulate at constant weights, as `main` does: one portfolio-level return per day.
+  - It warns when a holding's history is shorter than the lookback, and it refuses to run on fewer than 60 daily returns.
+  - **`main`'s "Brier score" is not ported.** `mean((prob_above − 0.5)²)` scores no outcome and is minimised by predicting 50/50. Its coverage figure comes from one autocorrelated hold-out path.
+  - Still open for Gunnar: whether to build a real calibration check, and whether `main`'s efficient-frontier chart, which sits inside its Monte Carlo section, comes across.
 
 ## Open questions (not decided)
 

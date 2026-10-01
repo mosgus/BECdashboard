@@ -13,9 +13,9 @@ import {
 import type { JSX } from 'react'
 import type { CalChartData } from '../lib/capm'
 
-export default function CapmChart({ data }: { data: CalChartData }): JSX.Element {
+export default function CapmChart({ data, size = 'inline' }: { data: CalChartData; size?: 'inline' | 'expanded' }): JSX.Element {
   return (
-    <div className="h-[22rem]">
+    <div className={size === 'expanded' ? 'h-[70vh]' : 'h-[22rem]'}>
       <ResponsiveContainer width="100%" height="100%">
         <ScatterChart>
           <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />

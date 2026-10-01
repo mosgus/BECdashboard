@@ -5,6 +5,7 @@ import { capmPortfolio, getUniverse } from '../../../api/client'
 import type { CapmResponse } from '../../../api/client'
 import { CapmGuide } from './CapmGuide'
 import { HelpButton } from '../../../components/GuidePanel'
+import { ExpandableChart } from '../../../components/ExpandableChart'
 import { DownloadIcon } from '../../../components/DownloadIcon'
 import { Tooltip } from '../../../components/Tooltip'
 import { downloadTextFile } from '../../../lib/download'
@@ -576,7 +577,9 @@ function Results({
             </div>
           }
         >
-          <CapmChart data={calChartData(response)} />
+          <ExpandableChart title="Risk vs return: Capital Allocation Line">
+            {(expanded) => <CapmChart data={calChartData(response)} size={expanded ? 'expanded' : 'inline'} />}
+          </ExpandableChart>
         </Suspense>
       </div>
     </div>

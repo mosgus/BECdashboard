@@ -2,6 +2,7 @@ import { priceChange } from './change'
 import type { ChangeDirection } from './change'
 
 export const MAX_CHART_POINTS = 400
+export const EXPANDED_CHART_POINTS = 1200
 
 export interface RangeReturn {
   label: string

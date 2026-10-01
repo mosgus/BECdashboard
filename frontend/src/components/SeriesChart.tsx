@@ -1,10 +1,11 @@
 import type { JSX } from 'react'
 import { Area, Bar, CartesianGrid, ComposedChart, Legend, Line, ReferenceArea, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import type { IndicatorsResponse } from '../api/client'
-import { downsample, priceDomain, rangeReturn, snapRange } from '../lib/chart'
+import { downsample, EXPANDED_CHART_POINTS, priceDomain, rangeReturn, snapRange } from '../lib/chart'
 import type { ChangeDirection } from '../lib/change'
 import type { ShadedRange } from '../lib/chart'
 import { formatPrice } from '../lib/format'
+import { ExpandableChart } from './ExpandableChart'
 import { Tooltip as HoverTooltip } from './Tooltip'
 
 export interface SeriesPoint {
@@ -116,154 +117,196 @@ export default function SeriesChart({ title, valueName, points, indicators, form
       typeof lower === 'number' && typeof upper === 'number' ? [lower, upper] : null
     return point
   })
-  const renderedData = downsample(chartData)
+  const inlineData = downsample(chartData)
+  const expandedData = downsample(chartData, EXPANDED_CHART_POINTS)
   const netReturn = rangeReturn(points)
-  const shadedRange = shaded === undefined ? null : snapRange(renderedData.map((row) => row.date), shaded.from, shaded.to)
-  const priceYDomain = priceDomain(renderedData)
   const showAdxPane = seriesByKey.has('adx')
   const showStochasticPane = seriesByKey.has('stochastic_k')
   const showObvPane = seriesByKey.has('obv')
 
+  function renderNetReturn(): JSX.Element | null {
+    if (netReturn === null) return null
+    return (
+      <HoverTooltip label="Change in the line from the first to the last date shown. Uses adjusted closes, so dividends are included. No fees or taxes.">
+        <span className="text-xs text-[var(--color-muted)]">
+          Net return{' '}
+          <span className={`text-sm font-semibold tabular-nums ${RETURN_COLOR[netReturn.direction]}`}>{netReturn.label}</span>
+        </span>
+      </HoverTooltip>
+    )
+  }
+
+  function renderPricePane(data: ChartPoint[], heightClass: string): JSX.Element {
+    const shadedRange = shaded === undefined ? null : snapRange(data.map((row) => row.date), shaded.from, shaded.to)
+    const priceYDomain = priceDomain(data)
+    return (
+      <div className={heightClass}>
+        <ResponsiveContainer width="100%" height="100%">
+          <ComposedChart data={data} margin={{ top: 8, right: 8, bottom: 4, left: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
+            {shadedRange !== null && shaded !== undefined && <ReferenceArea x1={shadedRange[0]} x2={shadedRange[1]} fill="var(--color-muted)" fillOpacity={0.12} label={{ value: shaded.label, position: 'insideTopLeft', fontSize: 10, fill: 'var(--color-muted)' }} />}
+            <ChartXAxis />
+            <ChartYAxis domain={priceYDomain} tickFormatter={formatValue} width={valueAxisWidth} />
+            <Tooltip content={<ChartTooltip format={formatValue} />} />
+            <Legend />
+            <Area
+              type="monotone"
+              dataKey="value"
+              name={valueName}
+              stroke="var(--color-primary)"
+              strokeWidth={1.6}
+              fill="var(--color-primary)"
+              fillOpacity={0.06}
+              dot={false}
+              isAnimationActive={false}
+            />
+            {seriesByKey.has('sma_fast') && <Line type="monotone" dataKey="sma_fast" name={seriesName('sma_fast')} stroke="var(--color-accent)" strokeWidth={1.5} strokeDasharray="4 2" dot={false} isAnimationActive={false} />}
+            {seriesByKey.has('sma_slow') && <Line type="monotone" dataKey="sma_slow" name={seriesName('sma_slow')} stroke="var(--color-negative)" strokeWidth={1.5} strokeDasharray="6 3" dot={false} isAnimationActive={false} />}
+            {seriesByKey.has('ema_fast') && <Line type="monotone" dataKey="ema_fast" name={seriesName('ema_fast')} stroke="var(--color-accent)" strokeWidth={1.4} dot={false} isAnimationActive={false} />}
+            {seriesByKey.has('ema_slow') && <Line type="monotone" dataKey="ema_slow" name={seriesName('ema_slow')} stroke="var(--color-accent)" strokeWidth={1.2} strokeDasharray="5 3" dot={false} isAnimationActive={false} />}
+            {seriesByKey.has('bollinger_upper') && <Area type="monotone" dataKey="bollinger_band" name="Bollinger (20, 2σ)" stroke="none" fill="var(--color-muted)" fillOpacity={0.14} dot={false} isAnimationActive={false} legendType="none" />}
+            {seriesByKey.has('bollinger_middle') && <Line type="monotone" dataKey="bollinger_middle" name={seriesName('bollinger_middle')} stroke="var(--color-muted)" strokeWidth={1.2} dot={false} isAnimationActive={false} />}
+            {seriesByKey.has('donchian_upper') && <Line type="monotone" dataKey="donchian_upper" name={seriesName('donchian_upper')} stroke="var(--color-positive)" strokeWidth={1.1} strokeDasharray="4 2" dot={false} isAnimationActive={false} />}
+            {seriesByKey.has('donchian_mid') && <Line type="monotone" dataKey="donchian_mid" name={seriesName('donchian_mid')} stroke="var(--color-positive)" strokeWidth={1.1} strokeDasharray="2 2" dot={false} isAnimationActive={false} />}
+            {seriesByKey.has('donchian_lower') && <Line type="monotone" dataKey="donchian_lower" name={seriesName('donchian_lower')} stroke="var(--color-positive)" strokeWidth={1.1} strokeDasharray="4 2" dot={false} isAnimationActive={false} />}
+          </ComposedChart>
+        </ResponsiveContainer>
+      </div>
+    )
+  }
+
+  function renderRsiPane(data: ChartPoint[], heightClass: string): JSX.Element {
+    return (
+      <div className={heightClass}>
+        <ResponsiveContainer width="100%" height="100%">
+          <ComposedChart data={data} margin={{ top: 4, right: 8, bottom: 4, left: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
+            <ChartXAxis />
+            <ChartYAxis domain={[0, 100]} width={40} tickFormatter={(value) => String(value)} />
+            <Tooltip content={<ChartTooltip format={(value) => value.toFixed(2)} />} />
+            <ReferenceLine y={70} stroke="var(--color-negative)" strokeDasharray="4 2" label={{ value: 'OB 70', fontSize: 10 }} />
+            <ReferenceLine y={30} stroke="var(--color-positive)" strokeDasharray="4 2" label={{ value: 'OS 30', fontSize: 10 }} />
+            {seriesByKey.has('rsi') && <Line type="monotone" dataKey="rsi" name={seriesName('rsi')} stroke="var(--color-primary)" strokeWidth={1.5} dot={false} isAnimationActive={false} />}
+          </ComposedChart>
+        </ResponsiveContainer>
+      </div>
+    )
+  }
+
+  function renderMacdPane(data: ChartPoint[], heightClass: string): JSX.Element {
+    return (
+      <div className={heightClass}>
+        <ResponsiveContainer width="100%" height="100%">
+          <ComposedChart data={data} margin={{ top: 4, right: 8, bottom: 4, left: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
+            <ChartXAxis />
+            <ChartYAxis domain={['auto', 'auto']} width={valueAxisWidth} tickFormatter={formatValue} />
+            <Tooltip content={<ChartTooltip format={(value) => value.toFixed(2)} />} />
+            <ReferenceLine y={0} stroke="var(--color-border)" />
+            {seriesByKey.has('macd_histogram') && <Bar dataKey="macd_histogram" name={seriesName('macd_histogram')} fill="var(--color-muted)" radius={[1, 1, 0, 0]} isAnimationActive={false} />}
+            {seriesByKey.has('macd_line') && <Line type="monotone" dataKey="macd_line" name={seriesName('macd_line')} stroke="var(--color-primary)" strokeWidth={1.5} dot={false} isAnimationActive={false} />}
+            {seriesByKey.has('macd_signal') && <Line type="monotone" dataKey="macd_signal" name={seriesName('macd_signal')} stroke="var(--color-accent)" strokeWidth={1.5} strokeDasharray="4 2" dot={false} isAnimationActive={false} />}
+          </ComposedChart>
+        </ResponsiveContainer>
+      </div>
+    )
+  }
+
+  function renderAdxPane(data: ChartPoint[], heightClass: string): JSX.Element {
+    return (
+      <div className={heightClass}>
+        <ResponsiveContainer width="100%" height="100%">
+          <ComposedChart data={data} margin={{ top: 4, right: 8, bottom: 4, left: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
+            <ChartXAxis />
+            <ChartYAxis domain={[0, 100]} width={40} tickFormatter={(value) => String(value)} />
+            <Tooltip content={<ChartTooltip format={(value) => value.toFixed(2)} />} />
+            <ReferenceLine y={25} stroke="var(--color-accent)" strokeDasharray="4 2" label={{ value: 'Trending 25', fontSize: 10 }} />
+            <Line type="monotone" dataKey="adx" name={seriesName('adx')} stroke="var(--color-primary)" strokeWidth={1.4} dot={false} isAnimationActive={false} />
+          </ComposedChart>
+        </ResponsiveContainer>
+      </div>
+    )
+  }
+
+  function renderStochasticPane(data: ChartPoint[], heightClass: string): JSX.Element {
+    return (
+      <div className={heightClass}>
+        <ResponsiveContainer width="100%" height="100%">
+          <ComposedChart data={data} margin={{ top: 4, right: 8, bottom: 4, left: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
+            <ChartXAxis />
+            <ChartYAxis domain={[0, 100]} width={40} tickFormatter={(value) => String(value)} />
+            <Tooltip content={<ChartTooltip format={(value) => value.toFixed(2)} />} />
+            <ReferenceLine y={80} stroke="var(--color-negative)" strokeDasharray="4 2" label={{ value: 'OB 80', fontSize: 10 }} />
+            <ReferenceLine y={20} stroke="var(--color-positive)" strokeDasharray="4 2" label={{ value: 'OS 20', fontSize: 10 }} />
+            <Line type="monotone" dataKey="stochastic_k" name={seriesName('stochastic_k')} stroke="var(--color-accent)" strokeWidth={1.4} dot={false} isAnimationActive={false} />
+            <Line type="monotone" dataKey="stochastic_d" name={seriesName('stochastic_d')} stroke="var(--color-accent)" strokeWidth={1.1} strokeDasharray="4 2" dot={false} isAnimationActive={false} />
+          </ComposedChart>
+        </ResponsiveContainer>
+      </div>
+    )
+  }
+
+  function renderObvPane(data: ChartPoint[], heightClass: string): JSX.Element {
+    return (
+      <div className={heightClass}>
+        <ResponsiveContainer width="100%" height="100%">
+          <ComposedChart data={data} margin={{ top: 4, right: 8, bottom: 4, left: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
+            <ChartXAxis />
+            <ChartYAxis domain={['auto', 'auto']} width={72} tickFormatter={(value) => `${(value / 1_000_000).toFixed(1)}M`} />
+            <Tooltip content={<ChartTooltip format={(value) => `${(value / 1_000_000).toFixed(1)}M`} />} />
+            <Line type="monotone" dataKey="obv" name={seriesName('obv')} stroke="var(--color-positive)" strokeWidth={1.4} dot={false} isAnimationActive={false} />
+          </ComposedChart>
+        </ResponsiveContainer>
+      </div>
+    )
+  }
+
   return (
     <div className="space-y-4">
-      <div>
-        <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
-          <h3 className="text-sm font-semibold">{title}</h3>
-          {netReturn !== null && (
-            <HoverTooltip label="Change in the line from the first to the last date shown. Uses adjusted closes, so dividends are included. No fees or taxes.">
-              <span className="text-xs text-[var(--color-muted)]">
-                Net return{' '}
-                <span className={`text-sm font-semibold tabular-nums ${RETURN_COLOR[netReturn.direction]}`}>{netReturn.label}</span>
-              </span>
-            </HoverTooltip>
-          )}
-        </div>
-        <div className="h-[22rem]">
-          <ResponsiveContainer width="100%" height="100%">
-            <ComposedChart data={renderedData} margin={{ top: 8, right: 8, bottom: 4, left: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
-              {shadedRange !== null && shaded !== undefined && <ReferenceArea x1={shadedRange[0]} x2={shadedRange[1]} fill="var(--color-muted)" fillOpacity={0.12} label={{ value: shaded.label, position: 'insideTopLeft', fontSize: 10, fill: 'var(--color-muted)' }} />}
-              <ChartXAxis />
-              <ChartYAxis domain={priceYDomain} tickFormatter={formatValue} width={valueAxisWidth} />
-              <Tooltip content={<ChartTooltip format={formatValue} />} />
-              <Legend />
-              <Area
-                type="monotone"
-                dataKey="value"
-                name={valueName}
-                stroke="var(--color-primary)"
-                strokeWidth={1.6}
-                fill="var(--color-primary)"
-                fillOpacity={0.06}
-                dot={false}
-                isAnimationActive={false}
-              />
-              {seriesByKey.has('sma_fast') && <Line type="monotone" dataKey="sma_fast" name={seriesName('sma_fast')} stroke="var(--color-accent)" strokeWidth={1.5} strokeDasharray="4 2" dot={false} isAnimationActive={false} />}
-              {seriesByKey.has('sma_slow') && <Line type="monotone" dataKey="sma_slow" name={seriesName('sma_slow')} stroke="var(--color-negative)" strokeWidth={1.5} strokeDasharray="6 3" dot={false} isAnimationActive={false} />}
-              {seriesByKey.has('ema_fast') && <Line type="monotone" dataKey="ema_fast" name={seriesName('ema_fast')} stroke="var(--color-accent)" strokeWidth={1.4} dot={false} isAnimationActive={false} />}
-              {seriesByKey.has('ema_slow') && <Line type="monotone" dataKey="ema_slow" name={seriesName('ema_slow')} stroke="var(--color-accent)" strokeWidth={1.2} strokeDasharray="5 3" dot={false} isAnimationActive={false} />}
-              {seriesByKey.has('bollinger_upper') && <Area type="monotone" dataKey="bollinger_band" name="Bollinger (20, 2σ)" stroke="none" fill="var(--color-muted)" fillOpacity={0.14} dot={false} isAnimationActive={false} legendType="none" />}
-              {seriesByKey.has('bollinger_middle') && <Line type="monotone" dataKey="bollinger_middle" name={seriesName('bollinger_middle')} stroke="var(--color-muted)" strokeWidth={1.2} dot={false} isAnimationActive={false} />}
-              {seriesByKey.has('donchian_upper') && <Line type="monotone" dataKey="donchian_upper" name={seriesName('donchian_upper')} stroke="var(--color-positive)" strokeWidth={1.1} strokeDasharray="4 2" dot={false} isAnimationActive={false} />}
-              {seriesByKey.has('donchian_mid') && <Line type="monotone" dataKey="donchian_mid" name={seriesName('donchian_mid')} stroke="var(--color-positive)" strokeWidth={1.1} strokeDasharray="2 2" dot={false} isAnimationActive={false} />}
-              {seriesByKey.has('donchian_lower') && <Line type="monotone" dataKey="donchian_lower" name={seriesName('donchian_lower')} stroke="var(--color-positive)" strokeWidth={1.1} strokeDasharray="4 2" dot={false} isAnimationActive={false} />}
-            </ComposedChart>
-          </ResponsiveContainer>
-        </div>
-      </div>
+      <ExpandableChart
+        title={title}
+        expandButtonAboveHeader
+        header={<><h3 className="text-sm font-semibold">{title}</h3>{renderNetReturn()}</>}
+      >
+        {(expanded) =>
+          expanded ? (
+            <>
+              <div className="mb-2 flex justify-end">{renderNetReturn()}</div>
+              {renderPricePane(expandedData, 'h-[70vh]')}
+            </>
+          ) : renderPricePane(inlineData, 'h-[22rem]')}
+      </ExpandableChart>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <div>
-          <h3 className="mb-2 text-sm font-semibold">RSI (14)</h3>
-          <div className="h-[12rem]">
-            <ResponsiveContainer width="100%" height="100%">
-              <ComposedChart data={renderedData} margin={{ top: 4, right: 8, bottom: 4, left: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
-                <ChartXAxis />
-                <ChartYAxis domain={[0, 100]} width={40} tickFormatter={(value) => String(value)} />
-                <Tooltip content={<ChartTooltip format={(value) => value.toFixed(2)} />} />
-                <ReferenceLine y={70} stroke="var(--color-negative)" strokeDasharray="4 2" label={{ value: 'OB 70', fontSize: 10 }} />
-                <ReferenceLine y={30} stroke="var(--color-positive)" strokeDasharray="4 2" label={{ value: 'OS 30', fontSize: 10 }} />
-                {seriesByKey.has('rsi') && <Line type="monotone" dataKey="rsi" name={seriesName('rsi')} stroke="var(--color-primary)" strokeWidth={1.5} dot={false} isAnimationActive={false} />}
-              </ComposedChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-
-        <div>
-          <h3 className="mb-2 text-sm font-semibold">MACD (12, 26, 9)</h3>
-          <div className="h-[12rem]">
-            <ResponsiveContainer width="100%" height="100%">
-              <ComposedChart data={renderedData} margin={{ top: 4, right: 8, bottom: 4, left: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
-                <ChartXAxis />
-                <ChartYAxis domain={['auto', 'auto']} width={valueAxisWidth} tickFormatter={formatValue} />
-                <Tooltip content={<ChartTooltip format={(value) => value.toFixed(2)} />} />
-                <ReferenceLine y={0} stroke="var(--color-border)" />
-                {seriesByKey.has('macd_histogram') && <Bar dataKey="macd_histogram" name={seriesName('macd_histogram')} fill="var(--color-muted)" radius={[1, 1, 0, 0]} isAnimationActive={false} />}
-                {seriesByKey.has('macd_line') && <Line type="monotone" dataKey="macd_line" name={seriesName('macd_line')} stroke="var(--color-primary)" strokeWidth={1.5} dot={false} isAnimationActive={false} />}
-                {seriesByKey.has('macd_signal') && <Line type="monotone" dataKey="macd_signal" name={seriesName('macd_signal')} stroke="var(--color-accent)" strokeWidth={1.5} strokeDasharray="4 2" dot={false} isAnimationActive={false} />}
-              </ComposedChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
+        <ExpandableChart title="RSI (14)" header={<h3 className="text-sm font-semibold">RSI (14)</h3>}>
+          {(expanded) => renderRsiPane(expanded ? expandedData : inlineData, expanded ? 'h-[70vh]' : 'h-[12rem]')}
+        </ExpandableChart>
+        <ExpandableChart title="MACD (12, 26, 9)" header={<h3 className="text-sm font-semibold">MACD (12, 26, 9)</h3>}>
+          {(expanded) => renderMacdPane(expanded ? expandedData : inlineData, expanded ? 'h-[70vh]' : 'h-[12rem]')}
+        </ExpandableChart>
       </div>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         {showAdxPane && (
-          <div>
-            <h3 className="mb-2 text-sm font-semibold">ADX (14) — Trend Strength</h3>
-            <div className="h-[12rem]">
-              <ResponsiveContainer width="100%" height="100%">
-                <ComposedChart data={renderedData} margin={{ top: 4, right: 8, bottom: 4, left: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
-                  <ChartXAxis />
-                  <ChartYAxis domain={[0, 100]} width={40} tickFormatter={(value) => String(value)} />
-                  <Tooltip content={<ChartTooltip format={(value) => value.toFixed(2)} />} />
-                  <ReferenceLine y={25} stroke="var(--color-accent)" strokeDasharray="4 2" label={{ value: 'Trending 25', fontSize: 10 }} />
-                  <Line type="monotone" dataKey="adx" name={seriesName('adx')} stroke="var(--color-primary)" strokeWidth={1.4} dot={false} isAnimationActive={false} />
-                </ComposedChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
+          <ExpandableChart title="ADX (14) — Trend Strength" header={<h3 className="text-sm font-semibold">ADX (14) — Trend Strength</h3>}>
+            {(expanded) => renderAdxPane(expanded ? expandedData : inlineData, expanded ? 'h-[70vh]' : 'h-[12rem]')}
+          </ExpandableChart>
         )}
 
         {showStochasticPane && (
-          <div>
-            <h3 className="mb-2 text-sm font-semibold">Stochastic (14, 3, 3)</h3>
-            <div className="h-[12rem]">
-              <ResponsiveContainer width="100%" height="100%">
-                <ComposedChart data={renderedData} margin={{ top: 4, right: 8, bottom: 4, left: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
-                  <ChartXAxis />
-                  <ChartYAxis domain={[0, 100]} width={40} tickFormatter={(value) => String(value)} />
-                  <Tooltip content={<ChartTooltip format={(value) => value.toFixed(2)} />} />
-                  <ReferenceLine y={80} stroke="var(--color-negative)" strokeDasharray="4 2" label={{ value: 'OB 80', fontSize: 10 }} />
-                  <ReferenceLine y={20} stroke="var(--color-positive)" strokeDasharray="4 2" label={{ value: 'OS 20', fontSize: 10 }} />
-                  <Line type="monotone" dataKey="stochastic_k" name={seriesName('stochastic_k')} stroke="var(--color-accent)" strokeWidth={1.4} dot={false} isAnimationActive={false} />
-                  <Line type="monotone" dataKey="stochastic_d" name={seriesName('stochastic_d')} stroke="var(--color-accent)" strokeWidth={1.1} strokeDasharray="4 2" dot={false} isAnimationActive={false} />
-                </ComposedChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
+          <ExpandableChart title="Stochastic (14, 3, 3)" header={<h3 className="text-sm font-semibold">Stochastic (14, 3, 3)</h3>}>
+            {(expanded) => renderStochasticPane(expanded ? expandedData : inlineData, expanded ? 'h-[70vh]' : 'h-[12rem]')}
+          </ExpandableChart>
         )}
       </div>
 
       {showObvPane && (
-        <div>
-          <h3 className="mb-2 text-sm font-semibold">On-Balance Volume (OBV)</h3>
-          <div className="h-[12rem]">
-            <ResponsiveContainer width="100%" height="100%">
-              <ComposedChart data={renderedData} margin={{ top: 4, right: 8, bottom: 4, left: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
-                <ChartXAxis />
-                <ChartYAxis domain={['auto', 'auto']} width={72} tickFormatter={(value) => `${(value / 1_000_000).toFixed(1)}M`} />
-                <Tooltip content={<ChartTooltip format={(value) => `${(value / 1_000_000).toFixed(1)}M`} />} />
-                <Line type="monotone" dataKey="obv" name={seriesName('obv')} stroke="var(--color-positive)" strokeWidth={1.4} dot={false} isAnimationActive={false} />
-              </ComposedChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
+        <ExpandableChart title="On-Balance Volume (OBV)" header={<h3 className="text-sm font-semibold">On-Balance Volume (OBV)</h3>}>
+          {(expanded) => renderObvPane(expanded ? expandedData : inlineData, expanded ? 'h-[70vh]' : 'h-[12rem]')}
+        </ExpandableChart>
       )}
     </div>
   )

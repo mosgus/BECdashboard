@@ -4,6 +4,7 @@ import { useParams } from 'react-router-dom'
 import { getUniverse, optimizePortfolio } from '../../api/client'
 import type { OptimizeResponse } from '../../api/client'
 import { DownloadIcon } from '../../components/DownloadIcon'
+import { ExpandableChart } from '../../components/ExpandableChart'
 import { OptimizerGuide } from '../../components/OptimizerGuide'
 import { Tooltip } from '../../components/Tooltip'
 import {
@@ -501,7 +502,9 @@ function OptimizeResults({
         </p>
         <div className="mt-3">
           <Suspense fallback={<p className="h-[22rem] flex items-center justify-center text-sm text-[var(--color-muted)]">Loading chart…</p>}>
-            <OptimizeChart rows={curveRows(response.curves)} hasBenchmark={response.curves.benchmark !== null} />
+            <ExpandableChart title="Return: Current vs Optimized">
+              {(expanded) => <OptimizeChart rows={curveRows(response.curves)} hasBenchmark={response.curves.benchmark !== null} size={expanded ? 'expanded' : 'inline'} />}
+            </ExpandableChart>
           </Suspense>
         </div>
       </div>
