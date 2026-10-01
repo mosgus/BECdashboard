@@ -10,6 +10,7 @@ import {
   buildOptimizeRequest,
   canOptimize,
   cashAfterDeploy,
+  cashSplit,
   curveRows,
   deployedInvestedValue,
   formatChangePp,
@@ -64,6 +65,44 @@ const DOLLAR_PORTFOLIO: Portfolio = {
 }
 const CLOSES = new Map<string, number | null>([['AAA', 45], ['BBB', 13.5], ['YNG', 45]])
 const DOLLAR_BASIS = { kind: 'dollar', investedValue: 900, prices: { AAA: 45, BBB: 13.5, YNG: 45 }, shares: { AAA: 10, BBB: 20, YNG: 4 } } as const
+const SHARES_BASED: Portfolio = {
+  id: 'sb', name: 'Shares', cashWeight: 10, cashDollars: 100, updatedAt: '2026-09-30T00:00:00.000Z',
+  positions: [{ ticker: 'AAA', weight: 45, shares: 10 }, { ticker: 'BBB', weight: 45, shares: 30 }],
+}
+const SB_CLOSES = new Map<string, number | null>([['AAA', 45], ['BBB', 15]])
+const SB_RESPONSE = { tickers: ['AAA', 'BBB'], target_weights: { AAA: 0.6, BBB: 0.4 }, feasible: true }
+
+describe('cashSplit', () => {
+  it('uses fixed cash dollars to size deployed holdings', () => {
+    const split = cashSplit(900, 10, 5, 100)
+    expect(split.cashBeforeDollars).toBeCloseTo(100, 6)
+    expect(split.cashAfterDollars).toBeCloseTo(50, 6)
+    expect(split.sizedValue).toBeCloseTo(950, 6)
+  })
+
+  it('uses cash dollars when the percentage snapshot has drifted', () => {
+    const split = cashSplit(900, 12, 6, 100)
+    expect(split.cashBeforeDollars).toBeCloseTo(100, 6)
+    expect(split.cashAfterDollars).toBeCloseTo(50, 6)
+    expect(split.sizedValue).toBeCloseTo(950, 6)
+    expect(split.sizedValue).not.toBeCloseTo(961.363636, 6)
+  })
+
+  it('infers cash from percentages when fixed dollars are absent', () => {
+    const split = cashSplit(900, 10, 5)
+    expect(split.cashBeforeDollars).toBeCloseTo(100, 6)
+    expect(split.cashAfterDollars).toBeCloseTo(50, 6)
+    expect(split.sizedValue).toBeCloseTo(950, 6)
+    expect(split.sizedValue).toBeCloseTo(deployedInvestedValue(900, 10, 5), 6)
+  })
+
+  it('handles zero cash and zero cash weight', () => {
+    const split = cashSplit(900, 0, 0, 0)
+    expect(split.cashBeforeDollars).toBe(0)
+    expect(split.cashAfterDollars).toBe(0)
+    expect(split.sizedValue).toBeCloseTo(900, 6)
+  })
+})
 
 describe('buildOptimizeRequest', () => {
   it('builds the default request from a portfolio', () => {
@@ -197,6 +236,72 @@ describe('applyPlan', () => {
   })
 })
 
+describe('applyPlan for shares-based portfolios', () => {
+  it('uses stored cash dollars rather than the drifted cash percentage snapshot', () => {
+    const portfolio: Portfolio = { ...SHARES_BASED, cashWeight: 12, positions: SHARES_BASED.positions.map((position) => ({ ...position, weight: 44 })) }
+    const plan = applyPlan(portfolio, SB_RESPONSE, SB_CLOSES, 6)
+    if (!plan.ok) throw new Error(plan.reason)
+    expect(plan.portfolio.cashDollars).toBeCloseTo(50, 6)
+    expect(plan.portfolio.positions[0].shares).toBeCloseTo(12.666667, 6)
+    expect(plan.portfolio.positions[1].shares).toBeCloseTo(25.333333, 6)
+  })
+
+  it('keeps cash dollars and sizes shares from dollars when no cash is deployed', () => {
+    const plan = applyPlan(SHARES_BASED, SB_RESPONSE, SB_CLOSES)
+    if (!plan.ok) throw new Error(plan.reason)
+    expect(plan.sharesMode).toBe('recomputed')
+    expect(plan.portfolio.cashDollars).toBeCloseTo(100, 6)
+    expect(plan.portfolio.cashWeight).toBe(10)
+    expect(plan.portfolio.positions[0].shares).toBeCloseTo(12, 6)
+    expect(plan.portfolio.positions[1].shares).toBeCloseTo(24, 6)
+    expect(plan.portfolio.positions.map((position) => position.weight)).toEqual([54, 36])
+  })
+
+  it('reduces cash dollars and adds the deployed amount to the holdings', () => {
+    const plan = applyPlan(SHARES_BASED, SB_RESPONSE, SB_CLOSES, 5)
+    if (!plan.ok) throw new Error(plan.reason)
+    expect(plan.portfolio.cashDollars).toBeCloseTo(50, 6)
+    expect(plan.portfolio.positions[0].shares).toBeCloseTo(12.666667, 6)
+    expect(plan.portfolio.positions[1].shares).toBeCloseTo(25.333333, 6)
+    expect(plan.portfolio.positions.map((position) => position.weight)).toEqual([57, 38])
+    expect(applyConfirmLines(plan)).toContain('Cash will be $50.00 and stays fixed; weights are re-marked from share counts at the next price load.')
+    expect(applyConfirmLines(plan).at(-1)).toBe('There is no undo.')
+  })
+
+  it('keeps a present zero cashDollars value when all cash is deployed', () => {
+    const plan = applyPlan(SHARES_BASED, SB_RESPONSE, SB_CLOSES, 0)
+    if (!plan.ok) throw new Error(plan.reason)
+    expect(plan.portfolio.cashDollars).toBeCloseTo(0, 6)
+    expect(plan.portfolio.positions[0].shares).toBeCloseTo(13.333333, 6)
+    expect(plan.portfolio.positions[1].shares).toBeCloseTo(26.666667, 6)
+  })
+
+  it('sizes only retained holdings and preserves cash when a target is zero', () => {
+    const plan = applyPlan(SHARES_BASED, { ...SB_RESPONSE, target_weights: { AAA: 1, BBB: 0 } }, SB_CLOSES)
+    if (!plan.ok) throw new Error(plan.reason)
+    expect(plan.portfolio.positions.map((position) => position.ticker)).toEqual(['AAA'])
+    expect(plan.portfolio.positions[0].shares).toBeCloseTo(20, 6)
+    expect(plan.portfolio.cashDollars).toBeCloseTo(100, 6)
+    expect(plan.removed).toEqual(['BBB'])
+  })
+
+  it('keeps weight-based portfolios on the existing deployment path', () => {
+    const { cashDollars: _cashDollars, ...weightBased } = SHARES_BASED
+    const plan = applyPlan(weightBased, SB_RESPONSE, SB_CLOSES, 5)
+    if (!plan.ok) throw new Error(plan.reason)
+    expect('cashDollars' in plan.portfolio).toBe(false)
+    expect(plan.portfolio.positions[0].shares).toBeCloseTo(12.666667, 6)
+  })
+
+  it('drops cashDollars when incomplete shares cause share counts to be cleared', () => {
+    const portfolio = { ...SHARES_BASED, positions: [SHARES_BASED.positions[0], { ticker: 'BBB', weight: 45 }] }
+    const plan = applyPlan(portfolio, SB_RESPONSE, SB_CLOSES)
+    if (!plan.ok) throw new Error(plan.reason)
+    expect(plan.sharesMode).toBe('cleared')
+    expect('cashDollars' in plan.portfolio).toBe(false)
+  })
+})
+
 describe('trades and exports', () => {
   it('calculates share and dollar trades from the response', () => {
     const rows = tradeRows(RESPONSE, DOLLAR_BASIS)
@@ -234,6 +339,24 @@ describe('trades and exports', () => {
     expect(optimizeCsv(RESPONSE, DOLLAR_BASIS)).toBe(
       'ticker,price,current_shares,current_value,current_pct,target_shares,target_value,target_pct,trade_shares,trade_value,change_pp,pinned\nAAA,45,10,450,50,12.4,558,62,2.4,108,12,false\nBBB,13.5,20,270,30,12,162,18,-8,-108,-12,false\nYNG,45,4,180,20,4,180,20,0,0,0,true\n',
     )
+  })
+
+  it('exports target shares using the same fixed cash dollars as Apply', () => {
+    const response: OptimizeResponse = {
+      ...RESPONSE,
+      tickers: ['AAA', 'BBB'],
+      current_weights: { AAA: 0.5, BBB: 0.5 },
+      target_weights: { AAA: 0.6, BBB: 0.4 },
+      implied_trades: { AAA: 0.1, BBB: -0.1 },
+      pinned: [],
+    }
+    const basis = { kind: 'dollar', investedValue: 900, prices: { AAA: 45, BBB: 15 }, shares: { AAA: 10, BBB: 30 } } as const
+    const portfolio: Portfolio = { ...SHARES_BASED, cashWeight: 12, positions: SHARES_BASED.positions.map((position) => ({ ...position, weight: 44 })) }
+    const applied = applyPlan(portfolio, response, SB_CLOSES, 6)
+    if (!applied.ok) throw new Error(applied.reason)
+    const csv = optimizeCsv(response, basis, 12, 6, 100)
+    const aaaCsv = csv.split('\n').find((row) => row.startsWith('AAA,'))?.split(',')
+    expect(Number(aaaCsv?.[5])).toBeCloseTo(applied.portfolio.positions[0].shares!, 6)
   })
 
   it('exports the weights table shape', () => {

@@ -1,6 +1,24 @@
 import { describe, expect, it } from 'vitest'
 import type { UniverseEntry } from '../api/client'
-import { addPositionDiluting, cashFromPositions, creationCashDollars, impliedPortfolioValue, isValidCurrentPortfolio, migrateLegacyPortfolio, remarkPortfolio, removePositionToCash, summariseDraft, switchEntryMode, valuePortfolio, weightFromShares } from './portfolio'
+import {
+  addPositionBuying,
+  addPositionDiluting,
+  cashFromPositions,
+  creationCashDollars,
+  impliedPortfolioValue,
+  isValidCurrentPortfolio,
+  migrateLegacyPortfolio,
+  remarkPortfolio,
+  removePositionSelling,
+  removePositionToCash,
+  sellPositionWeight,
+  sellSliderMax,
+  summariseDraft,
+  switchEntryMode,
+  valuePortfolio,
+  weightFromShares,
+  withCashDollars,
+} from './portfolio'
 import type { DraftRow, DraftSummary, ModeSwitch, Portfolio } from './portfolio'
 
 function portfolio(cashWeight: number, positions: Portfolio['positions']): Portfolio {
@@ -102,6 +120,329 @@ describe('shares-based portfolios', () => {
     expect(creationCashDollars('shares', null, base, prices)).toBeUndefined()
     expect(creationCashDollars('weight', null, { ...base, cashDollars: undefined }, prices)).toBeCloseTo(100, 6)
     expect(creationCashDollars('weight', null, { ...base, cashDollars: undefined, positions: [base.positions[0], { ticker: 'BBB', weight: 45 }] }, prices)).toBeUndefined()
+  })
+})
+
+describe('withCashDollars', () => {
+  const base: Portfolio = {
+    ...portfolio(10, [{ ticker: 'AAA', weight: 45, shares: 10 }, { ticker: 'BBB', weight: 45, shares: 30 }]),
+    cashDollars: 100,
+  }
+  const prices = new Map([['AAA', { ...entry(45), ticker: 'AAA' }], ['BBB', { ...entry(15), ticker: 'BBB' }]])
+
+  it('sets fixed cash and re-marks the weights', () => {
+    const result = withCashDollars(base, 1100, prices)
+
+    expect(result?.positions[0].weight).toBeCloseTo(22.5, 6)
+    expect(result?.positions[1].weight).toBeCloseTo(22.5, 6)
+    expect(result?.cashWeight).toBeCloseTo(55, 6)
+    expect(result?.cashDollars).toBe(1100)
+    expect(result?.updatedAt).toBe(base.updatedAt)
+  })
+
+  it('allows zero fixed cash', () => {
+    const result = withCashDollars(base, 0, prices)
+
+    expect(result?.positions[0].weight).toBeCloseTo(50, 6)
+    expect(result?.positions[1].weight).toBeCloseTo(50, 6)
+    expect(result?.cashWeight).toBeCloseTo(0, 6)
+    expect(result?.cashDollars).toBe(0)
+  })
+
+  it('rejects invalid dollars, weight-based portfolios, and unusable prices', () => {
+    const { cashDollars: _cashDollars, ...weightBased } = base
+
+    expect(withCashDollars(base, -1, prices)).toBeNull()
+    expect(withCashDollars(base, Number.NaN, prices)).toBeNull()
+    expect(withCashDollars(base, Number.POSITIVE_INFINITY, prices)).toBeNull()
+    expect(withCashDollars(weightBased, 100, prices)).toBeNull()
+    expect(withCashDollars(base, 100, new Map([...prices, ['BBB', { ...entry(null), ticker: 'BBB' }]]))).toBeNull()
+  })
+
+  it('keeps an all-cash portfolio at 100% cash', () => {
+    const result = withCashDollars({ ...base, cashWeight: 100, positions: [], cashDollars: 50 }, 75, prices)
+
+    expect(result?.cashDollars).toBe(75)
+    expect(result?.cashWeight).toBe(100)
+    expect(result?.positions).toEqual([])
+  })
+
+  it('does not mutate the input', () => {
+    const before = structuredClone(base)
+
+    withCashDollars(base, 1100, prices)
+
+    expect(base).toEqual(before)
+  })
+})
+
+describe('removePositionSelling', () => {
+  const base: Portfolio = {
+    ...portfolio(10, [{ ticker: 'AAA', weight: 45, shares: 10 }, { ticker: 'BBB', weight: 45, shares: 30 }]),
+    cashDollars: 100,
+  }
+  const prices = new Map([['AAA', { ...entry(45), ticker: 'AAA' }], ['BBB', { ...entry(15), ticker: 'BBB' }]])
+
+  it('sells at the current price into fixed cash and re-marks remaining weights', () => {
+    const result = removePositionSelling(base, 'AAA', prices)
+
+    expect(result?.positions).toHaveLength(1)
+    expect(result?.positions[0].ticker).toBe('BBB')
+    expect(result?.cashDollars).toBeCloseTo(550, 6)
+    expect(result?.positions[0].weight).toBeCloseTo(45, 6)
+    expect(result?.cashWeight).toBeCloseTo(55, 6)
+    expect(result?.updatedAt).toBe(base.updatedAt)
+  })
+
+  it('uses the current sale price when it differs from the saved mark', () => {
+    const changed = new Map([...prices, ['AAA', { ...entry(55), ticker: 'AAA' }]])
+    const result = removePositionSelling(base, 'AAA', changed)
+
+    expect(result?.cashDollars).toBeCloseTo(650, 6)
+    expect(result?.positions[0].weight).toBeCloseTo(40.909091, 6)
+    expect(result?.cashWeight).toBeCloseTo(59.090909, 6)
+  })
+
+  it('keeps all proceeds in cash after removing the final holding', () => {
+    const first = removePositionSelling(base, 'AAA', prices)!
+    const result = removePositionSelling(first, 'BBB', prices)
+
+    expect(result?.positions).toEqual([])
+    expect(result?.cashWeight).toBe(100)
+    expect(result?.cashDollars).toBeCloseTo(1000, 6)
+  })
+
+  it('returns null when the sold or remaining holding has no usable price', () => {
+    expect(removePositionSelling(base, 'AAA', new Map([...prices, ['AAA', { ...entry(null), ticker: 'AAA' }]]))).toBeNull()
+    expect(removePositionSelling(base, 'AAA', new Map([...prices, ['BBB', { ...entry(null), ticker: 'BBB' }]]))).toBeNull()
+  })
+
+  it('returns null for weight-based portfolios and unheld tickers', () => {
+    const { cashDollars: _cashDollars, ...weightBased } = base
+
+    expect(removePositionSelling(weightBased, 'AAA', prices)).toBeNull()
+    expect(removePositionSelling(base, 'CCC', prices)).toBeNull()
+  })
+
+  it('does not mutate the input', () => {
+    const before = structuredClone(base)
+
+    removePositionSelling(base, 'AAA', prices)
+
+    expect(base).toEqual(before)
+  })
+})
+
+describe('sellPositionWeight', () => {
+  const base: Portfolio = {
+    ...portfolio(10, [
+      { ticker: 'AAA', weight: 45, shares: 10 },
+      { ticker: 'BBB', weight: 45, shares: 30 },
+    ]),
+    cashDollars: 100,
+  }
+  const prices = new Map([
+    ['AAA', { ...entry(45), ticker: 'AAA' }],
+    ['BBB', { ...entry(15), ticker: 'BBB' }],
+  ])
+
+  it('sells portfolio weight and re-marks the shares portfolio', () => {
+    const before = structuredClone(base)
+    const result = sellPositionWeight(base, 'AAA', 15, prices)
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.soldAll).toBe(false)
+    expect(result.holdingWeight).toBeCloseTo(45, 6)
+    expect(result.sharesSold).toBeCloseTo(10 / 3, 6)
+    expect(result.proceeds).toBeCloseTo(150, 6)
+    expect(result.portfolio.cashDollars).toBeCloseTo(250, 6)
+    expect(result.portfolio.positions.find((position) => position.ticker === 'AAA')?.shares).toBeCloseTo(20 / 3, 6)
+    expect(result.portfolio.positions.find((position) => position.ticker === 'AAA')?.weight).toBeCloseTo(30, 6)
+    expect(result.portfolio.positions.find((position) => position.ticker === 'BBB')?.weight).toBeCloseTo(45, 6)
+    expect(result.portfolio.cashWeight).toBeCloseTo(25, 6)
+    expect(result.portfolio.updatedAt).toBe(base.updatedAt)
+    expect(base).toEqual(before)
+  })
+
+  it.each([45, 45.5, Number.POSITIVE_INFINITY])('sells all at weight %s', (weight) => {
+    const result = sellPositionWeight(base, 'AAA', weight, prices)
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.soldAll).toBe(true)
+    expect(result.sharesSold).toBe(10)
+    expect(result.holdingWeight).toBeCloseTo(45, 6)
+    expect(result.portfolio.positions.some((position) => position.ticker === 'AAA')).toBe(false)
+    expect(result.portfolio.cashDollars).toBeCloseTo(550, 6)
+    expect(result.portfolio.positions.find((position) => position.ticker === 'BBB')?.weight).toBeCloseTo(45, 6)
+    expect(result.portfolio.cashWeight).toBeCloseTo(55, 6)
+  })
+
+  it('uses the remarked holding weight when stored weights are stale', () => {
+    const stalePrices = new Map([
+      ['AAA', { ...entry(90), ticker: 'AAA' }],
+      ['BBB', { ...entry(15), ticker: 'BBB' }],
+    ])
+    const result = sellPositionWeight(base, 'AAA', 10, stalePrices)
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.holdingWeight).toBeCloseTo(900 / 1450 * 100, 6)
+    expect(result.proceeds).toBeCloseTo(145, 6)
+    expect(result.sharesSold).toBeCloseTo(145 / 90, 6)
+    expect(result.portfolio.positions.find((position) => position.ticker === 'AAA')?.weight).toBeCloseTo(755 / 1450 * 100, 6)
+    expect(result.portfolio.cashDollars).toBeCloseTo(245, 6)
+  })
+
+  it('sells the only holding entirely', () => {
+    const only: Portfolio = {
+      ...portfolio(10, [{ ticker: 'AAA', weight: 90, shares: 10 }]),
+      cashDollars: 50,
+    }
+    const result = sellPositionWeight(only, 'AAA', 90, prices)
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.portfolio.positions).toEqual([])
+    expect(result.portfolio.cashWeight).toBeCloseTo(100, 6)
+    expect(result.portfolio.cashDollars).toBeCloseTo(500, 6)
+  })
+
+  it('rejects invalid requests and distinguishes missing prices', () => {
+    for (const weight of [0, -1, Number.NaN]) {
+      expect(sellPositionWeight(base, 'AAA', weight, prices)).toEqual({ ok: false, reason: 'invalid' })
+    }
+    expect(sellPositionWeight(base, 'ZZZ', 1, prices)).toEqual({ ok: false, reason: 'invalid' })
+    const noCash = { ...base }
+    delete noCash.cashDollars
+    expect(sellPositionWeight(noCash, 'AAA', 1, prices)).toEqual({ ok: false, reason: 'invalid' })
+    expect(sellPositionWeight(base, 'AAA', 1, new Map([
+      ['AAA', { ...entry(null), ticker: 'AAA' }], ['BBB', prices.get('BBB')!],
+    ]))).toEqual({ ok: false, reason: 'no-price' })
+    expect(sellPositionWeight(base, 'AAA', 1, new Map([
+      ['AAA', prices.get('AAA')!], ['BBB', { ...entry(null), ticker: 'BBB' }],
+    ]))).toEqual({ ok: false, reason: 'unpriced-holding' })
+  })
+
+  it('rounds slider maxima up to the next hundredth point', () => {
+    expect(sellSliderMax(5.07)).toBe(5.07)
+    expect(sellSliderMax(5.071)).toBe(5.08)
+    expect(sellSliderMax(45)).toBe(45)
+    expect(sellSliderMax(0.002)).toBe(0.01)
+    expect(sellSliderMax(45.0000000001)).toBe(45)
+  })
+})
+
+describe('addPositionBuying', () => {
+  const base: Portfolio = {
+    ...portfolio(10, [{ ticker: 'AAA', weight: 45, shares: 10 }, { ticker: 'BBB', weight: 45, shares: 30 }]),
+    cashDollars: 100,
+  }
+  const prices = new Map([
+    ['AAA', { ...entry(45), ticker: 'AAA' }],
+    ['BBB', { ...entry(15), ticker: 'BBB' }],
+    ['CCC', { ...entry(20), ticker: 'CCC' }],
+  ])
+
+  it('buys shares from cash and re-marks the portfolio', () => {
+    const result = addPositionBuying(base, 'CCC', 4, prices)
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.cost).toBeCloseTo(80, 6)
+    expect(result.portfolio.cashDollars).toBeCloseTo(20, 6)
+    expect(result.portfolio.positions.find((position) => position.ticker === 'AAA')?.weight).toBeCloseTo(45, 6)
+    expect(result.portfolio.positions.find((position) => position.ticker === 'BBB')?.weight).toBeCloseTo(45, 6)
+    expect(result.portfolio.positions.find((position) => position.ticker === 'CCC')?.weight).toBeCloseTo(8, 6)
+    expect(result.portfolio.positions.find((position) => position.ticker === 'CCC')?.shares).toBe(4)
+    expect(result.portfolio.cashWeight).toBeCloseTo(2, 6)
+    expect(result.portfolio.updatedAt).toBe(base.updatedAt)
+  })
+
+  it('spends all cash when the purchase costs exactly the cash balance', () => {
+    const result = addPositionBuying(base, 'CCC', 5, prices)
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.portfolio.cashDollars).toBeCloseTo(0, 6)
+    expect(result.portfolio.cashWeight).toBeCloseTo(0, 6)
+    expect(result.portfolio.positions.find((position) => position.ticker === 'CCC')?.weight).toBeCloseTo(10, 6)
+  })
+
+  it('clamps cash to zero for a purchase within the half-cent tolerance', () => {
+    const result = addPositionBuying(base, 'CCC', 5.0002, prices)
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.portfolio.cashDollars).toBe(0)
+  })
+
+  it('rejects purchases that exceed available cash', () => {
+    expect(addPositionBuying(base, 'CCC', 6, prices)).toEqual({ ok: false, reason: 'insufficient-cash' })
+  })
+
+  it('rejects a new ticker without a usable price', () => {
+    const noCccPrice = new Map([...prices, ['CCC', { ...entry(null), ticker: 'CCC' }]])
+    expect(addPositionBuying(base, 'CCC', 1, noCccPrice)).toEqual({ ok: false, reason: 'no-price' })
+  })
+
+  it('rejects a buy when an existing holding cannot be re-marked', () => {
+    const noBbbPrice = new Map([...prices, ['BBB', { ...entry(null), ticker: 'BBB' }]])
+    expect(addPositionBuying(base, 'CCC', 1, noBbbPrice)).toEqual({ ok: false, reason: 'unpriced-holding' })
+  })
+
+  it('buys more shares of an existing holding without adding a duplicate', () => {
+    const result = addPositionBuying(base, 'AAA', 2, prices)
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.cost).toBeCloseTo(90, 6)
+    expect(result.portfolio.cashDollars).toBeCloseTo(10, 6)
+    expect(result.portfolio.positions.find((position) => position.ticker === 'AAA')?.shares).toBe(12)
+    expect(result.portfolio.positions.find((position) => position.ticker === 'BBB')?.shares).toBe(30)
+    expect(result.portfolio.positions.find((position) => position.ticker === 'AAA')?.weight).toBeCloseTo(54, 6)
+    expect(result.portfolio.positions.find((position) => position.ticker === 'BBB')?.weight).toBeCloseTo(45, 6)
+    expect(result.portfolio.cashWeight).toBeCloseTo(1, 6)
+    expect(result.portfolio.positions).toHaveLength(2)
+    expect(result.portfolio.updatedAt).toBe(base.updatedAt)
+  })
+
+  it('rejects a held-ticker purchase that exceeds available cash', () => {
+    expect(addPositionBuying(base, 'AAA', 3, prices)).toEqual({ ok: false, reason: 'insufficient-cash' })
+  })
+
+  it('rejects a top-up when another holding cannot be re-marked', () => {
+    const noBbbPrice = new Map([...prices, ['BBB', { ...entry(null), ticker: 'BBB' }]])
+    expect(addPositionBuying(base, 'AAA', 1, noBbbPrice)).toEqual({ ok: false, reason: 'unpriced-holding' })
+  })
+
+  it('rejects a top-up when the held ticker has no usable price', () => {
+    const noAaaPrice = new Map([...prices, ['AAA', { ...entry(null), ticker: 'AAA' }]])
+    expect(addPositionBuying(base, 'AAA', 1, noAaaPrice)).toEqual({ ok: false, reason: 'no-price' })
+  })
+
+  it.each([0, -1, Number.NaN])('rejects invalid share count %s', (shares) => {
+    expect(addPositionBuying(base, 'CCC', shares, prices)).toEqual({ ok: false, reason: 'invalid' })
+  })
+
+  it('rejects a weight-based portfolio', () => {
+    const { cashDollars: _cashDollars, ...weightBased } = base
+    expect(addPositionBuying(weightBased, 'CCC', 1, prices)).toEqual({ ok: false, reason: 'invalid' })
+  })
+
+  it('buys from an all-cash shares-based portfolio', () => {
+    const allCash: Portfolio = { ...base, cashWeight: 100, cashDollars: 100, positions: [] }
+    const result = addPositionBuying(allCash, 'CCC', 4, prices)
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.portfolio.positions[0].weight).toBeCloseTo(80, 6)
+    expect(result.portfolio.cashWeight).toBeCloseTo(20, 6)
+    expect(result.portfolio.cashDollars).toBeCloseTo(20, 6)
+  })
+
+  it('does not mutate the input portfolio', () => {
+    const before = structuredClone(base)
+    addPositionBuying(base, 'CCC', 4, prices)
+    expect(base).toEqual(before)
+  })
+
+  it('does not mutate the input when topping up a held ticker', () => {
+    const before = structuredClone(base)
+    addPositionBuying(base, 'AAA', 2, prices)
+    expect(base).toEqual(before)
   })
 })
 

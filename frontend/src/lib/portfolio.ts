@@ -248,6 +248,18 @@ export function remarkPortfolio(portfolio: Portfolio, byTicker: Map<string, Univ
   return isValidCurrentPortfolio(remarked) ? remarked : null
 }
 
+/** Set a shares-based portfolio's fixed cash and re-mark its weights at the given prices (contract 0130).
+ *  Null when the portfolio isn't shares-based, the amount is invalid, or a price is unusable. */
+export function withCashDollars(
+  portfolio: Portfolio,
+  dollars: number,
+  byTicker: Map<string, UniverseEntry>,
+): Portfolio | null {
+  if (!isValidCurrentPortfolio(portfolio) || !isSharesBased(portfolio) || !isFiniteNonNegative(dollars)) return null
+  if (portfolio.positions.length === 0) return { ...portfolio, cashDollars: dollars, cashWeight: 100 }
+  return remarkPortfolio({ ...portfolio, cashDollars: dollars }, byTicker)
+}
+
 /** Derive total value from a fully specified shares portfolio without making it allocation truth. */
 export function impliedPortfolioValue(
   portfolio: Portfolio,
@@ -331,6 +343,108 @@ export function removePositionToCash(portfolio: Portfolio, ticker: string): Port
     positions,
     updatedAt: portfolio.updatedAt,
   }
+}
+
+/** Sell a shares-based holding at its current price into fixed cash, then re-mark (contract 0131).
+ *  Null when the portfolio isn't shares-based, the ticker isn't held, or a needed price is unusable. */
+export function removePositionSelling(
+  portfolio: Portfolio,
+  ticker: string,
+  byTicker: Map<string, UniverseEntry>,
+): Portfolio | null {
+  if (!isValidCurrentPortfolio(portfolio) || !isSharesBased(portfolio)) return null
+  const position = portfolio.positions.find((candidate) => candidate.ticker === ticker)
+  if (position === undefined) return null
+  const price = positionPrice(byTicker.get(ticker))
+  if (!isFinitePositive(price)) return null
+  const proceeds = position.shares! * price
+  if (!isFinitePositive(proceeds)) return null
+
+  const base = removePositionToCash(portfolio, ticker)
+  if (base === null) return null
+  return withCashDollars({ ...base, cashDollars: 0 }, portfolio.cashDollars! + proceeds, byTicker)
+}
+
+export const SELL_STEP = 0.01
+
+/** Slider max for selling a holding: its weight rounded up to the next SELL_STEP (contract 0137). */
+export function sellSliderMax(weight: number): number {
+  return Math.max(SELL_STEP, Math.ceil(weight / SELL_STEP - 1e-9 / SELL_STEP) * SELL_STEP)
+}
+
+export type SellResult =
+  | { ok: true; portfolio: Portfolio; sharesSold: number; proceeds: number; soldAll: boolean; holdingWeight: number }
+  | { ok: false; reason: 'invalid' | 'no-price' | 'unpriced-holding' }
+
+/** Sell `sellWeight` points of portfolio weight of a shares-based holding at current prices into
+ *  fixed cash, then re-mark. At or above the holding's weight, sells all of it (contract 0137). */
+export function sellPositionWeight(
+  portfolio: Portfolio,
+  ticker: string,
+  sellWeight: number,
+  byTicker: Map<string, UniverseEntry>,
+): SellResult {
+  if (!isValidCurrentPortfolio(portfolio) || !isSharesBased(portfolio) || !(sellWeight > 0) || !portfolio.positions.some((position) => position.ticker === ticker)) {
+    return { ok: false, reason: 'invalid' }
+  }
+  const price = positionPrice(byTicker.get(ticker))
+  if (!isFinitePositive(price)) return { ok: false, reason: 'no-price' }
+  const marked = remarkPortfolio(portfolio, byTicker)
+  if (marked === null) return { ok: false, reason: 'unpriced-holding' }
+  const holdingWeight = marked.positions.find((position) => position.ticker === ticker)!.weight
+  const held = portfolio.positions.find((position) => position.ticker === ticker)!
+  if (sellWeight >= holdingWeight - 1e-9) {
+    const next = removePositionSelling(portfolio, ticker, byTicker)
+    if (next === null) return { ok: false, reason: 'unpriced-holding' }
+    return { ok: true, portfolio: next, sharesSold: held.shares!, proceeds: held.shares! * price, soldAll: true, holdingWeight }
+  }
+  const sharesSold = held.shares! * sellWeight / holdingWeight
+  const proceeds = sharesSold * price
+  const positions = portfolio.positions.map((position) => position.ticker === ticker
+    ? { ...position, shares: position.shares! - sharesSold }
+    : position)
+  const next = withCashDollars({ ...portfolio, positions }, portfolio.cashDollars! + proceeds, byTicker)
+  if (next === null) return { ok: false, reason: 'unpriced-holding' }
+  return { ok: true, portfolio: next, sharesSold, proceeds, soldAll: false, holdingWeight }
+}
+
+
+export type BuyResult =
+  | { ok: true; portfolio: Portfolio; cost: number }
+  | { ok: false; reason: 'invalid' | 'no-price' | 'insufficient-cash' | 'unpriced-holding' }
+
+/** Buy a holding (new or already held) in a shares-based portfolio with its fixed cash, then
+ *  re-mark (contracts 0135, 0136). */
+export function addPositionBuying(
+  portfolio: Portfolio,
+  ticker: string,
+  shares: number,
+  byTicker: Map<string, UniverseEntry>,
+): BuyResult {
+  if (!isValidCurrentPortfolio(portfolio) || !isSharesBased(portfolio) || ticker === '' || !isFinitePositive(shares)) {
+    return { ok: false, reason: 'invalid' }
+  }
+  const held = portfolio.positions.some((position) => position.ticker === ticker)
+  const price = positionPrice(byTicker.get(ticker))
+  if (!isFinitePositive(price)) return { ok: false, reason: 'no-price' }
+  const cost = shares * price
+  if (!isFinitePositive(cost)) return { ok: false, reason: 'invalid' }
+  if (cost > portfolio.cashDollars! + 0.005) return { ok: false, reason: 'insufficient-cash' }
+
+  const cashAfter = Math.max(0, portfolio.cashDollars! - cost)
+  if (held) {
+    const positions = portfolio.positions.map((position) =>
+      position.ticker === ticker ? { ...position, shares: position.shares! + shares } : position)
+    const next = withCashDollars({ ...portfolio, positions }, cashAfter, byTicker)
+    if (next === null) return { ok: false, reason: 'unpriced-holding' }
+    return { ok: true, portfolio: next, cost }
+  }
+
+  const base = addPositionDiluting(portfolio, { ticker, weight: 1, shares })
+  if (base === null) return { ok: false, reason: 'invalid' }
+  const next = withCashDollars({ ...base, cashDollars: 0 }, cashAfter, byTicker)
+  if (next === null) return { ok: false, reason: 'unpriced-holding' }
+  return { ok: true, portfolio: next, cost }
 }
 
 export function weightOf(value: number | null, totalValue: number): number | null {

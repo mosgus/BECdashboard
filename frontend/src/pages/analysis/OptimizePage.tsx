@@ -12,7 +12,7 @@ import {
   applyConfirmLines,
   applyPlan,
   cashAfterDeploy,
-  deployedInvestedValue,
+  cashSplit,
   LOOKBACK_OPTIONS,
   OPTIMIZE_MODES,
   REBALANCE_OPTIONS,
@@ -358,7 +358,7 @@ function OptimizeResults({
   response: OptimizeResponse
   settings: OptimizeSettings
   liveSettings: OptimizeSettings
-  portfolio: { cashWeight: number; name: string }
+  portfolio: { cashWeight: number; name: string; cashDollars?: number }
   basis: TradeBasis
   plan: ApplyPlan
   applied: boolean
@@ -369,9 +369,9 @@ function OptimizeResults({
   onOpenApply: () => void
 }): JSX.Element {
   const rows = portfolioShareRows(weightRows(response), portfolio.cashWeight, cashAfter)
-  const total = basis.kind === 'dollar' ? basis.investedValue / ((100 - portfolio.cashWeight) / 100) : null
+  const split = basis.kind === 'dollar' ? cashSplit(basis.investedValue, portfolio.cashWeight, cashAfter, portfolio.cashDollars) : null
   const dollarRows = basis.kind === 'dollar'
-    ? portfolioShareRows(tradeRows(response, basis, deployedInvestedValue(basis.investedValue, portfolio.cashWeight, cashAfter)), portfolio.cashWeight, cashAfter)
+    ? portfolioShareRows(tradeRows(response, basis, split!.sizedValue), portfolio.cashWeight, cashAfter)
     : null
   const note = scoreWindowNote(response)
 
@@ -417,7 +417,7 @@ function OptimizeResults({
             <Tooltip label="Download this table as a CSV">
               <button
                 type="button"
-                onClick={() => downloadTextFile(optimizeCsvFilename(portfolio.name, response.mode, new Date()), optimizeCsv(response, basis, portfolio.cashWeight, cashAfter), 'text/csv;charset=utf-8')}
+                onClick={() => downloadTextFile(optimizeCsvFilename(portfolio.name, response.mode, new Date()), optimizeCsv(response, basis, portfolio.cashWeight, cashAfter, portfolio.cashDollars), 'text/csv;charset=utf-8')}
                 className="inline-flex items-center gap-2 text-sm font-medium px-4 py-2 rounded-[var(--radius-btn)] bg-brand-surface border border-brand-border text-[var(--color-muted)] hover:bg-brand-border hover:text-foreground"
               >
                 <DownloadIcon />
@@ -466,12 +466,12 @@ function OptimizeResults({
                   const tradeSharesText = formatSignedShares(row.tradeShares)
                   const tradeMoneyText = formatSignedMoney(row.tradeValue)
                   return <tr key={row.ticker}><TickerCell row={row} /><td className={`${TD} text-right tabular-nums whitespace-nowrap`}>{formatPrice(row.price)}</td><td className={`${TD} text-right tabular-nums whitespace-nowrap`}>{formatShares(row.currentShares)}</td><td className={`${TD} text-right tabular-nums whitespace-nowrap`}>{formatMoney(row.currentValue)}</td><td className={`${TD} text-right tabular-nums whitespace-nowrap`}>{formatWeight(row.current)}</td><td className={`${TD} text-right tabular-nums whitespace-nowrap`}>{formatShares(row.targetShares)}</td><td className={`${TD} text-right tabular-nums whitespace-nowrap`}>{formatMoney(row.targetValue)}</td><td className={`${TD} text-right tabular-nums whitespace-nowrap`}>{formatWeight(row.target)}</td><td className={`${TD} text-right tabular-nums whitespace-nowrap ${changeColor(tradeSharesText)}`}>{tradeSharesText}</td><td className={`${TD} text-right tabular-nums whitespace-nowrap ${changeColor(tradeMoneyText)}`}>{tradeMoneyText}</td><td className={`${TD} text-right tabular-nums whitespace-nowrap ${changeColor(changeText)}`}>{changeText}</td></tr>
-                })}{portfolio.cashWeight > 0 && total !== null && <DollarCashRow cashWeight={portfolio.cashWeight} cashAfter={cashAfter} total={total} />}</tbody>
+                })}{portfolio.cashWeight > 0 && split !== null && <DollarCashRow cashWeight={portfolio.cashWeight} cashAfter={cashAfter} beforeDollars={split.cashBeforeDollars} afterDollars={split.cashAfterDollars} />}</tbody>
               </>
             )}
           </table>
         </div>
-        <p className="mt-3 text-xs text-[var(--color-muted)]">{tradeBasisNote(basis, basis.kind === 'dollar' && total !== null ? total * (portfolio.cashWeight - cashAfter) / 100 : 0)}</p>
+        <p className="mt-3 text-xs text-[var(--color-muted)]">{tradeBasisNote(basis, split === null ? 0 : split.cashBeforeDollars - split.cashAfterDollars)}</p>
         {applyError !== null && <p className="mt-3 text-sm text-brand-negative">{applyError}</p>}
       </div>
 
@@ -521,18 +521,18 @@ function WeightCashRow({ cashWeight, cashAfter }: { cashWeight: number; cashAfte
   )
 }
 
-function DollarCashRow({ cashWeight, cashAfter, total }: { cashWeight: number; cashAfter: number; total: number }): JSX.Element {
-  const tradeMoneyText = formatSignedMoney(total * (cashAfter - cashWeight) / 100)
+function DollarCashRow({ cashWeight, cashAfter, beforeDollars, afterDollars }: { cashWeight: number; cashAfter: number; beforeDollars: number; afterDollars: number }): JSX.Element {
+  const tradeMoneyText = formatSignedMoney(afterDollars - beforeDollars)
   const changeText = formatChangePp((cashAfter - cashWeight) / 100)
   return (
     <tr>
       <td className={`${TD} font-mono text-xs font-semibold whitespace-nowrap`}>Cash</td>
       <td className={`${TD} text-right tabular-nums whitespace-nowrap`}>—</td>
       <td className={`${TD} text-right tabular-nums whitespace-nowrap`}>—</td>
-      <td className={`${TD} text-right tabular-nums whitespace-nowrap`}>{formatMoney(total * cashWeight / 100)}</td>
+      <td className={`${TD} text-right tabular-nums whitespace-nowrap`}>{formatMoney(beforeDollars)}</td>
       <td className={`${TD} text-right tabular-nums whitespace-nowrap`}>{formatWeight(cashWeight / 100)}</td>
       <td className={`${TD} text-right tabular-nums whitespace-nowrap`}>—</td>
-      <td className={`${TD} text-right tabular-nums whitespace-nowrap`}>{formatMoney(total * cashAfter / 100)}</td>
+      <td className={`${TD} text-right tabular-nums whitespace-nowrap`}>{formatMoney(afterDollars)}</td>
       <td className={`${TD} text-right tabular-nums whitespace-nowrap`}>{formatWeight(cashAfter / 100)}</td>
       <td className={`${TD} text-right tabular-nums whitespace-nowrap`}>—</td>
       <td className={`${TD} text-right tabular-nums whitespace-nowrap ${changeColor(tradeMoneyText)}`}>{tradeMoneyText}</td>

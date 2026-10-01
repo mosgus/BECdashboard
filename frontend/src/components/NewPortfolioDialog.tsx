@@ -46,7 +46,7 @@ export function NewPortfolioDialog({ universe, onCancel, onCreate }: NewPortfoli
   const holdable = universe.filter((entry) => isHoldableType(entry.quote_type))
   const byTicker = new Map(holdable.map((entry) => [entry.ticker, entry]))
   const summary = summariseDraft({ name, mode, cash: cashText, rows }, byTicker)
-  const pristine = name.trim() === '' && cashText === '' && rows.length === 0
+  const pristine = cashText === '' && rows.length === 0
   const tickerOnlyDrop = mode === 'weight' && droppedRows.every((row) => row.weightPct === null)
 
   /** Apply a parsed CSV (or a future catalog selection) to the dialog's draft state. The only path

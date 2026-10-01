@@ -6,8 +6,9 @@ import type { UniverseEntry } from '../api/client'
 import { AddPositionForm } from '../components/AddPositionForm'
 import { NewPortfolioDialog } from '../components/NewPortfolioDialog'
 import { PositionsTable } from '../components/PositionsTable'
+import { SellPositionDialog } from '../components/SellPositionDialog'
 import { Tooltip } from '../components/Tooltip'
-import { addPositionDiluting, migrateLegacyPortfolio, removePositionToCash, valuePortfolio } from '../lib/portfolio'
+import { addPositionDiluting, isSharesBased, migrateLegacyPortfolio, removePositionSelling, removePositionToCash, sellPositionWeight, valuePortfolio, withCashDollars } from '../lib/portfolio'
 import type { Portfolio, Position, StoredPortfolio } from '../lib/portfolio'
 import { downloadTextFile } from '../lib/download'
 import { portfolioCsvFilename, serializePortfolioCsv } from '../lib/portfolioCsv'
@@ -32,6 +33,8 @@ export function PortfoliosPage(): JSX.Element {
   const [composerOpen, setComposerOpen] = useState(false)
   const [cashText, setCashText] = useState('')
   const [cashProblem, setCashProblem] = useState<string | null>(null)
+  const [positionNotice, setPositionNotice] = useState<string | null>(null)
+  const [sellTicker, setSellTicker] = useState<string | null>(null)
 
   useEffect(() => {
     getUniverse()
@@ -60,6 +63,7 @@ export function PortfoliosPage(): JSX.Element {
 
   const selected = portfolios.find((portfolio) => portfolio.id === selectedId) ?? null
   const current = isCurrentPortfolio(selected) ? selected : null
+  const sharesBased = current !== null && isSharesBased(current)
   const universeEntries = universeState.status === 'ready' ? universeState.entries : []
   const actualByTicker = new Map(universeEntries.map((entry) => [entry.ticker, entry]))
   const displayByTicker = universeState.status === 'ready'
@@ -68,11 +72,17 @@ export function PortfoliosPage(): JSX.Element {
   const valued = current === null ? null : valuePortfolio(current, displayByTicker)
 
   useEffect(() => {
-    setCashText(current === null ? '' : String(current.cashWeight))
+    const value = current === null ? null : sharesBased ? current.cashDollars : current.cashWeight
+    if (cashText.trim() === '' || Number(cashText) !== value) setCashText(value === null ? '' : String(value))
     setCashProblem(null)
-    // The editor owns its text between keystrokes; reseed when the selected portfolio or its cash changes.
+    // The editor owns its text between keystrokes; reseed only when its selected saved cash changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [current?.id, current?.cashWeight])
+  }, [current?.id, sharesBased, sharesBased ? current?.cashDollars : current?.cashWeight])
+
+  useEffect(() => {
+    setPositionNotice(null)
+    setSellTicker(null)
+  }, [current?.id])
 
   function persist(next: Portfolio): void {
     savePortfolio(next)
@@ -96,6 +106,26 @@ export function PortfoliosPage(): JSX.Element {
   function handleCashTextChange(text: string): void {
     setCashText(text)
     if (current === null) return
+
+    if (sharesBased) {
+      const parsed = text.trim() === '' ? null : Number(text)
+      if (parsed === null || !Number.isFinite(parsed) || parsed < 0) {
+        setCashProblem('Cash must be a dollar amount of 0 or more.')
+        return
+      }
+      if (universeState.status !== 'ready') {
+        setCashProblem('Current prices are needed to update the weights. Try again once the Universe has loaded.')
+        return
+      }
+      const next = withCashDollars(current, parsed, actualByTicker)
+      if (next === null) {
+        setCashProblem('Every holding needs a current price to update the weights.')
+        return
+      }
+      setCashProblem(null)
+      persist(next)
+      return
+    }
 
     const parsed = text.trim() === '' ? null : Number(text)
     if (parsed === null || !Number.isFinite(parsed) || parsed < 0 || parsed > 100) {
@@ -148,8 +178,36 @@ export function PortfoliosPage(): JSX.Element {
 
   function handleRemovePosition(ticker: string): void {
     if (current === null) return
+    if (!sharesBased) {
+      const next = removePositionToCash(current, ticker)
+      if (next !== null) persist(next)
+      setPositionNotice(null)
+      return
+    }
+    if (universeState.status !== 'ready') {
+      setPositionNotice(`Current prices are needed to sell ${ticker} into cash. Try again once the Universe has loaded.`)
+      return
+    }
+    const sold = removePositionSelling(current, ticker, actualByTicker)
+    if (sold !== null) {
+      persist(sold)
+      setPositionNotice(null)
+      return
+    }
     const next = removePositionToCash(current, ticker)
-    if (next !== null) persist(next)
+    if (next !== null) {
+      persist(next)
+      setPositionNotice(`${ticker} was removed by weight because a current price was missing, so this portfolio is now weight-based. Set its cash in dollars again by re-importing its shares.`)
+    }
+  }
+
+  function handleRequestRemove(ticker: string): void {
+    if (current !== null && sharesBased && universeState.status === 'ready'
+      && sellPositionWeight(current, ticker, Number.POSITIVE_INFINITY, actualByTicker).ok) {
+      setSellTicker(ticker)
+      return
+    }
+    handleRemovePosition(ticker)
   }
 
   function handleDeletePortfolio(): void {
@@ -281,19 +339,24 @@ export function PortfoliosPage(): JSX.Element {
 
                       <div className="flex flex-wrap items-center gap-2 mb-4">
                         <span className="text-sm text-[var(--color-muted)]">Cash</span>
-                        <Tooltip label="Share of this allocation kept in cash.">
+                        {sharesBased && <span className="text-sm text-[var(--color-muted)]">$</span>}
+                        <Tooltip label={sharesBased
+                          ? 'Cash held in dollars. Holding weights are recalculated from share counts and current prices.'
+                          : 'Share of this allocation kept in cash.'}
+                        >
                           <input
                             type="number"
                             inputMode="decimal"
                             min="0"
-                            max="100"
+                            max={sharesBased ? undefined : '100'}
                             step="any"
                             value={cashText}
                             onChange={(event) => handleCashTextChange(event.target.value)}
+                            disabled={sharesBased && universeState.status !== 'ready'}
                             className="text-sm px-3 py-1.5 w-32 rounded-[var(--radius-btn)] border border-brand-border bg-brand-surface text-foreground no-spinners"
                           />
                         </Tooltip>
-                        <span className="text-sm text-[var(--color-muted)]">%</span>
+                        {!sharesBased && <span className="text-sm text-[var(--color-muted)]">%</span>}
                         {cashProblem && <span className="text-sm text-brand-negative">{cashProblem}</span>}
                       </div>
 
@@ -301,7 +364,9 @@ export function PortfoliosPage(): JSX.Element {
                         <AddPositionForm
                           universe={universeState.entries}
                           portfolio={current}
+                          sharesBased={sharesBased}
                           onAdd={handleAddPosition}
+                          onBuy={persist}
                         />
                       )}
                       {universeState.status === 'loading' && (
@@ -320,7 +385,21 @@ export function PortfoliosPage(): JSX.Element {
                       </p>
                     )}
 
-                    <PositionsTable valued={valued} onRemove={handleRemovePosition} />
+                    {positionNotice !== null && <p className="text-sm text-brand-negative mb-3">{positionNotice}</p>}
+                    <PositionsTable valued={valued} onRemove={handleRequestRemove} />
+                    {sellTicker !== null && current !== null && (
+                      <SellPositionDialog
+                        portfolio={current}
+                        ticker={sellTicker}
+                        byTicker={actualByTicker}
+                        onConfirm={(next) => {
+                          persist(next)
+                          setSellTicker(null)
+                          setPositionNotice(null)
+                        }}
+                        onCancel={() => setSellTicker(null)}
+                      />
+                    )}
                   </>
                 ) : null}
               </div>

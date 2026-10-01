@@ -92,6 +92,19 @@ export function deployedInvestedValue(investedValue: number, cashWeight: number,
   return investedValue * (100 - cashAfter) / (100 - cashWeight)
 }
 
+export interface CashSplit { cashBeforeDollars: number; cashAfterDollars: number; sizedValue: number }
+
+/** Dollars in cash before and after deployment, and the invested value to size targets on (contract 0134).
+ *  Uses fixed cash dollars when present; otherwise infers cash from the percentage. */
+export function cashSplit(investedValue: number, cashWeight: number, cashAfter: number, cashDollars?: number): CashSplit {
+  if (cashDollars !== undefined) {
+    const cashAfterDollars = cashWeight > 0 ? cashDollars * cashAfter / cashWeight : cashDollars
+    return { cashBeforeDollars: cashDollars, cashAfterDollars, sizedValue: investedValue + cashDollars - cashAfterDollars }
+  }
+  const total = cashWeight < 100 ? investedValue / ((100 - cashWeight) / 100) : 0
+  return { cashBeforeDollars: total * cashWeight / 100, cashAfterDollars: total * cashAfter / 100, sizedValue: deployedInvestedValue(investedValue, cashWeight, cashAfter) }
+}
+
 export function portfolioShareRows<T extends WeightRow>(rows: T[], cashWeight: number, cashAfter: number): T[] {
   return rows.map((row) => ({
     ...row,
@@ -126,14 +139,16 @@ export function applyPlan(portfolio: Portfolio, response: ApplySource, lastClose
   const investedValue = sharesMode === 'recomputed'
     ? portfolio.positions.reduce((sum, position) => sum + position.shares! * prices[position.ticker], 0)
     : 0
+  const cashDollars = sharesMode === 'recomputed' ? portfolio.cashDollars : undefined
+  const split = cashSplit(investedValue, portfolio.cashWeight, cashAfter, cashDollars)
   const positions = kept.map((position) => {
     const fraction = response.target_weights[position.ticker] / targetTotal
     const weight = fraction * (100 - cashAfter)
     return sharesMode === 'recomputed'
-      ? { ticker: position.ticker, weight, shares: fraction * deployedInvestedValue(investedValue, portfolio.cashWeight, cashAfter) / prices[position.ticker] }
+      ? { ticker: position.ticker, weight, shares: fraction * split.sizedValue / prices[position.ticker] }
       : { ticker: position.ticker, weight }
   })
-  const next: Portfolio = { id: portfolio.id, name: portfolio.name, cashWeight: cashAfter, positions, updatedAt: portfolio.updatedAt }
+  const next: Portfolio = { id: portfolio.id, name: portfolio.name, cashWeight: cashAfter, positions, updatedAt: portfolio.updatedAt, ...(cashDollars === undefined ? {} : { cashDollars: split.cashAfterDollars }) }
   if (!isValidCurrentPortfolio(next)) return { ok: false, reason: 'invalid' }
   return { ok: true, portfolio: next, sharesMode, removed }
 }
@@ -151,6 +166,7 @@ export function applyConfirmLines(plan: Extract<ApplyPlan, { ok: true }>, column
     ? `Holdings weights will be replaced by the ${column} column, scaled up to use cash. Cash goes from ${cashBefore.toFixed(1)}% to ${plan.portfolio.cashWeight.toFixed(1)}%.`
     : `Holdings weights will be replaced by the ${column} column. Cash stays at ${plan.portfolio.cashWeight.toFixed(1)}%.`]
   if (plan.sharesMode === 'recomputed') lines.push("Share counts will be recalculated from each holding's last stored close, as fractional shares.")
+  if (plan.portfolio.cashDollars !== undefined) lines.push(`Cash will be ${formatMoney(plan.portfolio.cashDollars)} and stays fixed; weights are re-marked from share counts at the next price load.`)
   if (plan.sharesMode === 'cleared') lines.push('Only some holdings have share counts, so all share counts will be removed.')
   if (plan.removed.length > 0) {
     const list = plan.removed.length === 1 ? plan.removed[0] : `${plan.removed.slice(0, -1).join(', ')} and ${plan.removed.at(-1)}`
@@ -277,11 +293,11 @@ export function csvNumber(value: number, decimals: number): string {
   return String(Number(value.toFixed(decimals)))
 }
 
-export function optimizeCsv(response: OptimizeResponse, basis: TradeBasis, cashWeight: number = 0, cashAfter: number = cashWeight): string {
+export function optimizeCsv(response: OptimizeResponse, basis: TradeBasis, cashWeight: number = 0, cashAfter: number = cashWeight, cashDollars?: number): string {
   if (basis.kind === 'dollar') {
     const header = 'ticker,price,current_shares,current_value,current_pct,target_shares,target_value,target_pct,trade_shares,trade_value,change_pp,pinned'
     const rows = portfolioShareRows(
-      tradeRows(response, basis, deployedInvestedValue(basis.investedValue, cashWeight, cashAfter)), cashWeight, cashAfter,
+      tradeRows(response, basis, cashSplit(basis.investedValue, cashWeight, cashAfter, cashDollars).sizedValue), cashWeight, cashAfter,
     ).map((row) => [
       row.ticker, csvNumber(row.price, 4), csvNumber(row.currentShares, 6), csvNumber(row.currentValue, 2),
       csvNumber(row.current * 100, 2), csvNumber(row.targetShares, 6), csvNumber(row.targetValue, 2),

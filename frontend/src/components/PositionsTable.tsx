@@ -40,7 +40,10 @@ export function PositionsTable({ valued, onRemove }: PositionsTableProps): JSX.E
                 <td className={`${TD} text-right tabular-nums`}>{row.shares === null ? '—' : formatShares(row.shares)}</td>
                 <td className={`${TD} text-right tabular-nums`}>{formatPercent(row.weight)}</td>
                 <td className={`${TD} text-right`}>
-                  <Tooltip label={`Remove ${row.ticker} from this portfolio`}>
+                  <Tooltip label={valued.cashFixed
+                    ? `Sell some or all of ${row.ticker} at its current price; the proceeds go to cash.`
+                    : `Remove ${row.ticker} from this portfolio`}
+                  >
                     <button
                       type="button"
                       onClick={() => onRemove(row.ticker)}
