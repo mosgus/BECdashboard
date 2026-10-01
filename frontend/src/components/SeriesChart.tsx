@@ -209,43 +209,45 @@ export default function SeriesChart({ title, valueName, points, indicators, form
         </div>
       </div>
 
-      {showAdxPane && (
-        <div>
-          <h3 className="mb-2 text-sm font-semibold">ADX (14) — Trend Strength</h3>
-          <div className="h-[12rem]">
-            <ResponsiveContainer width="100%" height="100%">
-              <ComposedChart data={renderedData} margin={{ top: 4, right: 8, bottom: 4, left: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
-                <ChartXAxis />
-                <ChartYAxis domain={[0, 100]} width={40} tickFormatter={(value) => String(value)} />
-                <Tooltip content={<ChartTooltip format={(value) => value.toFixed(2)} />} />
-                <ReferenceLine y={25} stroke="var(--color-accent)" strokeDasharray="4 2" label={{ value: 'Trending 25', fontSize: 10 }} />
-                <Line type="monotone" dataKey="adx" name={seriesName('adx')} stroke="var(--color-primary)" strokeWidth={1.4} dot={false} isAnimationActive={false} />
-              </ComposedChart>
-            </ResponsiveContainer>
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        {showAdxPane && (
+          <div>
+            <h3 className="mb-2 text-sm font-semibold">ADX (14) — Trend Strength</h3>
+            <div className="h-[12rem]">
+              <ResponsiveContainer width="100%" height="100%">
+                <ComposedChart data={renderedData} margin={{ top: 4, right: 8, bottom: 4, left: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
+                  <ChartXAxis />
+                  <ChartYAxis domain={[0, 100]} width={40} tickFormatter={(value) => String(value)} />
+                  <Tooltip content={<ChartTooltip format={(value) => value.toFixed(2)} />} />
+                  <ReferenceLine y={25} stroke="var(--color-accent)" strokeDasharray="4 2" label={{ value: 'Trending 25', fontSize: 10 }} />
+                  <Line type="monotone" dataKey="adx" name={seriesName('adx')} stroke="var(--color-primary)" strokeWidth={1.4} dot={false} isAnimationActive={false} />
+                </ComposedChart>
+              </ResponsiveContainer>
+            </div>
           </div>
-        </div>
-      )}
+        )}
 
-      {showStochasticPane && (
-        <div>
-          <h3 className="mb-2 text-sm font-semibold">Stochastic (14, 3, 3)</h3>
-          <div className="h-[12rem]">
-            <ResponsiveContainer width="100%" height="100%">
-              <ComposedChart data={renderedData} margin={{ top: 4, right: 8, bottom: 4, left: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
-                <ChartXAxis />
-                <ChartYAxis domain={[0, 100]} width={40} tickFormatter={(value) => String(value)} />
-                <Tooltip content={<ChartTooltip format={(value) => value.toFixed(2)} />} />
-                <ReferenceLine y={80} stroke="var(--color-negative)" strokeDasharray="4 2" label={{ value: 'OB 80', fontSize: 10 }} />
-                <ReferenceLine y={20} stroke="var(--color-positive)" strokeDasharray="4 2" label={{ value: 'OS 20', fontSize: 10 }} />
-                <Line type="monotone" dataKey="stochastic_k" name={seriesName('stochastic_k')} stroke="var(--color-accent)" strokeWidth={1.4} dot={false} isAnimationActive={false} />
-                <Line type="monotone" dataKey="stochastic_d" name={seriesName('stochastic_d')} stroke="var(--color-accent)" strokeWidth={1.1} strokeDasharray="4 2" dot={false} isAnimationActive={false} />
-              </ComposedChart>
-            </ResponsiveContainer>
+        {showStochasticPane && (
+          <div>
+            <h3 className="mb-2 text-sm font-semibold">Stochastic (14, 3, 3)</h3>
+            <div className="h-[12rem]">
+              <ResponsiveContainer width="100%" height="100%">
+                <ComposedChart data={renderedData} margin={{ top: 4, right: 8, bottom: 4, left: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
+                  <ChartXAxis />
+                  <ChartYAxis domain={[0, 100]} width={40} tickFormatter={(value) => String(value)} />
+                  <Tooltip content={<ChartTooltip format={(value) => value.toFixed(2)} />} />
+                  <ReferenceLine y={80} stroke="var(--color-negative)" strokeDasharray="4 2" label={{ value: 'OB 80', fontSize: 10 }} />
+                  <ReferenceLine y={20} stroke="var(--color-positive)" strokeDasharray="4 2" label={{ value: 'OS 20', fontSize: 10 }} />
+                  <Line type="monotone" dataKey="stochastic_k" name={seriesName('stochastic_k')} stroke="var(--color-accent)" strokeWidth={1.4} dot={false} isAnimationActive={false} />
+                  <Line type="monotone" dataKey="stochastic_d" name={seriesName('stochastic_d')} stroke="var(--color-accent)" strokeWidth={1.1} strokeDasharray="4 2" dot={false} isAnimationActive={false} />
+                </ComposedChart>
+              </ResponsiveContainer>
+            </div>
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
       {showObvPane && (
         <div>
