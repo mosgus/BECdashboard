@@ -22,6 +22,7 @@ import {
   modeLabel,
   pinnedBannerLines,
   runSummary,
+  customLookbackDays, presetLookbackDate, customLookbackError, lookbackLabel,
   sameSettings,
   scoreWindowNote,
   tradeBasis,
@@ -498,6 +499,20 @@ describe('runSummary', () => {
 
   it('falls back to the raw mode string when unlisted', () => {
     expect(modeLabel('not_a_mode')).toBe('not_a_mode')
+  })
+
+  it('labels a custom lookback', () => expect(runSummary({ ...RESPONSE, lookback_days: 183 })).toContain('183-day lookback'))
+})
+
+describe('custom lookback helpers', () => {
+  const today = new Date(2026, 9, 1)
+  it('handles calendar presets and validation', () => {
+    expect(customLookbackDays('2026-07-01', today)).toBe(92)
+    expect(presetLookbackDate('1M', today)).toBe('2026-09-01'); expect(presetLookbackDate('3M', today)).toBe('2026-07-01'); expect(presetLookbackDate('6M', today)).toBe('2026-04-01'); expect(presetLookbackDate('YTD', today)).toBe('2026-01-01')
+    expect(presetLookbackDate('3M', new Date(2026, 4, 31))).toBe('2026-02-28'); expect(presetLookbackDate('1M', new Date(2026, 2, 31))).toBe('2026-02-28')
+    expect(customLookbackError('2026-09-03', today)).toBeNull(); expect(customLookbackError('2026-09-04', today)).toBe('Choose a date at least 4 weeks ago.'); expect(customLookbackError('2026-12-01', today)).toBe('Choose a date at least 4 weeks ago.'); expect(customLookbackError('2015-01-01', today)).toBe('Choose a date within the last 10 years.'); expect(customLookbackError('', today)).toBe('Choose a start date.')
+    expect(customLookbackError(presetLookbackDate('1M', new Date(2026, 2, 1)), new Date(2026, 2, 1))).toBeNull(); expect(customLookbackError(presetLookbackDate('YTD', new Date(2026, 0, 20)), new Date(2026, 0, 20))).toBe('Choose a date at least 4 weeks ago.')
+    expect([lookbackLabel(1825), lookbackLabel(730), lookbackLabel(183)]).toEqual(['5Y', '2Y', '183-day'])
   })
 })
 

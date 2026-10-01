@@ -1,6 +1,6 @@
 # Contract 0143 — Expand each SeriesChart pane on its own
 
-**Status:** reported
+**Status:** accepted (with deviations, see Audit)
 **Assigned to:** sonnet
 **Author:** planner (opus)
 
@@ -205,3 +205,22 @@ Use the `Tooltip` component, never `title`.
 
 None. If `70vh` is too tall for a short sub-pane like OBV in practice, report it rather than
 retuning silently.
+
+## Audit (planner, 2026-10-01)
+
+Audited against commit `d857fac`. Criteria 1–13 were re-run and all pass: 6 wrappers in
+`SeriesChart`; 0 references in `TickerPage` and `PortfolioCharts`; no `size`; per-pane
+`aria-label`; tsc exit 0; lint shows only the two existing warnings; 278 tests pass; the build
+succeeds; the entry bundle has no recharts; no new lines over 300 characters. Inline and expanded
+data and domains are computed per pane, as specified.
+
+Deviations, accepted as-is but recorded:
+- **The Expand button has no `Tooltip`.** Gunnar removed it deliberately (2026-10-01). It's an
+  accepted exception to the every-control-has-a-tooltip rule, so don't restore it.
+- **The unspecified `expandButtonAboveHeader` prop** puts the price pane's button on its own row
+  above the heading, which is the layout this contract rejected. That's fine if Gunnar asked for it
+  after looking at it. Otherwise it's scope creep.
+- **Unspecified dialog alignment change:** the backdrop went from `items-start` to `items-center`.
+- **The expanded price pane always renders the Net return row,** even when `netReturn` is null. The
+  result is an empty `mb-2` div. It's harmless.
+- No report was pasted into the contract.

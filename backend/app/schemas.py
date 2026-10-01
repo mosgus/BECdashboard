@@ -253,6 +253,58 @@ class CapmResponse(BaseModel):
     warnings: list[str]
 
 
+class MonteCarloRequest(BaseModel):
+    tickers: list[str]
+    weights: list[float]
+    cash: float = 0.0
+    initial_value: float
+    horizon_days: int = 252
+    num_simulations: int = 1000
+    lookback_days: int = 1825
+    model: str = "bootstrap"
+
+
+class MonteCarloPathPointOut(BaseModel):
+    day: int
+    p5: float
+    p25: float
+    p50: float
+    p75: float
+    p95: float
+
+
+class MonteCarloTerminalOut(BaseModel):
+    mean: float
+    median: float
+    p5: float
+    p25: float
+    p75: float
+    p95: float
+    prob_loss: float
+    mean_return: float
+    median_return: float
+
+
+class MonteCarloResponse(BaseModel):
+    tickers: list[str]
+    weights: dict[str, float]
+    cash_weight: float
+    model: str
+    seed: int
+    horizon_days: int
+    num_simulations: int
+    initial_value: float
+    lookback_days: int
+    fit_start: date
+    fit_end: date
+    n_returns: int
+    daily_mean: float
+    daily_vol: float
+    paths: list[MonteCarloPathPointOut]
+    terminal: MonteCarloTerminalOut
+    warnings: list[str]
+
+
 class TickerSignals(BaseModel):
     ticker: str
     signals: list[SignalOut]

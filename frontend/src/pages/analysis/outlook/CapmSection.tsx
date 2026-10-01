@@ -8,6 +8,7 @@ import { HelpButton } from '../../../components/GuidePanel'
 import { ExpandableChart } from '../../../components/ExpandableChart'
 import { DownloadIcon } from '../../../components/DownloadIcon'
 import { Tooltip } from '../../../components/Tooltip'
+import { LookbackPicker } from '../../../components/LookbackPicker'
 import { downloadTextFile } from '../../../lib/download'
 import { formatPrice, formatShares } from '../../../lib/format'
 import {
@@ -36,7 +37,6 @@ import {
 } from '../../../lib/capm'
 import type { CapmInputs, CapmItem, CapmRun, CapmSettings } from '../../../lib/capm'
 import {
-  LOOKBACK_OPTIONS,
   applyBlockedText,
   canOptimize,
   formatChangePp,
@@ -199,26 +199,12 @@ export function CapmSection(): JSX.Element | null {
           projections, not guarantees.
         </p>
         <div className="grid gap-4 md:grid-cols-4">
-          <div>
-            <label className="mb-1 block text-xs font-medium text-[var(--color-muted)]">Lookback</label>
-            <div className="grid grid-cols-4 gap-2">
-              {LOOKBACK_OPTIONS.map((option) => (
-                <Tooltip
-                  block
-                  key={option.days}
-                  label={`Estimate betas and covariances from the last ${option.days / 365} ${option.days / 365 === 1 ? 'year' : 'years'} of daily prices`}
-                >
-                  <button
-                    type="button"
-                    onClick={() => setSettings({ ...settings, lookbackDays: option.days })}
-                    className={`w-full py-2 text-xs font-medium rounded-[var(--radius-btn)] ${settings.lookbackDays === option.days ? 'bg-btn-action text-btn-action-text' : 'border border-brand-border text-[var(--color-muted)] hover:bg-brand-border hover:text-foreground'}`}
-                  >
-                    {option.label}
-                  </button>
-                </Tooltip>
-              ))}
-            </div>
-          </div>
+          <LookbackPicker
+            lookbackDays={settings.lookbackDays}
+            onChange={(lookbackDays) => setSettings({ ...settings, lookbackDays })}
+            optionTooltip={(option) => `Estimate betas and covariances from the last ${option.days / 365} ${option.days === 365 ? 'year' : 'years'} of daily prices`}
+            customTooltip="Estimate betas and covariances from a start date you choose"
+          />
           <Field
             label="Risk-free rate (%)"
             tip="Annual risk-free rate in percent. Leave blank to use the live 3-month Treasury bill yield."

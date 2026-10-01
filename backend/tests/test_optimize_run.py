@@ -39,6 +39,28 @@ def test_min_variance_without_pinning_has_analytic_result():
     assert len(result.curves.dates) == 261
 
 
+def test_custom_lookbacks_and_bounds():
+    result = run_optimize({"A": 1, "B": 1}, {"A": A, "B": B}, SPY, lookback_days=180)
+    assert result.lookback_days == 180
+    assert date(2024, 7, 4) <= result.fit_start <= date(2024, 7, 10)
+    assert run_optimize({"A": 1, "B": 1}, {"A": A, "B": B}, SPY, lookback_days=28).lookback_days == 28
+    long_dates = [day.date() for day in pd.bdate_range("2023-01-02", periods=522)]
+    long_a = pd.Series(100 * np.concatenate([[1], np.cumprod(1 + np.tile(A_RETURNS, 3)[:521])]), index=long_dates)
+    long_b = pd.Series(100 * np.concatenate([[1], np.cumprod(1 + np.tile(B_RETURNS, 3)[:521])]), index=long_dates)
+    assert run_optimize({"A": 1, "B": 1}, {"A": long_a, "B": long_b}, long_a, lookback_days=730).lookback_days == 730
+    for days in (27, 3651):
+        with pytest.raises(OptimizeInputError, match="between 28 and 3650"):
+            run_optimize({"A": 1, "B": 1}, {"A": A, "B": B}, SPY, lookback_days=days)
+
+
+def test_lookback_requires_more_returns_than_holdings():
+    dates = [date(2024, 12, 3), date(2024, 12, 17), date(2024, 12, 31)]
+    a = pd.Series([100, 101, 102], index=dates)
+    b = pd.Series([100, 99, 101], index=dates)
+    with pytest.raises(OptimizeInputError, match="2 daily returns for 2 holdings"):
+        run_optimize({"A": 1, "B": 1}, {"A": a, "B": b}, a, lookback_days=28)
+
+
 def test_pins_young_holding_without_shrinking_fit_window():
     result = run_optimize({"A": 1, "B": 1, "Y": 2}, CLOSES, SPY, lookback_days=365)
 
@@ -155,7 +177,7 @@ def test_target_volatility_below_floor_is_an_input_error():
         ({}, {}, {}),
         ({"A": 0, "B": 1}, {"A": A, "B": B}, {}),
         ({"A": 1, "B": 1}, {"A": A, "B": B}, {"mode": "unknown"}),
-        ({"A": 1, "B": 1}, {"A": A, "B": B}, {"lookback_days": 400}),
+        ({"A": 1, "B": 1}, {"A": A, "B": B}, {"lookback_days": 27}),
         ({"A": 1, "B": 1}, {"A": A, "B": B}, {"rebalance": "weekly"}),
         ({"A": 1, "B": 1}, {"A": A}, {}),
     ],

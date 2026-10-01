@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 from scipy.stats import norm
 
-from app.optimize_run import LOOKBACK_DAYS, PIN_GRACE_DAYS
+from app.optimize_run import PIN_GRACE_DAYS, lookback_error
 from app.optimizer import compute_betas, compute_capm_expected_returns, compute_returns, optimize_max_sharpe_capm
 
 
@@ -76,8 +76,8 @@ def run_capm(
 ) -> CapmResult:
     """Optimize full-history holdings on CAPM returns and pin young holdings."""
     configs = configs or {}
-    if lookback_days not in LOOKBACK_DAYS:
-        raise CapmInputError(f"lookback_days must be one of {LOOKBACK_DAYS}")
+    if error := lookback_error(lookback_days):
+        raise CapmInputError(error)
     if not (math.isfinite(rf) and 0 <= rf < 0.2):
         raise CapmInputError("rf must be between 0 and 0.2")
     if not (math.isfinite(mrp) and 0 < mrp <= 0.2):
@@ -163,6 +163,11 @@ def run_capm(
     fit_prices = pd.DataFrame({ticker: closes[ticker] for ticker in fitted_tickers})
     fit_prices = fit_prices.loc[(fit_prices.index >= lookback_start) & (fit_prices.index <= end)].sort_index().ffill()
     fit_returns = compute_returns(fit_prices)
+    if len(fit_returns) <= len(fitted_tickers):
+        raise CapmInputError(
+            f"The lookback has {len(fit_returns)} daily returns for {len(fitted_tickers)} holdings. "
+            "Choose a longer lookback so there are more daily returns than holdings."
+        )
     fit_start, fit_end = fit_returns.index[0], fit_returns.index[-1]
     warnings = [
         f"{ticker} has prices only from {closes[ticker].index[0]}; it is held at its current weight "

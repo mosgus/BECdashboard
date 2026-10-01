@@ -49,7 +49,7 @@ export const CAPM_GUIDE: GuideSection[] = [
     heading: 'Settings',
     paragraphs: [],
     entries: [
-      { term: 'Lookback', text: 'How many years of daily prices are used to estimate betas, volatilities and correlations. Longer lookbacks are steadier but slower to reflect change; shorter ones react faster but are noisier.' },
+      { term: 'Lookback', text: 'How far back the daily prices used to estimate betas, volatilities and correlations go: 1, 3 or 5 years, or a custom start date at least 4 weeks ago. Longer lookbacks are steadier but slower to reflect change; shorter ones react faster but are noisier.' },
       { term: 'Risk-free rate', text: 'The annual return on cash-like assets. Leave it blank to use the live 3-month Treasury bill yield. Every expected return and the Sharpe ratio start from it.' },
       { term: 'Market risk premium', text: 'How much more than the risk-free rate you expect the market to return each year (5% by default). At 0%, every holding expects the risk-free rate and views have no effect.' },
       { term: 'Market ticker', text: 'The benchmark that betas are measured against (SPY by default). Its prices must cover the whole lookback.' },

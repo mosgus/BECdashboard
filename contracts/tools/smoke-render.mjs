@@ -1,11 +1,13 @@
 // Headless render smoke check against the running Vite dev server (localhost:5173).
 // Uses a throwaway Chrome profile under /tmp and a fake portfolio, so no real browser data is touched.
 // Usage: node contracts/tools/smoke-render.mjs outlook   (or holdings, optimize, monitor, risk)
+//        node contracts/tools/smoke-render.mjs outlook "Monte Carlo"   (also clicks the in-page tab with that label)
 // Prints any uncaught exception and console error, then the first 400 characters of #root.
 // An empty ROOT TEXT means the page rendered blank.
 import { spawn } from 'node:child_process'
 
 const tab = process.argv[2] ?? 'outlook'
+const subTab = process.argv[3]
 const port = 9333
 const chrome = spawn('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', [
   '--headless=new', `--remote-debugging-port=${port}`, '--user-data-dir=/tmp/be_scratch/chrome', '--no-first-run', 'about:blank',
@@ -70,6 +72,13 @@ try {
   })
   await send('Page.navigate', { url: `http://localhost:5173/portfolios/smoke/${tab}` })
   await sleep(5000)
+  if (subTab !== undefined) {
+    const clicked = await send('Runtime.evaluate', {
+      expression: `(() => { const tab = [...document.querySelectorAll('[role="tab"]')].find((el) => el.innerText.trim() === ${JSON.stringify(subTab)}); tab?.click(); return tab !== undefined })()`,
+    })
+    console.log('SUB-TAB CLICKED:', clicked.result.value)
+    await sleep(3000)
+  }
   const root = await send('Runtime.evaluate', { expression: `document.getElementById('root')?.innerText.slice(0, 400)` })
   console.log('ROOT TEXT:', JSON.stringify(root.result.value))
   ws.close()

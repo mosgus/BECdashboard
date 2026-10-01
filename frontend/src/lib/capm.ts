@@ -1,6 +1,6 @@
 import type { CapmRequest, CapmResponse } from '../api/client'
 import type { Portfolio } from './portfolio'
-import { LOOKBACK_OPTIONS, applyConfirmLines, applyPlan, csvNumber, formatMoney, tradeRows } from './optimize'
+import { applyConfirmLines, applyPlan, csvNumber, formatMoney, lookbackLabel, tradeRows } from './optimize'
 import type { ApplyPlan, TradeBasis, TradeRow, WeightSource } from './optimize'
 import { datePart, filenameSafeName, quote } from './portfolioCsv'
 
@@ -203,8 +203,7 @@ export function rfLabel(rf: number, source: CapmResponse['rf_source']): string {
 }
 
 export function capmSummary(response: CapmResponse): string {
-  const label = LOOKBACK_OPTIONS.find((option) => option.days === response.lookback_days)?.label
-    ?? `${response.lookback_days}d`
+  const label = lookbackLabel(response.lookback_days)
   return `${label} lookback · market ${response.market_ticker} · risk-free ${rfLabel(response.rf, response.rf_source)} · MRP ${formatReturn(response.mrp)} · fitted ${response.fit_start} → ${response.fit_end}`
 }
 

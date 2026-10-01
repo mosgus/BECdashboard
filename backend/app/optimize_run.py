@@ -29,10 +29,17 @@ Mode = Literal[
     "equal_weight", "min_variance", "max_sharpe", "risk_parity",
     "max_sortino", "min_cvar", "max_diversification", "target_volatility",
 ]
-LOOKBACK_DAYS = (365, 730, 1095, 1825)
+MIN_LOOKBACK_DAYS = 28
+MAX_LOOKBACK_DAYS = 3650
 PIN_GRACE_DAYS = 7
 _MODES = set(Mode.__args__)
 _REBALANCES = {"none", "monthly", "quarterly", "annual"}
+
+
+def lookback_error(lookback_days: int) -> str | None:
+    if not MIN_LOOKBACK_DAYS <= lookback_days <= MAX_LOOKBACK_DAYS:
+        return f"lookback_days must be between {MIN_LOOKBACK_DAYS} and {MAX_LOOKBACK_DAYS}"
+    return None
 
 
 class OptimizeInputError(ValueError):
@@ -98,8 +105,8 @@ def run_optimize(
         raise OptimizeInputError("weights must be finite and greater than zero")
     if mode not in _MODES:
         raise OptimizeInputError(f"unknown optimization mode: {mode!r}")
-    if lookback_days not in LOOKBACK_DAYS:
-        raise OptimizeInputError(f"lookback_days must be one of {LOOKBACK_DAYS}")
+    if error := lookback_error(lookback_days):
+        raise OptimizeInputError(error)
     if rebalance not in _REBALANCES:
         raise OptimizeInputError(f"unknown rebalance schedule: {rebalance!r}")
     if not math.isfinite(max_short) or not 0.0 <= max_short <= 1.0:
@@ -137,6 +144,11 @@ def run_optimize(
     fit_prices = pd.DataFrame({ticker: closes[ticker] for ticker in fitted_tickers}).sort_index()
     fit_prices = fit_prices.loc[(fit_prices.index >= lookback_start) & (fit_prices.index <= end)].ffill()
     returns = compute_returns(fit_prices)
+    if len(returns) <= len(fitted_tickers):
+        raise OptimizeInputError(
+            f"The lookback has {len(returns)} daily returns for {len(fitted_tickers)} holdings. "
+            "Choose a longer lookback so there are more daily returns than holdings."
+        )
     fit_start, fit_end = returns.index[0], returns.index[-1]
     warnings = ["In-sample: the optimized weights were chosen using the same prices they are scored on."]
     if len(returns) < 60:

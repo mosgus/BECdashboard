@@ -1850,6 +1850,25 @@ What was deliberately *not* ported into it is in the next bullet but one.
     - **Scoring window:** scoring still needs every holding, so the curves start at the youngest
       holding's first bar. That is shorter than the fit window, and it is labelled. This is the honest
       cost of pinning: the fit window and the score window differ.
+  - **Lookback is a range, not four values, for every portfolio analysis** (contract 0145, 2026-10-01).
+    - **What changed:**
+      - Optimize and CAPM show `Custom 1Y 3Y 5Y` (one shared `LookbackPicker`), with 2Y dropped.
+      - The Custom dialog takes a start date, either typed or from the 1 Mo, 3 Mo, 6 Mo and YTD
+        presets.
+      - `optimize_run`, `capm_run` and `montecarlo_run` all accept `lookback_days` from 28 to 3650
+        through `optimize_run.lookback_error`.
+    - **Floor:** 28 calendar days, Gunnar's choice of about a month. 28 is the shortest "1 month
+      ago" span, so the 1 Mo preset is always valid. A 5-day option was rejected: 4 returns make the
+      covariance singular.
+    - **Noisy is allowed; degenerate is not.** About 20 returns gives noisy fits: Max Sharpe tends
+      to corners, CVaR(95%) has about one tail day, and betas have wide errors. The user chooses
+      that knowingly. But Optimize and CAPM refuse to run when `n_returns <= n_fitted_holdings`,
+      because there the covariance is singular and the weights are arbitrary.
+    - **Monte Carlo keeps `MIN_RETURNS = 60`.** Bootstrapping from 20 days just replays them. So
+      its effective floor is about 3 months, and its future picker should reflect that.
+    - **Wire format:** `lookback_days` stays the field. The frontend converts the chosen date into
+      days before today, and the backend counts back from the last common close, so `fit_start` can
+      land a few days before the chosen date. The run summary shows the real fit window.
   - **Metrics are computed from the scored curve's daily returns.** Sharpe = (CAGR − rf) / vol.
     ~~rf = 0, as in the reference and labelled.~~ **Changed 2026-09-24, Gunnar (contract 0112):** rf is
     the live 10-year Treasury yield from `rates.py` (yfinance `^TNX`, cached 1 h, 4.27% fallback).
@@ -2022,13 +2041,15 @@ risk-free rate to the 3-month T-bill and limits portfolios to holdable tickers.
   - The duplicate `isValidCurrentPortfolio` in `portfolioStore.ts` is merged into `lib/portfolio.ts`.
 - **Frontend audits render the page (from 0119).** `node contracts/tools/smoke-render.mjs <tab>` loads a portfolio tab in headless Chrome with a throwaway profile and a fake portfolio, then prints any uncaught exception.
   - **Why:** 0119 passed tests, build and lint but blanked the Outlook tab. `Tooltip` calls `Children.only`, and the Target value `Field` gave it two children.
-- **Monte Carlo backend is `POST /portfolio/montecarlo` over the pure `app/montecarlo_run.py`** (0143, 2026-10-01). It differs from `main` in these ways:
+- **Monte Carlo backend is `POST /portfolio/montecarlo` over the pure `app/montecarlo_run.py`** (0144, 2026-10-01). It differs from `main` in these ways:
   - It takes `tickers`, `weights` and `cash` in the body. Cash is part of the portfolio and earns 0%, as in `/portfolio/series`; `main` dropped cash.
   - There are two models. **`bootstrap` (the default)** resamples the portfolio's own historical daily returns, which keeps the real crash days. `normal` is `main`'s fitted normal and stays for comparison.
   - Both simulate at constant weights, as `main` does: one portfolio-level return per day.
   - It warns when a holding's history is shorter than the lookback, and it refuses to run on fewer than 60 daily returns.
   - **`main`'s "Brier score" is not ported.** `mean((prob_above − 0.5)²)` scores no outcome and is minimised by predicting 50/50. Its coverage figure comes from one autocorrelated hold-out path.
-  - Still open for Gunnar: whether to build a real calibration check, and whether `main`'s efficient-frontier chart, which sits inside its Monte Carlo section, comes across.
+  - It accepts any `lookback_days` from 28 to 3650 (0145). Its 60-return floor makes the effective minimum about 3 months.
+  - **Calibration comes later, as its own contract** (Gunnar, 2026-10-01), after the Monte Carlo tab works. It must be a real check, not `main`'s formula. The planned design fits on the history before each of many past start dates, then measures how often the realised outcome landed inside the predicted p5–p95 and p25–p75 bands (expect about 90% and 50%), and shows how many start dates that used.
+- **The efficient-frontier chart is kept, but not in Monte Carlo** (Gunnar, 2026-10-01: "I still want it"). `main` draws it inside its Monte Carlo section, but it answers an optimization question: the best risk/return mix of your holdings, with Max Sharpe, Min Variance and Risk Parity marked. It simulates nothing. The planner's proposed home is the Optimize tab, whose modes are the points it marks. It is ported later with its own backend route (`main`'s `efficient_frontier`, around line 905 of `portfolios_optimize.py`), and it has no contract yet.
 
 ## Open questions (not decided)
 

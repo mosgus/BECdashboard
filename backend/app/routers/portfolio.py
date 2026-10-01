@@ -11,10 +11,14 @@ from app.db import is_enabled, session
 from app.capm_run import CapmInputError, HoldingConfig, run_capm
 from app.indicators import CLOSE_ONLY_INDICATORS, indicator_series
 from app.models import PriceBar
+from app.montecarlo_run import MonteCarloInputError, run_monte_carlo
 from app.optimize_run import OptimizeInputError, run_optimize
 from app.portfolio_series import build_portfolio_series
 from app.rates import fetch_risk_free_rate_with_source
-from app.schemas import CapmRequest, CapmResponse, OptimizeRequest, OptimizeResponse, PortfolioSeriesResponse
+from app.schemas import (
+    CapmRequest, CapmResponse, MonteCarloRequest, MonteCarloResponse,
+    OptimizeRequest, OptimizeResponse, PortfolioSeriesResponse,
+)
 from app.signals import compute_all_signals
 
 router = APIRouter(prefix="/portfolio", tags=["portfolio"])
@@ -233,3 +237,19 @@ def capm_portfolio(body: CapmRequest) -> dict:
         "score_start": result.score_start,
         "warnings": result.warnings,
     }
+
+
+@router.post("/montecarlo", response_model=MonteCarloResponse)
+def montecarlo_portfolio(body: MonteCarloRequest) -> dict:
+    _require_database()
+    tickers, weights = _normalise_request(body.tickers, body.weights)
+    closes = _load_stored_closes(tickers)
+    try:
+        result = run_monte_carlo(
+            dict(zip(tickers, weights, strict=True)), body.cash, closes,
+            initial_value=body.initial_value, horizon_days=body.horizon_days,
+            num_simulations=body.num_simulations, lookback_days=body.lookback_days, model=body.model,
+        )
+    except MonteCarloInputError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return asdict(result)

@@ -55,6 +55,15 @@ def test_two_holdings_match_the_analytic_tangency():
     assert all(not holding.pinned and not holding.frozen for holding in result.holdings)
 
 
+def test_custom_lookback_and_return_count_guard():
+    assert run(lookback_days=180).lookback_days == 180
+    dates = [date(2024, 12, 3), date(2024, 12, 17), date(2024, 12, 31)]
+    a = pd.Series([100, 101, 102], index=dates)
+    b = pd.Series([100, 99, 101], index=dates)
+    with pytest.raises(CapmInputError, match="daily returns for 2 holdings"):
+        run_capm({"A": 1, "B": 1}, {"A": a, "B": b}, a, market_ticker="M", rf=0.04, lookback_days=28)
+
+
 def test_view_changes_expected_return_not_capm_return():
     result = run(configs={"A": HoldingConfig(view=-0.2)})
     a = result.holdings[0]
@@ -107,7 +116,7 @@ def test_young_holding_is_pinned_and_scored_on_the_common_window():
     ({"configs": {"A": HoldingConfig(freeze=True), "B": HoldingConfig(freeze=True)}}, "Nothing to optimize: every holding with full history is frozen."),
     ({"weights": {"A": 1, "Y": 1}, "closes": {"A": A, "Y": Y}}, "Need at least 2 holdings with full history to optimize."),
     ({"configs": {"Z": HoldingConfig()}}, "configs names Z, which is not a holding."),
-    ({"lookback_days": 400}, "lookback_days must be one of (365, 730, 1095, 1825)"),
+    ({"lookback_days": 27}, "lookback_days must be between 28 and 3650"),
     ({"rf": 0.25}, "rf must be between 0 and 0.2"),
     ({"mrp": 0}, "mrp must be above 0 and at most 0.2"),
     ({"market": Y, "market_ticker": "Y"}, "Market ticker Y has prices only from 2024-06-03, after the lookback start (2024-01-01). Choose a shorter lookback or another market ticker."),

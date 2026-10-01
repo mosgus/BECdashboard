@@ -100,6 +100,6 @@ def test_missing_holding_is_404(client, db_mode):
 
 def test_input_error_is_422(client, db_mode):
     _seed()
-    response = client.post("/portfolio/capm", json={"tickers": ["A", "B"], "weights": [1, 1], "lookback_days": 400, "market_ticker": "M", "rf": 0.04})
+    response = client.post("/portfolio/capm", json={"tickers": ["A", "B"], "weights": [1, 1], "lookback_days": 27, "market_ticker": "M", "rf": 0.04})
     assert response.status_code == 422
-    assert response.json()["detail"] == "lookback_days must be one of (365, 730, 1095, 1825)"
+    assert response.json()["detail"] == "lookback_days must be between 28 and 3650"

@@ -25,8 +25,47 @@ export const OPTIMIZE_MODES: ReadonlyArray<{ value: OptimizeMode; label: string 
 export const LONG_ONLY_MODES: ReadonlyArray<OptimizeMode> = ['equal_weight', 'risk_parity', 'max_diversification']
 
 export const LOOKBACK_OPTIONS: ReadonlyArray<{ label: string; days: number }> = [
-  { label: '1Y', days: 365 }, { label: '2Y', days: 730 }, { label: '3Y', days: 1095 }, { label: '5Y', days: 1825 },
+  { label: '1Y', days: 365 }, { label: '3Y', days: 1095 }, { label: '5Y', days: 1825 },
 ]
+export const MIN_LOOKBACK_DAYS = 28
+export const MAX_LOOKBACK_DAYS = 3650
+export type LookbackPreset = '1M' | '3M' | '6M' | 'YTD'
+
+function localDateParts(today: Date): [number, number, number] { return [today.getFullYear(), today.getMonth(), today.getDate()] }
+function dateText(year: number, month: number, day: number): string { return `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}` }
+function parseDate(date: string): [number, number, number] | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date)
+  if (!match) return null
+  const [year, month, day] = match.slice(1).map(Number)
+  const candidate = new Date(year, month - 1, day)
+  return candidate.getFullYear() === year && candidate.getMonth() === month - 1 && candidate.getDate() === day ? [year, month - 1, day] : null
+}
+export function customLookbackDays(date: string, today: Date): number {
+  const parsed = parseDate(date)
+  if (!parsed) return Number.NaN
+  const [year, month, day] = localDateParts(today)
+  return (Date.UTC(year, month, day) - Date.UTC(...parsed)) / 86400000
+}
+export function presetLookbackDate(preset: LookbackPreset, today: Date): string {
+  const [year, month, day] = localDateParts(today)
+  if (preset === 'YTD') return dateText(year, 0, 1)
+  const offset = preset === '1M' ? 1 : preset === '3M' ? 3 : 6
+  const targetMonth = month - offset
+  const targetYear = year + Math.floor(targetMonth / 12)
+  const normalizedMonth = (targetMonth + 12) % 12
+  const lastDay = new Date(targetYear, normalizedMonth + 1, 0).getDate()
+  return dateText(targetYear, normalizedMonth, Math.min(day, lastDay))
+}
+export function customLookbackError(date: string, today: Date): string | null {
+  if (!parseDate(date)) return 'Choose a start date.'
+  const days = customLookbackDays(date, today)
+  if (days < MIN_LOOKBACK_DAYS) return 'Choose a date at least 4 weeks ago.'
+  if (days > MAX_LOOKBACK_DAYS) return 'Choose a date within the last 10 years.'
+  return null
+}
+export function lookbackLabel(days: number): string {
+  return LOOKBACK_OPTIONS.find((option) => option.days === days)?.label ?? (days === 730 ? '2Y' : `${days}-day`)
+}
 
 export const REBALANCE_OPTIONS: ReadonlyArray<{ value: OptimizeRebalance; label: string; summary: string }> = [
   { value: 'none', label: 'None (buy and hold)', summary: 'buy and hold' },
@@ -375,7 +414,7 @@ export function modeLabel(mode: string): string {
 }
 
 export function runSummary(response: OptimizeResponse): string {
-  const lookback = LOOKBACK_OPTIONS.find((option) => option.days === response.lookback_days)?.label ?? `${response.lookback_days}d`
+  const lookback = lookbackLabel(response.lookback_days)
   const rebalance = REBALANCE_OPTIONS.find((option) => option.value === response.rebalance)?.summary ?? response.rebalance
   return `${modeLabel(response.mode)} · ${lookback} lookback · ${rebalance} · fitted ${response.fit_start} → ${response.fit_end}`
 }

@@ -1,6 +1,6 @@
-# Contract 0143 — Monte Carlo simulation backend for the Outlook tab
+# Contract 0144 — Monte Carlo simulation backend for the Outlook tab
 
-**Status:** open <!-- open | in-progress | reported | accepted | rejected | abandoned -->
+**Status:** accepted <!-- open | in-progress | reported | accepted | rejected | abandoned -->
 **Assigned to:** sonnet <!-- haiku | sonnet -->
 **Author:** planner (opus)
 
@@ -464,3 +464,12 @@ value. Do not loosen a tolerance or change a fixture to make it pass.
 ## Report
 
 <Coder: paste your report in chat. Include every verification command's verbatim output.>
+
+## Audit
+
+**Accepted** (planner, 2026-10-01). Renumbered from 0143 to 0144 after a collision with the second planner session's `0143-expand-each-chart-pane`.
+
+- Re-ran every verification command: 702 passed (672 + 30); the two new files give 30 passed; the purity, constant, brier, rng, route, schema-count and OpenAPI checks all match.
+- Read `montecarlo_run.py` against the algorithm. Validation order and messages, window, warning tie-break (`max` returns the first on ties), the `ffill → pct_change → dropna` order, the draw calls, the floor, the grid and the statistics all match. The route passes no seed.
+- The tests assert the contract's values at its tolerances. Nothing is skipped or loosened.
+- Worst case (20 holdings, 10,000 sims, 756 days) runs in under 0.1 s locally.

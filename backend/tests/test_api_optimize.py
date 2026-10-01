@@ -113,7 +113,7 @@ def test_missing_spy_is_optional(client, db_mode):
         ({"tickers": ["A", "B"], "weights": [0, 1]}, 400),
         ({"tickers": ["A", "B"], "weights": [1, 1], "mode": "nope"}, 422),
         ({"tickers": ["A", "B"], "weights": [1, 1], "mode": "max_sharpe_capm"}, 422),
-        ({"tickers": ["A", "B"], "weights": [1, 1], "lookback_days": 400}, 422),
+        ({"tickers": ["A", "B"], "weights": [1, 1], "lookback_days": 27}, 422),
         ({"tickers": ["A", "B"], "weights": [1, 1], "rebalance": "weekly"}, 422),
         ({"tickers": ["A", "B", "Y"], "weights": [1, 1, 2], "lookback_days": 365, "max_weight": 0.2}, 422),
         ({"tickers": ["A", "Y"], "weights": [1, 1], "lookback_days": 365}, 422),

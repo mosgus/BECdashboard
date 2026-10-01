@@ -7,6 +7,7 @@ import { DownloadIcon } from '../../components/DownloadIcon'
 import { ExpandableChart } from '../../components/ExpandableChart'
 import { OptimizerGuide } from '../../components/OptimizerGuide'
 import { Tooltip } from '../../components/Tooltip'
+import { LookbackPicker } from '../../components/LookbackPicker'
 import {
   DEFAULT_SETTINGS,
   applyBlockedText,
@@ -14,7 +15,6 @@ import {
   applyPlan,
   cashAfterDeploy,
   cashSplit,
-  LOOKBACK_OPTIONS,
   OPTIMIZE_MODES,
   REBALANCE_OPTIONS,
   buildOptimizeRequest,
@@ -172,26 +172,12 @@ export function OptimizePage(): JSX.Element | null {
             </div>
           </div>
 
-          <div>
-            <label className="mb-1 block text-xs font-medium text-[var(--color-muted)]">Lookback</label>
-            <div className="grid grid-cols-4 gap-2">
-              {LOOKBACK_OPTIONS.map((option) => (
-                <Tooltip block key={option.days} label={`Fit the weights on the last ${option.days / 365} ${option.days / 365 === 1 ? 'year' : 'years'} of daily prices`}>
-                  <button
-                    type="button"
-                    onClick={() => setSettings({ ...settings, lookbackDays: option.days })}
-                    className={`w-full py-2 text-xs font-medium rounded-[var(--radius-btn)] ${
-                      settings.lookbackDays === option.days
-                        ? 'bg-btn-action text-btn-action-text'
-                        : 'border border-brand-border text-[var(--color-muted)] hover:bg-brand-border hover:text-foreground'
-                    }`}
-                  >
-                    {option.label}
-                  </button>
-                </Tooltip>
-              ))}
-            </div>
-          </div>
+          <LookbackPicker
+            lookbackDays={settings.lookbackDays}
+            onChange={(lookbackDays) => setSettings({ ...settings, lookbackDays })}
+            optionTooltip={(option) => `Fit the weights on the last ${option.days / 365} ${option.days === 365 ? 'year' : 'years'} of daily prices`}
+            customTooltip="Fit the weights on daily prices from a start date you choose"
+          />
 
           <div className="flex flex-col gap-4">
             <div>
