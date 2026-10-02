@@ -328,6 +328,7 @@ class ForecastRequest(MonteCarloRequest):
 
 class ForecastVolPointOut(BaseModel):
     date: date
+    day: int
     vol: float
 
 
@@ -338,6 +339,7 @@ class ForecastVolForecastPointOut(BaseModel):
 
 class ForecastHistoryPointOut(BaseModel):
     date: date
+    day: int
     value: float
 
 

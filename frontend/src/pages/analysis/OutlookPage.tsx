@@ -3,16 +3,16 @@ import type { JSX } from 'react'
 import { Tooltip } from '../../components/Tooltip'
 import { CapmSection } from './outlook/CapmSection'
 import { MonteCarloSection } from './outlook/MonteCarloSection'
+import { ForecastSection } from './outlook/ForecastSection'
 
 const TABS = [
   ['capm', 'CAPM Allocation', 'Allocate using CAPM expected returns and your views'],
   ['montecarlo', 'Monte Carlo', 'Simulate many possible paths for this portfolio'],
-  ['forecast', 'Forecast', 'Project this portfolio with statistical forecasting models (not built yet)'],
+  ['forecast', 'Forecast', 'Project this portfolio with volatility forecasting models'],
 ] as const
 
 export function OutlookPage(): JSX.Element {
   const [tab, setTab] = useState<'capm' | 'montecarlo' | 'forecast'>('capm')
-  const placeholder = tab === 'montecarlo' ? 'Monte Carlo' : 'Forecast'
 
   return (
     <div>
@@ -31,12 +31,7 @@ export function OutlookPage(): JSX.Element {
           </Tooltip>
         ))}
       </div>
-      {tab === 'capm' ? <CapmSection /> : tab === 'montecarlo' ? <MonteCarloSection /> : (
-        <div className="bg-brand-surface border border-brand-border rounded-[var(--radius-card)] p-16 text-center">
-          <h2 className="text-lg font-semibold text-foreground mb-2">{placeholder}</h2>
-          <p className="text-sm text-[var(--color-muted)]">{placeholder} — not built yet.</p>
-        </div>
-      )}
+      {tab === 'capm' ? <CapmSection /> : tab === 'montecarlo' ? <MonteCarloSection /> : <ForecastSection />}
     </div>
   )
 }

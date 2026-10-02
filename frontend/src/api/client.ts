@@ -466,6 +466,22 @@ export async function monteCarloPortfolio(body: MonteCarloRequest): Promise<Mont
   return request<MonteCarloResponse>('/portfolio/montecarlo', { method: 'POST', body })
 }
 
+export type ForecastRequest = MonteCarloRequest
+export interface ForecastVolPoint { date: string; day: number; vol: number }
+export interface ForecastVolForecastPoint { day: number; vol: number }
+export interface ForecastHistoryPoint { date: string; day: number; value: number }
+export interface ForecastResponse {
+  tickers: string[]; weights: Record<string, number>; cash_weight: number; model: string; seed: number
+  horizon_days: number; num_simulations: number; initial_value: number; lookback_days: number
+  fit_start: string; fit_end: string; n_returns: number; daily_drift: number; current_vol: number; lookback_vol: number
+  params: Record<string, number>; members: string[]; member_medians: Record<string, number>
+  paths: MonteCarloPathPoint[]; terminal: MonteCarloTerminal; vol_forecast: ForecastVolForecastPoint[]
+  vol_history: ForecastVolPoint[]; history: ForecastHistoryPoint[]; warnings: string[]
+}
+export async function forecastPortfolio(body: ForecastRequest): Promise<ForecastResponse> {
+  return request<ForecastResponse>('/portfolio/forecast', { method: 'POST', body })
+}
+
 export async function getPortfolioSeries(
   tickers: string[], weights: number[], cash: number, include: string[],
 ): Promise<PortfolioSeriesResponse> {

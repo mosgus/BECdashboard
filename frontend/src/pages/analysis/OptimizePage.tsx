@@ -49,7 +49,8 @@ import { isLegacyPortfolio, listPortfolios, savePortfolio } from '../../lib/port
 const OptimizeChart = lazy(() => import('../../components/OptimizeChart'))
 const FrontierChart = lazy(() => import('../../components/FrontierChart'))
 
-const TH = 'text-left font-medium text-[11px] tracking-wide uppercase text-[var(--color-muted)] px-3 py-2 border-b border-brand-border whitespace-nowrap'
+const TH =
+  'text-left font-medium text-[11px] tracking-wide uppercase text-[var(--color-muted)] px-3 py-2 border-b border-brand-border whitespace-nowrap'
 const TD = 'px-3 py-2.5 border-b border-brand-border'
 
 type RunState =
@@ -58,9 +59,7 @@ type RunState =
   | { status: 'error'; message: string }
   | { status: 'ready'; response: OptimizeResponse; settings: OptimizeSettings; basis: TradeBasis; applied: boolean }
 
-type PricesState =
-  | { status: 'loading' }
-  | { status: 'ready'; lastClose: Map<string, number | null> }
+type PricesState = { status: 'loading' } | { status: 'ready'; lastClose: Map<string, number | null> }
 
 function changeColor(formatted: string): string {
   if (formatted.startsWith('+')) return 'text-brand-positive'
@@ -93,7 +92,8 @@ export function OptimizePage(): JSX.Element | null {
     let cancelled = false
     void getUniverse()
       .then((entries) => {
-        if (!cancelled) setPrices({ status: 'ready', lastClose: new Map(entries.map((entry) => [entry.ticker, entry.last_close])) })
+        if (!cancelled)
+          setPrices({ status: 'ready', lastClose: new Map(entries.map((entry) => [entry.ticker, entry.last_close])) })
       })
       .catch(() => {
         if (!cancelled) setPrices({ status: 'ready', lastClose: new Map() })
@@ -107,9 +107,10 @@ export function OptimizePage(): JSX.Element | null {
 
   const cashAfter = cashAfterDeploy(current.cashWeight, cashDeployPct)
   const runnable = canOptimize(current)
-  const plan = run.status === 'ready'
-    ? applyPlan(current, run.response, prices.status === 'ready' ? prices.lastClose : new Map(), cashAfter)
-    : null
+  const plan =
+    run.status === 'ready'
+      ? applyPlan(current, run.response, prices.status === 'ready' ? prices.lastClose : new Map(), cashAfter)
+      : null
 
   function handleRun(): void {
     if (current === null || prices.status !== 'ready') return
@@ -157,17 +158,28 @@ export function OptimizePage(): JSX.Element | null {
                 className="w-full rounded-[var(--radius-btn)] border border-brand-border px-3 py-2 text-sm bg-brand-surface text-foreground"
               >
                 {OPTIMIZE_MODES.map((option) => (
-                  <option key={option.value} value={option.value}>{option.label}</option>
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
                 ))}
               </select>
             </Tooltip>
             <div className="mt-auto pt-6">
-              <Tooltip block label={prices.status === 'loading' ? 'Loading the latest prices' : runnable ? 'Fit weights on stored prices and score them against your current weights' : 'Needs at least 2 holdings to optimize'}>
+              <Tooltip
+                block
+                label={
+                  prices.status === 'loading'
+                    ? 'Loading the latest prices'
+                    : runnable
+                      ? 'Fit weights on stored prices and score them against your current weights'
+                      : 'Needs at least 2 holdings to optimize'
+                }
+              >
                 <button
                   type="button"
                   onClick={handleRun}
                   disabled={!runnable || prices.status === 'loading' || run.status === 'running'}
-                  className="w-full py-3 text-sm rounded-[var(--radius-btn)] bg-btn-action text-btn-action-text font-semibold disabled:opacity-50"
+                  className="inline-flex px-4 py-3 text-sm rounded-[var(--radius-btn)] bg-btn-action text-btn-action-text font-semibold disabled:opacity-50"
                 >
                   {run.status === 'running' ? 'Optimizing…' : 'Run optimizer'}
                 </button>
@@ -178,14 +190,18 @@ export function OptimizePage(): JSX.Element | null {
           <LookbackPicker
             lookbackDays={settings.lookbackDays}
             onChange={(lookbackDays) => setSettings({ ...settings, lookbackDays })}
-            optionTooltip={(option) => `Fit the weights on the last ${option.days / 365} ${option.days === 365 ? 'year' : 'years'} of daily prices`}
+            optionTooltip={(option) =>
+              `Fit the weights on the last ${option.days / 365} ${option.days === 365 ? 'year' : 'years'} of daily prices`
+            }
             customTooltip="Fit the weights on daily prices from a start date you choose"
           />
 
           <div className="flex flex-col gap-4">
             <div>
               <label className="mb-1 block text-xs font-medium text-[var(--color-muted)]">
-                {settings.allowShort ? `Max abs. weight: ${settings.maxWeightPct}%` : `Max weight: ${settings.maxWeightPct}%`}
+                {settings.allowShort
+                  ? `Max abs. weight: ${settings.maxWeightPct}%`
+                  : `Max weight: ${settings.maxWeightPct}%`}
               </label>
               <input
                 type="range"
@@ -218,7 +234,11 @@ export function OptimizePage(): JSX.Element | null {
                 <label className="mb-1 block text-xs font-medium text-[var(--color-muted)]">
                   Vol target: {settings.volTargetPct}%
                 </label>
-                <Tooltip dismissOnPointerDown block label="The optimizer finds the highest-return mix whose annual volatility stays at or below this">
+                <Tooltip
+                  dismissOnPointerDown
+                  block
+                  label="The optimizer finds the highest-return mix whose annual volatility stays at or below this"
+                >
                   <input
                     type="range"
                     min={5}
@@ -234,20 +254,30 @@ export function OptimizePage(): JSX.Element | null {
 
             <div>
               <label className="mb-1 block text-xs font-medium text-[var(--color-muted)]">Rebalance</label>
-              <Tooltip block label="How the curves hold the weights: bought and held from the start, or reset to them on this schedule. It doesn't change which weights are picked.">
+              <Tooltip
+                block
+                label="How the curves hold the weights: bought and held from the start, or reset to them on this schedule. It doesn't change which weights are picked."
+              >
                 <select
                   value={settings.rebalance}
-                  onChange={(event) => setSettings({ ...settings, rebalance: event.target.value as OptimizeSettings['rebalance'] })}
+                  onChange={(event) =>
+                    setSettings({ ...settings, rebalance: event.target.value as OptimizeSettings['rebalance'] })
+                  }
                   className="w-full rounded-[var(--radius-btn)] border border-brand-border px-3 py-2 text-sm bg-brand-surface text-foreground"
                 >
                   {REBALANCE_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>{option.label}</option>
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
                   ))}
                 </select>
               </Tooltip>
             </div>
 
-            <Tooltip block label="Let weights go negative, up to the Max total short cap. Equal Weight, Risk Parity and Max Diversification stay long-only.">
+            <Tooltip
+              block
+              label="Let weights go negative, up to the Max total short cap. Equal Weight, Risk Parity and Max Diversification stay long-only."
+            >
               <label className="inline-flex items-center gap-2 text-sm cursor-pointer">
                 <input
                   type="checkbox"
@@ -262,7 +292,15 @@ export function OptimizePage(): JSX.Element | null {
               <label className="mb-1 block text-xs font-medium text-[var(--color-muted)]">
                 Max total short: {settings.maxShortPct}%
               </label>
-              <Tooltip dismissOnPointerDown block label={settings.allowShort ? 'Cap on the combined size of all short positions, as a share of the portfolio. 30% allows up to 130% long / 30% short.' : 'Only used when short positions are allowed'}>
+              <Tooltip
+                dismissOnPointerDown
+                block
+                label={
+                  settings.allowShort
+                    ? 'Cap on the combined size of all short positions, as a share of the portfolio. 30% allows up to 130% long / 30% short.'
+                    : 'Only used when short positions are allowed'
+                }
+              >
                 <input
                   type="range"
                   min={0}
@@ -278,9 +316,7 @@ export function OptimizePage(): JSX.Element | null {
           </div>
         </div>
 
-        {run.status === 'error' && (
-          <p className="mt-3 text-sm text-brand-negative">{run.message}</p>
-        )}
+        {run.status === 'error' && <p className="mt-3 text-sm text-brand-negative">{run.message}</p>}
         <div className="flex justify-end mt-4">
           <Tooltip label="Open a short description of each optimization mode">
             <button
@@ -300,9 +336,18 @@ export function OptimizePage(): JSX.Element | null {
 
       {run.status === 'ready' && (
         <OptimizeResults
-          response={run.response} settings={run.settings} liveSettings={settings} portfolio={current} basis={run.basis}
-          plan={plan!} applied={run.applied} applyError={applyError} cashDeployPct={cashDeployPct}
-          onCashDeployChange={setCashDeployPct} cashAfter={cashAfter} onOpenApply={() => setApplyOpen(true)}
+          response={run.response}
+          settings={run.settings}
+          liveSettings={settings}
+          portfolio={current}
+          basis={run.basis}
+          plan={plan!}
+          applied={run.applied}
+          applyError={applyError}
+          cashDeployPct={cashDeployPct}
+          onCashDeployChange={setCashDeployPct}
+          cashAfter={cashAfter}
+          onOpenApply={() => setApplyOpen(true)}
         />
       )}
 
@@ -315,14 +360,38 @@ export function OptimizePage(): JSX.Element | null {
             if (event.target === event.currentTarget) setApplyOpen(false)
           }}
         >
-          <div role="dialog" aria-modal="true" aria-labelledby="apply-portfolio-heading" className="bg-brand-surface border border-brand-border rounded-[var(--radius-card)] p-4 w-full max-w-sm shadow-xl">
-            <h2 id="apply-portfolio-heading" className="font-heading font-bold text-lg text-foreground mb-2">Apply to {current.name}?</h2>
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="apply-portfolio-heading"
+            className="bg-brand-surface border border-brand-border rounded-[var(--radius-card)] p-4 w-full max-w-sm shadow-xl"
+          >
+            <h2 id="apply-portfolio-heading" className="font-heading font-bold text-lg text-foreground mb-2">
+              Apply to {current.name}?
+            </h2>
             <div className="space-y-2 mb-4">
-              {applyConfirmLines(plan, 'Optimized', current.cashWeight).map((line) => <p key={line} className="text-sm text-[var(--color-muted)] leading-relaxed">{line}</p>)}
+              {applyConfirmLines(plan, 'Optimized', current.cashWeight).map((line) => (
+                <p key={line} className="text-sm text-[var(--color-muted)] leading-relaxed">
+                  {line}
+                </p>
+              ))}
             </div>
             <div className="flex justify-end gap-2">
-              <button type="button" autoFocus onClick={() => setApplyOpen(false)} className="text-sm font-medium px-4 py-2 rounded-[var(--radius-btn)] bg-brand-surface border border-brand-border text-[var(--color-muted)] hover:bg-brand-border hover:text-foreground">Cancel</button>
-              <button type="button" onClick={handleConfirmApply} className="text-sm font-medium px-4 py-2 rounded-[var(--radius-btn)] bg-btn-action text-btn-action-text hover:opacity-90">Apply</button>
+              <button
+                type="button"
+                autoFocus
+                onClick={() => setApplyOpen(false)}
+                className="text-sm font-medium px-4 py-2 rounded-[var(--radius-btn)] bg-brand-surface border border-brand-border text-[var(--color-muted)] hover:bg-brand-border hover:text-foreground"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmApply}
+                className="text-sm font-medium px-4 py-2 rounded-[var(--radius-btn)] bg-btn-action text-btn-action-text hover:opacity-90"
+              >
+                Apply
+              </button>
             </div>
           </div>
         </div>
@@ -359,12 +428,17 @@ function OptimizeResults({
   onOpenApply: () => void
 }): JSX.Element {
   const rows = portfolioShareRows(weightRows(response), portfolio.cashWeight, cashAfter)
-  const split = basis.kind === 'dollar' ? cashSplit(basis.investedValue, portfolio.cashWeight, cashAfter, portfolio.cashDollars) : null
-  const dollarRows = basis.kind === 'dollar'
-    ? portfolioShareRows(tradeRows(response, basis, split!.sizedValue), portfolio.cashWeight, cashAfter)
-    : null
+  const split =
+    basis.kind === 'dollar'
+      ? cashSplit(basis.investedValue, portfolio.cashWeight, cashAfter, portfolio.cashDollars)
+      : null
+  const dollarRows =
+    basis.kind === 'dollar'
+      ? portfolioShareRows(tradeRows(response, basis, split!.sizedValue), portfolio.cashWeight, cashAfter)
+      : null
   const note = scoreWindowNote(response)
-  const frontierData = response.frontier === null ? null : frontierChartData(response.frontier, modeLabel(response.mode))
+  const frontierData =
+    response.frontier === null ? null : frontierChartData(response.frontier, modeLabel(response.mode))
   const excludedFrontierNote = response.frontier === null ? null : frontierNote(response.frontier)
 
   return (
@@ -388,17 +462,22 @@ function OptimizeResults({
           <div className="bg-brand-accent/10 rounded-[var(--radius-btn)] p-3">
             <p className="text-sm font-semibold">Held at current weight: not enough price history</p>
             {pinnedBannerLines(response.pinned, settings.maxWeightPct).map((line) => (
-              <p key={line} className="text-sm mt-1">{line}</p>
+              <p key={line} className="text-sm mt-1">
+                {line}
+              </p>
             ))}
           </div>
         )}
 
         {response.warnings.map((warning) => (
-          <p key={warning} className="text-sm text-[var(--color-muted)]">{warning}</p>
+          <p key={warning} className="text-sm text-[var(--color-muted)]">
+            {warning}
+          </p>
         ))}
 
         <p className="text-sm text-[var(--color-muted)]">
-          Weights are constant-mix: chosen as if held at these proportions every day. The optimizer and backtest use invested holdings only; the table shows each holding's share of the whole portfolio, cash included.
+          Weights are constant-mix: chosen as if held at these proportions every day. The optimizer and backtest use
+          invested holdings only; the table shows each holding's share of the whole portfolio, cash included.
         </p>
       </div>
 
@@ -409,20 +488,44 @@ function OptimizeResults({
             <Tooltip label="Download this table as a CSV">
               <button
                 type="button"
-                onClick={() => downloadTextFile(optimizeCsvFilename(portfolio.name, response.mode, new Date()), optimizeCsv(response, basis, portfolio.cashWeight, cashAfter, portfolio.cashDollars), 'text/csv;charset=utf-8')}
+                onClick={() =>
+                  downloadTextFile(
+                    optimizeCsvFilename(portfolio.name, response.mode, new Date()),
+                    optimizeCsv(response, basis, portfolio.cashWeight, cashAfter, portfolio.cashDollars),
+                    'text/csv;charset=utf-8',
+                  )
+                }
                 className="inline-flex items-center gap-2 text-sm font-medium px-4 py-2 rounded-[var(--radius-btn)] bg-brand-surface border border-brand-border text-[var(--color-muted)] hover:bg-brand-border hover:text-foreground"
               >
                 <DownloadIcon />
                 <span>Export CSV</span>
               </button>
             </Tooltip>
-            <Tooltip label={applied ? 'Already applied. Run again to optimize the new weights.' : !plan.ok ? applyBlockedText(plan.reason) : "Save the Optimized weights to this portfolio's Holdings"}>
-              <button type="button" disabled={applied || !plan.ok} onClick={onOpenApply} className="text-sm font-semibold px-4 py-2 rounded-[var(--radius-btn)] bg-btn-action text-btn-action-text hover:opacity-90 disabled:opacity-50">Apply to portfolio</button>
+            <Tooltip
+              label={
+                applied
+                  ? 'Already applied. Run again to optimize the new weights.'
+                  : !plan.ok
+                    ? applyBlockedText(plan.reason)
+                    : "Save the Optimized weights to this portfolio's Holdings"
+              }
+            >
+              <button
+                type="button"
+                disabled={applied || !plan.ok}
+                onClick={onOpenApply}
+                className="text-sm font-semibold px-4 py-2 rounded-[var(--radius-btn)] bg-btn-action text-btn-action-text hover:opacity-90 disabled:opacity-50"
+              >
+                Apply to portfolio
+              </button>
             </Tooltip>
           </div>
         </div>
         {portfolio.cashWeight > 0 && (
-          <Tooltip block label="Move this share of the portfolio's cash into the holdings, keeping the Optimized proportions. Updates the table, Export CSV and Apply to portfolio. No re-run needed.">
+          <Tooltip
+            block
+            label="Move this share of the portfolio's cash into the holdings, keeping the Optimized proportions. Updates the table, Export CSV and Apply to portfolio. No re-run needed."
+          >
             <div className="mb-3">
               <label className="mb-1 block text-xs font-medium text-[var(--color-muted)]">
                 {`Cash to deploy: ${cashDeployPct}% · cash ${portfolio.cashWeight.toFixed(1)}% → ${cashAfter.toFixed(1)}%`}
@@ -439,55 +542,122 @@ function OptimizeResults({
             </div>
           </Tooltip>
         )}
-        {applied && <p className="text-sm text-brand-positive mb-3">Applied. Holdings now use the Optimized weights. Run again to compare against them.</p>}
+        {applied && (
+          <p className="text-sm text-brand-positive mb-3">
+            Applied. Holdings now use the Optimized weights. Run again to compare against them.
+          </p>
+        )}
         <div className="overflow-x-auto">
           <table className="w-full border-collapse text-sm">
             {dollarRows === null ? (
               <>
-                <thead><tr><th className={TH}>Ticker</th><th className={`${TH} text-right`}>Current</th><th className={`${TH} text-right`}>Optimized</th><th className={`${TH} text-right`}>Change</th></tr></thead>
-                <tbody>{rows.map((row) => {
-                  const changeText = formatChangePp(row.change)
-                  return <tr key={row.ticker}>
-                    <TickerCell row={row} />
-                    <td className={`${TD} text-right tabular-nums whitespace-nowrap`}>{formatWeight(row.current)}</td>
-                    <td className={`${TD} text-right tabular-nums whitespace-nowrap`}>{formatWeight(row.target)}</td>
-                    <td className={`${TD} text-right tabular-nums whitespace-nowrap ${changeColor(changeText)}`}>{changeText}</td>
+                <thead>
+                  <tr>
+                    <th className={TH}>Ticker</th>
+                    <th className={`${TH} text-right`}>Current</th>
+                    <th className={`${TH} text-right`}>Optimized</th>
+                    <th className={`${TH} text-right`}>Change</th>
                   </tr>
-                })}{portfolio.cashWeight > 0 && <WeightCashRow cashWeight={portfolio.cashWeight} cashAfter={cashAfter} />}</tbody>
+                </thead>
+                <tbody>
+                  {rows.map((row) => {
+                    const changeText = formatChangePp(row.change)
+                    return (
+                      <tr key={row.ticker}>
+                        <TickerCell row={row} />
+                        <td className={`${TD} text-right tabular-nums whitespace-nowrap`}>
+                          {formatWeight(row.current)}
+                        </td>
+                        <td className={`${TD} text-right tabular-nums whitespace-nowrap`}>
+                          {formatWeight(row.target)}
+                        </td>
+                        <td className={`${TD} text-right tabular-nums whitespace-nowrap ${changeColor(changeText)}`}>
+                          {changeText}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                  {portfolio.cashWeight > 0 && (
+                    <WeightCashRow cashWeight={portfolio.cashWeight} cashAfter={cashAfter} />
+                  )}
+                </tbody>
               </>
             ) : (
               <>
-                <thead><tr>
-                  <th className={TH}>Ticker</th><th className={`${TH} text-right`}>Price</th>
-                  <th className={`${TH} text-right`}>Current shares</th><th className={`${TH} text-right`}>Current value</th>
-                  <th className={`${TH} text-right`}>Current</th><th className={`${TH} text-right`}>Optimized shares</th>
-                  <th className={`${TH} text-right`}>Optimized value</th><th className={`${TH} text-right`}>Optimized</th>
-                  <th className={`${TH} text-right`}>Trade shares</th><th className={`${TH} text-right`}>Trade $</th>
-                  <th className={`${TH} text-right`}>Change</th>
-                </tr></thead>
-                <tbody>{dollarRows.map((row) => {
-                  const changeText = formatChangePp(row.change)
-                  const tradeSharesText = formatSignedShares(row.tradeShares)
-                  const tradeMoneyText = formatSignedMoney(row.tradeValue)
-                  return <tr key={row.ticker}>
-                    <TickerCell row={row} />
-                    <td className={`${TD} text-right tabular-nums whitespace-nowrap`}>{formatPrice(row.price)}</td>
-                    <td className={`${TD} text-right tabular-nums whitespace-nowrap`}>{formatShares(row.currentShares)}</td>
-                    <td className={`${TD} text-right tabular-nums whitespace-nowrap`}>{formatMoney(row.currentValue)}</td>
-                    <td className={`${TD} text-right tabular-nums whitespace-nowrap`}>{formatWeight(row.current)}</td>
-                    <td className={`${TD} text-right tabular-nums whitespace-nowrap`}>{formatShares(row.targetShares)}</td>
-                    <td className={`${TD} text-right tabular-nums whitespace-nowrap`}>{formatMoney(row.targetValue)}</td>
-                    <td className={`${TD} text-right tabular-nums whitespace-nowrap`}>{formatWeight(row.target)}</td>
-                    <td className={`${TD} text-right tabular-nums whitespace-nowrap ${changeColor(tradeSharesText)}`}>{tradeSharesText}</td>
-                    <td className={`${TD} text-right tabular-nums whitespace-nowrap ${changeColor(tradeMoneyText)}`}>{tradeMoneyText}</td>
-                    <td className={`${TD} text-right tabular-nums whitespace-nowrap ${changeColor(changeText)}`}>{changeText}</td>
+                <thead>
+                  <tr>
+                    <th className={TH}>Ticker</th>
+                    <th className={`${TH} text-right`}>Price</th>
+                    <th className={`${TH} text-right`}>Current shares</th>
+                    <th className={`${TH} text-right`}>Current value</th>
+                    <th className={`${TH} text-right`}>Current</th>
+                    <th className={`${TH} text-right`}>Optimized shares</th>
+                    <th className={`${TH} text-right`}>Optimized value</th>
+                    <th className={`${TH} text-right`}>Optimized</th>
+                    <th className={`${TH} text-right`}>Trade shares</th>
+                    <th className={`${TH} text-right`}>Trade $</th>
+                    <th className={`${TH} text-right`}>Change</th>
                   </tr>
-                })}{portfolio.cashWeight > 0 && split !== null && <DollarCashRow cashWeight={portfolio.cashWeight} cashAfter={cashAfter} beforeDollars={split.cashBeforeDollars} afterDollars={split.cashAfterDollars} />}</tbody>
+                </thead>
+                <tbody>
+                  {dollarRows.map((row) => {
+                    const changeText = formatChangePp(row.change)
+                    const tradeSharesText = formatSignedShares(row.tradeShares)
+                    const tradeMoneyText = formatSignedMoney(row.tradeValue)
+                    return (
+                      <tr key={row.ticker}>
+                        <TickerCell row={row} />
+                        <td className={`${TD} text-right tabular-nums whitespace-nowrap`}>{formatPrice(row.price)}</td>
+                        <td className={`${TD} text-right tabular-nums whitespace-nowrap`}>
+                          {formatShares(row.currentShares)}
+                        </td>
+                        <td className={`${TD} text-right tabular-nums whitespace-nowrap`}>
+                          {formatMoney(row.currentValue)}
+                        </td>
+                        <td className={`${TD} text-right tabular-nums whitespace-nowrap`}>
+                          {formatWeight(row.current)}
+                        </td>
+                        <td className={`${TD} text-right tabular-nums whitespace-nowrap`}>
+                          {formatShares(row.targetShares)}
+                        </td>
+                        <td className={`${TD} text-right tabular-nums whitespace-nowrap`}>
+                          {formatMoney(row.targetValue)}
+                        </td>
+                        <td className={`${TD} text-right tabular-nums whitespace-nowrap`}>
+                          {formatWeight(row.target)}
+                        </td>
+                        <td
+                          className={`${TD} text-right tabular-nums whitespace-nowrap ${changeColor(tradeSharesText)}`}
+                        >
+                          {tradeSharesText}
+                        </td>
+                        <td
+                          className={`${TD} text-right tabular-nums whitespace-nowrap ${changeColor(tradeMoneyText)}`}
+                        >
+                          {tradeMoneyText}
+                        </td>
+                        <td className={`${TD} text-right tabular-nums whitespace-nowrap ${changeColor(changeText)}`}>
+                          {changeText}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                  {portfolio.cashWeight > 0 && split !== null && (
+                    <DollarCashRow
+                      cashWeight={portfolio.cashWeight}
+                      cashAfter={cashAfter}
+                      beforeDollars={split.cashBeforeDollars}
+                      afterDollars={split.cashAfterDollars}
+                    />
+                  )}
+                </tbody>
               </>
             )}
           </table>
         </div>
-        <p className="mt-3 text-xs text-[var(--color-muted)]">{tradeBasisNote(basis, split === null ? 0 : split.cashBeforeDollars - split.cashAfterDollars)}</p>
+        <p className="mt-3 text-xs text-[var(--color-muted)]">
+          {tradeBasisNote(basis, split === null ? 0 : split.cashBeforeDollars - split.cashAfterDollars)}
+        </p>
         {applyError !== null && <p className="mt-3 text-sm text-brand-negative">{applyError}</p>}
       </div>
 
@@ -512,13 +682,25 @@ function OptimizeResults({
         </p>
         {note !== null && <p className="text-xs text-[var(--color-muted)] mt-1">{note}</p>}
         <p className="text-xs text-[var(--color-muted)] mt-1">
-          The Current curve starts from today's weights on that date, so it will not match the Holdings chart, which
-          is anchored at today.
+          The Current curve starts from today's weights on that date, so it will not match the Holdings chart, which is
+          anchored at today.
         </p>
         <div className="mt-3">
-          <Suspense fallback={<p className="h-[22rem] flex items-center justify-center text-sm text-[var(--color-muted)]">Loading chart…</p>}>
+          <Suspense
+            fallback={
+              <p className="h-[22rem] flex items-center justify-center text-sm text-[var(--color-muted)]">
+                Loading chart…
+              </p>
+            }
+          >
             <ExpandableChart title="Return: Current vs Optimized">
-              {(expanded) => <OptimizeChart rows={curveRows(response.curves)} hasBenchmark={response.curves.benchmark !== null} size={expanded ? 'expanded' : 'inline'} />}
+              {(expanded) => (
+                <OptimizeChart
+                  rows={curveRows(response.curves)}
+                  hasBenchmark={response.curves.benchmark !== null}
+                  size={expanded ? 'expanded' : 'inline'}
+                />
+              )}
             </ExpandableChart>
           </Suspense>
         </div>
@@ -528,12 +710,23 @@ function OptimizeResults({
         <div className="bg-brand-surface border border-brand-border rounded-[var(--radius-card)] p-4">
           <h3 className="text-sm font-semibold mb-1">Efficient frontier</h3>
           <p className="text-xs text-[var(--color-muted)]">
-            In-sample, over the fit window. Each point on the curve is the lowest volatility these holdings could have had for that average return, within your weight limits. Returns here are annualized daily averages, not the CAGR shown above. Past behavior, not a forecast.
-            {frontierData.cloud.length > 0 && ' Gray dots are random mixes within your limits.'} Short lookbacks make this curve jumpy; a longer lookback gives a steadier picture.
+            In-sample, over the fit window. Each point on the curve is the lowest volatility these holdings could have
+            had for that average return, within your weight limits. Returns here are annualized daily averages, not the
+            CAGR shown above. Past behavior, not a forecast.
+            {frontierData.cloud.length > 0 && ' Gray dots are random mixes within your limits.'} Short lookbacks make
+            this curve jumpy; a longer lookback gives a steadier picture.
           </p>
-          {excludedFrontierNote !== null && <p className="mt-1 text-xs text-[var(--color-muted)]">{excludedFrontierNote}</p>}
+          {excludedFrontierNote !== null && (
+            <p className="mt-1 text-xs text-[var(--color-muted)]">{excludedFrontierNote}</p>
+          )}
           <div className="mt-3">
-            <Suspense fallback={<p className="h-[22rem] flex items-center justify-center text-sm text-[var(--color-muted)]">Loading chart…</p>}>
+            <Suspense
+              fallback={
+                <p className="h-[22rem] flex items-center justify-center text-sm text-[var(--color-muted)]">
+                  Loading chart…
+                </p>
+              }
+            >
               <ExpandableChart title="Efficient frontier">
                 {(expanded) => <FrontierChart data={frontierData} size={expanded ? 'expanded' : 'inline'} />}
               </ExpandableChart>
@@ -557,7 +750,17 @@ function WeightCashRow({ cashWeight, cashAfter }: { cashWeight: number; cashAfte
   )
 }
 
-function DollarCashRow({ cashWeight, cashAfter, beforeDollars, afterDollars }: { cashWeight: number; cashAfter: number; beforeDollars: number; afterDollars: number }): JSX.Element {
+function DollarCashRow({
+  cashWeight,
+  cashAfter,
+  beforeDollars,
+  afterDollars,
+}: {
+  cashWeight: number
+  cashAfter: number
+  beforeDollars: number
+  afterDollars: number
+}): JSX.Element {
   const tradeMoneyText = formatSignedMoney(afterDollars - beforeDollars)
   const changeText = formatChangePp((cashAfter - cashWeight) / 100)
   return (
@@ -571,7 +774,9 @@ function DollarCashRow({ cashWeight, cashAfter, beforeDollars, afterDollars }: {
       <td className={`${TD} text-right tabular-nums whitespace-nowrap`}>{formatMoney(afterDollars)}</td>
       <td className={`${TD} text-right tabular-nums whitespace-nowrap`}>{formatWeight(cashAfter / 100)}</td>
       <td className={`${TD} text-right tabular-nums whitespace-nowrap`}>—</td>
-      <td className={`${TD} text-right tabular-nums whitespace-nowrap ${changeColor(tradeMoneyText)}`}>{tradeMoneyText}</td>
+      <td className={`${TD} text-right tabular-nums whitespace-nowrap ${changeColor(tradeMoneyText)}`}>
+        {tradeMoneyText}
+      </td>
       <td className={`${TD} text-right tabular-nums whitespace-nowrap ${changeColor(changeText)}`}>{changeText}</td>
     </tr>
   )
@@ -590,7 +795,10 @@ function MetricTiles({ items }: { items: ReturnType<typeof metricItems> }): JSX.
   return (
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
       {items.map((item) => (
-        <div key={item.label} className="rounded-[var(--radius-card)] border border-brand-border bg-brand-surface p-3 text-center">
+        <div
+          key={item.label}
+          className="rounded-[var(--radius-card)] border border-brand-border bg-brand-surface p-3 text-center"
+        >
           <p className="text-xs text-[var(--color-muted)]">
             <Tooltip label={item.tooltip}>
               <span>{item.label}</span>

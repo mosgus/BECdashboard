@@ -2005,7 +2005,8 @@ risk-free rate to the 3-month T-bill and limits portfolios to holdable tickers.
   one coverage test.
 
   No statsmodels: it is not installed, and the methods above do not need it. Contracts: 0149
-  (backend), 0150 (frontend and guide), 0151 (Prophet).
+  (backend), 0150 (frontend and guide), 0151 (Prophet). 0149 was accepted on 2026-10-02. 0150 was
+  accepted on 2026-10-02 after two reworks, pending Gunnar's browser check.
 - **Tilt is removed** (Gunnar, 2026-09-24; contract 0113). `POST /portfolio/tilt`, `TiltRequest`,
   `optimizer.compute_tilt` and their five tests are deleted. `main` never made tilt reachable, so there
   was no reference behaviour to keep, and no rebuild UI called it. Gunnar first chose to keep it,

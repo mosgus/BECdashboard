@@ -32,7 +32,7 @@ export function defaultStartingValue(portfolio: Portfolio, basis: TradeBasis): s
 }
 
 export function buildMonteCarloRequest(
-  portfolio: Portfolio, settings: MonteCarloSettings, startingText: string, basis: TradeBasis,
+  portfolio: Portfolio, settings: Omit<MonteCarloSettings, 'model'> & { model: string }, startingText: string, basis: TradeBasis,
 ): { ok: true; request: MonteCarloRequest } | { ok: false; message: string } {
   if (portfolio.positions.length === 0) return { ok: false, message: 'Add at least one holding to simulate.' }
   const simulations = settings.simulationsText.trim()
@@ -77,7 +77,7 @@ export function monteCarloSummary(response: MonteCarloResponse): string {
 }
 
 export interface TerminalRow { label: string; value: number; change: number }
-export function terminalRows(response: MonteCarloResponse): TerminalRow[] {
+export function terminalRows(response: Pick<MonteCarloResponse, 'terminal' | 'initial_value'>): TerminalRow[] {
   const values = [
     ['5th percentile', response.terminal.p5], ['25th percentile', response.terminal.p25],
     ['Median', response.terminal.median], ['75th percentile', response.terminal.p75],
@@ -87,7 +87,7 @@ export function terminalRows(response: MonteCarloResponse): TerminalRow[] {
 }
 
 export interface FanPoint { day: number; outer: [number, number]; inner: [number, number]; median: number }
-export function fanChartData(response: MonteCarloResponse): FanPoint[] {
+export function fanChartData(response: Pick<MonteCarloResponse, 'paths'>): FanPoint[] {
   return response.paths.map((point) => ({
     day: point.day, outer: [point.p5, point.p95], inner: [point.p25, point.p75], median: point.p50,
   }))

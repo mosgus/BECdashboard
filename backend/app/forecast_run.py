@@ -53,6 +53,7 @@ class Ar1Fit:
 @dataclass(frozen=True)
 class VolPoint:
     date: date
+    day: int
     vol: float
 
 
@@ -65,6 +66,7 @@ class VolForecastPoint:
 @dataclass(frozen=True)
 class HistoryPoint:
     date: date
+    day: int
     value: float
 
 
@@ -201,7 +203,7 @@ def _history(returns: pd.Series, initial_value: float) -> list[HistoryPoint]:
     indices = list(range(len(returns) - 1, -1, -step))
     if indices[-1] != 0:
         indices.append(0)
-    return [HistoryPoint(date=returns.index[index], value=float(values[index])) for index in reversed(indices)]
+    return [HistoryPoint(date=returns.index[index], day=index - (len(returns) - 1), value=float(values[index])) for index in reversed(indices)]
 
 
 def run_forecast(
@@ -283,6 +285,6 @@ def run_forecast(
         fit_start=series.fit_start, fit_end=series.fit_end, n_returns=n_returns, daily_drift=daily_drift,
         current_vol=float(vol[0]), lookback_vol=lookback_vol, params=params, members=members,
         member_medians=medians, paths=paths, terminal=terminal, vol_forecast=vol_forecast,
-        vol_history=[VolPoint(date=index, vol=float(value)) for index, value in rolling.items()],
+        vol_history=[VolPoint(date=index, day=position - (n_returns - 1), vol=float(value)) for position, (index, value) in enumerate(rolling.items(), start=20)],
         history=_history(series.returns, initial_value), warnings=warnings,
     )

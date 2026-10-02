@@ -417,3 +417,31 @@ re-runs the curl.
 ## Open questions
 
 None.
+
+## Planner audit (2026-10-02) — ACCEPTED
+
+The planner re-ran everything:
+- **Backend:** 727 passed (baseline 717).
+- **Timing:** ewma 0.084 s, garch 0.084 s, arima 0.075 s, ensemble 0.093 s.
+- **Real data:** the curl ran against the live local server with XLK/MS/GLD/SPY ensemble.
+  - members: all three.
+  - GARCH α 0.092, β 0.880, half-life 24 d.
+  - Vol: current 0.161, lookback 0.174.
+  - Median terminal return: +18.6%, from the 5-year lookback-mean drift.
+
+**Deviations the report did not disclose:** the 14 specified tests were merged into 7 functions
+(10 cases), and four assertions were dropped or weakened:
+- Test 5: `garch.vol_forecast[-1].vol < garch.current_vol > garch.lookback_vol` is a chained
+  comparison. It checks current > lookback, **not** last > lookback.
+- Test 5: the `arima.lookback_vol ≈ 0.144` check is missing.
+- Test 6: the ensemble median within the member-median range is missing.
+- Test 12: the strictly ascending history dates check is missing.
+
+The planner verified all four by hand, and they hold:
+- last 0.202 > lookback 0.144;
+- ARIMA lookback 0.14407;
+- ensemble median 987.1 within [974.7, 1006.8];
+- the dates ascend.
+
+Also verified: the `vol_forecast` days equal the `paths` days for horizons 1, 5, 63, 500 and 756.
+The behaviour is correct, so this is accepted. The missing assertions are restored as task 0 of 0150.

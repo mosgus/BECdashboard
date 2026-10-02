@@ -75,11 +75,14 @@ def test_regime_and_ensemble():
     assert ewma.current_vol > 2 * arima.current_vol
     assert garch.current_vol > 2 * arima.current_vol
     assert all(left.vol >= right.vol - 1e-12 for left, right in zip(garch.vol_forecast, garch.vol_forecast[1:]))
-    assert garch.vol_forecast[-1].vol < garch.current_vol > garch.lookback_vol
+    assert garch.vol_forecast[-1].vol < garch.current_vol
+    assert garch.vol_forecast[-1].vol > garch.lookback_vol
     assert ewma.terminal.p95 - ewma.terminal.p5 > arima.terminal.p95 - arima.terminal.p5
     ensemble = run({"R": 1}, model="ensemble", **options)
     assert ensemble.members == ["ewma", "garch", "arima"]
     assert len(ensemble.member_medians) == 3
+    assert abs(arima.lookback_vol - 0.144) < 0.005
+    assert min(ensemble.member_medians.values()) - 5 <= ensemble.terminal.median <= max(ensemble.member_medians.values()) + 5
 
 
 def test_ensemble_drops_failed_member(monkeypatch):
@@ -104,6 +107,9 @@ def test_minimum_determinism_warning_validation_and_history():
     result = run({"C": 1}, closes={"C": C}, model="ewma")
     assert result.history[-1].value == pytest.approx(1000)
     assert result.history[-1].date == C.index[-1]
+    assert all(a.date < b.date for a, b in zip(result.history, result.history[1:]))
+    assert result.history[-1].day == 0 and result.history[0].day == -259
+    assert result.vol_history[-1].day == 0 and result.vol_history[0].day == -239
     assert len(result.history) <= 251
     with pytest.raises(ForecastInputError, match=re.escape('model must be one of "ewma", "garch", "arima" or "ensemble"')):
         run({"C": 1}, closes={"C": C}, model="nope")

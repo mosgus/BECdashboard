@@ -202,7 +202,9 @@ export function CapmSection(): JSX.Element | null {
           <LookbackPicker
             lookbackDays={settings.lookbackDays}
             onChange={(lookbackDays) => setSettings({ ...settings, lookbackDays })}
-            optionTooltip={(option) => `Estimate betas and covariances from the last ${option.days / 365} ${option.days === 365 ? 'year' : 'years'} of daily prices`}
+            optionTooltip={(option) =>
+              `Estimate betas and covariances from the last ${option.days / 365} ${option.days === 365 ? 'year' : 'years'} of daily prices`
+            }
             customTooltip="Estimate betas and covariances from a start date you choose"
           />
           <Field
@@ -306,7 +308,7 @@ export function CapmSection(): JSX.Element | null {
             type="button"
             onClick={submit}
             disabled={!canOptimize(current) || universe.status === 'loading' || run.status === 'running'}
-            className="w-full mt-4 py-3 text-sm rounded-[var(--radius-btn)] bg-btn-action text-btn-action-text font-semibold disabled:opacity-50"
+            className="inline-flex mt-4 px-4 py-3 text-sm rounded-[var(--radius-btn)] bg-btn-action text-btn-action-text font-semibold disabled:opacity-50"
           >
             {run.status === 'running' ? 'Optimizing…' : 'Run CAPM optimizer'}
           </button>
