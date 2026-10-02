@@ -5,6 +5,7 @@ import { getUniverse, monteCarloPortfolio } from '../../../api/client'
 import type { MonteCarloRequest, MonteCarloResponse } from '../../../api/client'
 import { DownloadIcon } from '../../../components/DownloadIcon'
 import { ExpandableChart } from '../../../components/ExpandableChart'
+import { HelpButton } from '../../../components/GuidePanel'
 import { LookbackPicker } from '../../../components/LookbackPicker'
 import { Tooltip } from '../../../components/Tooltip'
 import { downloadTextFile } from '../../../lib/download'
@@ -26,6 +27,7 @@ import type { MonteCarloSettings } from '../../../lib/monteCarlo'
 import { formatMoney, tradeBasis } from '../../../lib/optimize'
 import type { TradeBasis } from '../../../lib/optimize'
 import { isLegacyPortfolio, listPortfolios } from '../../../lib/portfolioStore'
+import { MonteCarloGuide } from './MonteCarloGuide'
 
 const MonteCarloChart = lazy(() => import('../../../components/MonteCarloChart'))
 const TH = 'text-left font-medium text-[11px] tracking-wide uppercase text-[var(--color-muted)] px-3 py-2 border-b border-brand-border'
@@ -46,6 +48,7 @@ export function MonteCarloSection(): JSX.Element | null {
   const [startingText, setStartingText] = useState<string | null>(null)
   const [run, setRun] = useState<RunState>({ status: 'idle' })
   const [universe, setUniverse] = useState<UniverseState>({ status: 'loading' })
+  const [guideOpen, setGuideOpen] = useState(false)
   const mountedRef = useRef(true)
 
   useEffect(() => {
@@ -98,7 +101,10 @@ export function MonteCarloSection(): JSX.Element | null {
   return (
     <div className="space-y-5">
       <div className="bg-brand-surface border border-brand-border rounded-[var(--radius-card)] p-4">
-        <h2 className="text-sm font-semibold mb-4">Monte Carlo settings</h2>
+        <div className="flex items-center justify-between gap-4 mb-4">
+          <h2 className="text-sm font-semibold">Monte Carlo settings</h2>
+          <HelpButton tooltip="What the Monte Carlo simulation does and how each setting works" onClick={() => setGuideOpen(true)} />
+        </div>
         <div className="grid gap-4 md:grid-cols-4">
           <LookbackPicker
             floor={MONTE_CARLO_LOOKBACK_FLOOR}
@@ -159,6 +165,7 @@ export function MonteCarloSection(): JSX.Element | null {
         {run.status === 'error' && <p className="mt-3 text-sm text-brand-negative">{run.message}</p>}
       </div>
       {run.status === 'ready' && <Results response={run.response} changed={!built.ok || !sameMonteCarloRequest(built.request, run.request)} portfolioName={portfolio.name} />}
+      {guideOpen && <MonteCarloGuide onClose={() => setGuideOpen(false)} />}
     </div>
   )
 }

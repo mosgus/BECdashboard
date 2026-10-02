@@ -594,3 +594,24 @@ Run a 4+ holding portfolio on Max Sharpe, with a **5-year** lookback.
 
 Then switch to a 1-year lookback: the curve stretches, which is expected. Then enable shorts: the
 cloud disappears and the curve still draws. Steps 2–6 above still apply.
+
+## Acceptance (planner, 2026-10-01)
+
+**The planner re-ran these checks:**
+- **Tests:** backend 717 passed (709 + 8), frontend 288 passed (R10 extended an existing test).
+- **Gates:** tsc exit 0, and lint shows only the 2 known warnings. The build is OK, and
+  `ResponsiveContainer` isn't in the index bundle.
+- **Greps:** RW1–RW4 pass: RW2 = 7, RW3 = 2, no hex values, no `title=`, and no line over 300
+  characters. The `SyntaxWarning` the coder mentions doesn't appear in the planner's pytest run, so
+  it came from the throwaway script.
+
+**Live API on Gunnar's backend** (XLK/MS/GLD/SPY, 5-year lookback):
+- **Max Sharpe:** 500 cloud points and 25 curve points. Max Sharpe equals Optimized. The cloud's
+  lowest vol is 13.97%, and the curve starts at 13.65%. The cloud's highest return is 23.2%, and
+  the curve's is 23.9%. So the cloud sits inside the curve, as it should.
+- **Shorts on:** the cloud is empty and the curve still draws.
+- **Max weight 30%:** 159 cloud points, so it's sparser under tight limits, as designed. The
+  cloud's lowest vol is 16.48%, and the curve's is 16.35%.
+
+**Accepted.** The browser render (the Human verification for Rework 1) is still Gunnar's to do,
+because Chrome isn't installed.
