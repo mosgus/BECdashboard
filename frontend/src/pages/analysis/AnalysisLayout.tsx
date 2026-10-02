@@ -4,8 +4,8 @@ import { isLegacyPortfolio, listPortfolios } from '../../lib/portfolioStore'
 
 const ANALYSIS_TABS = [
   { path: 'holdings', label: 'Holdings' },
-  { path: 'optimize', label: 'Optimize' },
-  { path: 'outlook', label: 'Outlook' },
+  { path: 'optimize', label: 'Historical Optimize' },
+  { path: 'outlook', label: 'Forward Models' },
   { path: 'monitor', label: 'Monitor' },
   { path: 'risk', label: 'Risk & Perf' },
 ] as const

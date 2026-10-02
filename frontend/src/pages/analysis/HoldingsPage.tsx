@@ -141,7 +141,7 @@ export function HoldingsPage(): JSX.Element {
                 <th className={`${TH} text-right`}>
                   <Tooltip
                     label={valued.cashFixed
-                      ? "Each holding's share of the portfolio at the last close, the price Optimize and Outlook use. Share counts and cash dollars are fixed; weights update after each close."
+                      ? "Each holding's share of the portfolio at the last close, the price Historical Optimize and Forward Models use. Share counts and cash dollars are fixed; weights update after each close."
                       : 'The saved allocation. It does not change as prices move.'}
                   >
                     <span>Weight %</span>

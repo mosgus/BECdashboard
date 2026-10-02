@@ -322,6 +322,52 @@ class MonteCarloResponse(BaseModel):
     warnings: list[str]
 
 
+class ForecastRequest(MonteCarloRequest):
+    model: str = "garch"
+
+
+class ForecastVolPointOut(BaseModel):
+    date: date
+    vol: float
+
+
+class ForecastVolForecastPointOut(BaseModel):
+    day: int
+    vol: float
+
+
+class ForecastHistoryPointOut(BaseModel):
+    date: date
+    value: float
+
+
+class ForecastResponse(BaseModel):
+    tickers: list[str]
+    weights: dict[str, float]
+    cash_weight: float
+    model: str
+    seed: int
+    horizon_days: int
+    num_simulations: int
+    initial_value: float
+    lookback_days: int
+    fit_start: date
+    fit_end: date
+    n_returns: int
+    daily_drift: float
+    current_vol: float
+    lookback_vol: float
+    params: dict[str, float]
+    members: list[str]
+    member_medians: dict[str, float]
+    paths: list[MonteCarloPathPointOut]
+    terminal: MonteCarloTerminalOut
+    vol_forecast: list[ForecastVolForecastPointOut]
+    vol_history: list[ForecastVolPointOut]
+    history: list[ForecastHistoryPointOut]
+    warnings: list[str]
+
+
 class TickerSignals(BaseModel):
     ticker: str
     signals: list[SignalOut]

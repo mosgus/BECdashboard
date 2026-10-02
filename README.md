@@ -17,10 +17,10 @@ These pages ship, all backed by a live deployment on Render.
 | `/` | Market briefing (Gemini, over stored headlines), news cards and text list, four explanatory entry cards |
 | `/universe` | Add, refresh and delete tickers; filters; charts; CSV and zip export; live quotes and day change; an "updating" note while a sweep runs, then a reload without blanking the table |
 | `/ticker/:symbol` | Price chart with technical indicators and signal states for one universe ticker |
-| `/portfolios` | Portfolios in browser storage, either weight-based or **shares-based** (see below). Create by weight or by shares. CSV import and export, including brokerage-style `ticker,shares` files and the Optimize tab's export |
+| `/portfolios` | Portfolios in browser storage, either weight-based or **shares-based** (see below). Create by weight or by shares. CSV import and export, including brokerage-style `ticker,shares` files and the Historical Optimize tab's export |
 | `/portfolios/:id/holdings` | Positions with a Cash row in dollars, plus buy-and-hold value/return charts anchored at today's weights |
-| `/portfolios/:id/optimize` | Eight optimizer modes; an in-sample current-vs-optimized comparison with metrics and a %-return chart vs SPY; a "Cash to deploy" slider; a share-and-dollar trade table; CSV export; Apply to portfolio |
-| `/portfolios/:id/outlook` | **CAPM Optimizer** sub-tab: expected returns with per-holding conviction views, Current vs Target statistics, a sized trade table with dollar VaR, a risk-vs-return chart with the Capital Allocation Line, CSV export, and Apply. The Monte Carlo and Forecast sub-tabs are placeholders |
+| `/portfolios/:id/optimize` (**Historical Optimize**) | Eight optimizer modes; an in-sample current-vs-optimized comparison with metrics and a %-return chart vs SPY; a "Cash to deploy" slider; a share-and-dollar trade table; CSV export; Apply to portfolio |
+| `/portfolios/:id/outlook` (**Forward Models**) | **CAPM Allocation** sub-tab: expected returns with per-holding conviction views, Current vs Target statistics, a sized trade table with dollar VaR, a risk-vs-return chart with the Capital Allocation Line, CSV export, and Apply. The Monte Carlo and Forecast sub-tabs are placeholders |
 | `/ops` | System health, job-run history, a **Force update** button that runs the universe sweep now, theme selector |
 
 Chrome on every page: a scrolling ticker strip, a backend status indicator, and light/dark theming
@@ -29,19 +29,19 @@ off a single attribute.
 **Shares-based portfolios (contracts 0129–0137, finished 2026-10-01).** When a portfolio has cash in
 dollars and a share count on every position, shares are the source of truth. On every price load,
 the weights are re-marked from shares × last close plus the fixed cash. Every edit is a trade at
-the last close, the same price Optimize and Outlook use (contract 0139). Only the Holdings tab's Price
-and Day % columns show the live quote, and only for display:
+the last close, the same price Historical Optimize and Forward Models use (contract 0139). Only
+the Holdings tab's Price and Day % columns show the live quote, and only for display:
 - the Cash editor takes dollars;
 - Add buys a new ticker, or more of a held one, out of the cash (no margin);
 - Remove opens a dialog that sells some or all of a holding in 0.5-point weight steps, with the
   proceeds going to cash;
-- Optimize's table and Apply size trades from the real cash dollars, and Apply keeps the portfolio
-  shares-based.
+- Historical Optimize's table and Apply size trades from the real cash dollars, and Apply keeps
+  the portfolio shares-based.
 
 Portfolios without full share counts stay weight-based and behave as before.
 
-Not built: the Monte Carlo and Forecast sub-tabs of Outlook, the Monitor and Risk & Perf portfolio
-tabs (they render empty on purpose), and the `Research` nav destination. The four entry cards on `/`
+Not built: the Monte Carlo and Forecast sub-tabs of Forward Models, the Monitor and Risk & Perf
+portfolio tabs (they render empty on purpose), and the `Research` nav destination. The four entry cards on `/`
 describe the unbuilt features and are deliberately inert.
 
 **Order of work, decided 2026-09-22: Portfolios → Ops → Research.** All four nav destinations are

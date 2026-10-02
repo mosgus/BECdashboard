@@ -5,7 +5,7 @@ import { CapmSection } from './outlook/CapmSection'
 import { MonteCarloSection } from './outlook/MonteCarloSection'
 
 const TABS = [
-  ['capm', 'CAPM Optimizer', 'Optimize weights on CAPM expected returns and your views'],
+  ['capm', 'CAPM Allocation', 'Allocate using CAPM expected returns and your views'],
   ['montecarlo', 'Monte Carlo', 'Simulate many possible paths for this portfolio'],
   ['forecast', 'Forecast', 'Project this portfolio with statistical forecasting models (not built yet)'],
 ] as const
@@ -16,7 +16,7 @@ export function OutlookPage(): JSX.Element {
 
   return (
     <div>
-      <div role="tablist" aria-label="Outlook sections" className="flex gap-1 border-b border-brand-border mb-5">
+      <div role="tablist" aria-label="Forward Models sections" className="flex gap-1 border-b border-brand-border mb-5">
         {TABS.map(([value, label, tooltip]) => (
           <Tooltip key={value} label={tooltip}>
             <button

@@ -161,11 +161,11 @@ refreshes hang off it — it is the only reliable signal that a person is presen
 - Not reusing any general-purpose env: `requirements.txt` has to match what Render installs into a clean environment, and a shared env accumulates unrelated packages, so a missing dependency wouldn't surface locally.
 - `requirements.txt` (runtime) and `requirements-dev.txt` (test-only) are separate files. Render installs only the former; shipping pytest to production both bloats the build and destroys the file's meaning as a statement of what the app needs.
 
-**Drop Prophet as a forecast method.**
+**Drop Prophet as a forecast method.** *(Reversed 2026-10-01: Prophet returns as an opt-in method labelled unstable and untested, contract 0151. See the Forecast decision under Outlook.)*
 - Was one of four methods (`ewma`/`arima`/`prophet`/`ensemble`) in the old `backend/core/forecast.py`, using only generic yearly-seasonality-on-log-price — nothing Prophet-specific (no holidays, custom regressors, changepoint tuning).
 - Heaviest dependency in the stack for the least differentiated output. Ensemble already tolerated per-method failures, so losing it doesn't break the pattern.
 - **This is a value judgment, not a compatibility constraint.** The original "most fragile native dependency" framing was tested on 2026-09-11 and did not survive: Prophet installs from a wheel on 3.13 in seconds. If the replacement forecaster below turns out to be genuinely hard with statsmodels alone, Prophet is available and this decision is cheap to reverse — reopen it on the merits rather than assuming it's blocked.
-- Replacement forecaster is an open question, not decided — statsmodels alone (already a dependency) may cover it.
+- ~~Replacement forecaster is an open question~~ Decided 2026-10-01: EWMA, GARCH(1,1), AR(1) and a pooled Ensemble, using numpy and scipy only (see the Forecast decision under Outlook). statsmodels is not installed.
 
 **No auth, no multi-user concerns.** Single-operator prototype. No login, no per-user data isolation, no audit log, no job-run tracking.
 
@@ -1971,22 +1971,41 @@ risk-free rate to the 3-month T-bill and limits portfolios to holdable tickers.
 - **Target value defaults to the portfolio's current market value** (Σ shares × last close) when
   every position has a share count. Otherwise the user types it. Gunnar was indifferent. The planner
   kept the default because Holdings already computes that value.
-- **Forecast ports all four methods: EWMA, ARIMA, Prophet and Ensemble** (Gunnar: "the more the
-  merrier"). Accepted costs, which the planner raised:
-  - **Deploy weight:** Prophet 1.4 ships prebuilt wheels with cmdstan bundled, so there is no
-    compile step. But it pulls in `cmdstanpy`, `matplotlib` and `holidays`, which makes the Render
-    build larger and slower.
-  - **Speed on Render's free tier:** `main`'s own tooltip says Prophet "may take 30–60 s". Each
-    request fits twice: once for the forecast and once for the 30-day calibration hold-out.
-    Ensemble fits every method, so it is the slowest.
-  - **Compatibility is unverified:** Prophet and statsmodels have not been tested against this
-    stack (pandas 3, numpy 2.5, Python 3.13). The Forecast contracts must check that in a scratch
-    venv before anything touches `requirements.txt`.
-  - **Mitigation:** Prophet and Ensemble get their own contract, after EWMA and ARIMA, and are
-    lazy-imported. If they prove too slow on Render, that contract can be dropped without touching
-    the rest.
-  - `main`'s `_calibration` swallows every exception and returns nulls. The port must not: a failed
-    calibration is reported as failed.
+- **Forecast: five methods, fixed rather than ported** (Gunnar, 2026-10-01). It supersedes the
+  earlier "ports all four methods as-is". The planner read `main:backend/core/forecast.py` and found
+  the methods wrong, not just slow:
+  - EWMA's drift (λ = 0.97) extrapolates roughly the last month's trend.
+  - ARIMA(1,1,0) has no constant, so its median is flat. Its 90% interval is labelled P10/P90, and
+    its P25/P75 come from an ad hoc 0.25 blend.
+  - Ensemble's bands are the lowest P10 and the highest P90 across models, which are not
+    percentiles of anything.
+  - Calibration scores one 30-day window, and its "directional accuracy" just counts up days.
+
+  **The rebuild's methods**, all on the same constant-mix daily series and lookback as Monte Carlo,
+  with simulated P5–P95 bands:
+  - **EWMA:** RiskMetrics λ = 0.94 volatility, held flat over the horizon, with the lookback's mean
+    drift.
+  - **GARCH(1,1):** the new main model. Gaussian MLE with variance targeting, fitted with scipy.
+    Volatility starts at today's level and reverts toward the lookback level.
+  - **ARIMA:** AR(1) with a constant on daily log returns, fitted with numpy. This is `main`'s
+    ARIMA(1,1,0) on log prices plus the missing drift term. It is labelled the constant-volatility
+    baseline.
+  - **Ensemble:** the EWMA, GARCH and ARIMA paths pooled into one distribution. A member that fails
+    to fit is dropped, with a warning.
+  - **Prophet:** kept at Gunnar's request, and labelled **unstable and untested**. It has its own
+    contract after the frontend, with the scratch-venv compatibility check before
+    `requirements.txt` changes. It is not in the Ensemble, and calibration does not cover it,
+    because refitting at many start dates would take hours.
+
+  **Why the expected return is the lookback average:** it matches Monte Carlo. The tab's value over
+  Monte Carlo is that its volatility reacts to the current market. Its value is not trend
+  extrapolation.
+
+  **Calibration** (the later contract) covers Monte Carlo plus EWMA, GARCH, ARIMA and Ensemble with
+  one coverage test.
+
+  No statsmodels: it is not installed, and the methods above do not need it. Contracts: 0149
+  (backend), 0150 (frontend and guide), 0151 (Prophet).
 - **Tilt is removed** (Gunnar, 2026-09-24; contract 0113). `POST /portfolio/tilt`, `TiltRequest`,
   `optimizer.compute_tilt` and their five tests are deleted. `main` never made tilt reachable, so there
   was no reference behaviour to keep, and no rebuild UI called it. Gunnar first chose to keep it,
@@ -2333,6 +2352,12 @@ contract 0075, matching `main:frontend/app/portfolios/[id]/`. Five tabs: Holding
 slug and is an optimizer (see the buy-and-hold entry). `main` also has an unlinked `rebalance` page.
 *(Corrected 2026-09-24. This previously said the reference had no backtest.)*
 
+**Current portfolio tab labels (2026-10-02):** `Historical Optimize`, `Forward Models`, and, within
+Forward Models, `CAPM Allocation`. The route slugs remain `optimize` and `outlook`. Historical
+Optimize fits allocations from trailing returns; Forward Models groups the CAPM allocation,
+Monte Carlo, and forecast tools. Renaming the CAPM subsection avoids presenting two neighboring
+tabs as optimizers with no visible distinction.
+
 - **The id is in the URL because selection is not durable anywhere else.** `PortfoliosPage` holds
   `selectedId` in React state, which a reload destroys, so `/portfolios/holdings` would have no way to
   know what it was analysing. This is the same reasoning as the 2026-09-13 routing decision — real
@@ -2346,7 +2371,7 @@ slug and is an optimizer (see the buy-and-hold entry). `main` also has an unlink
 
 ## Explicitly cut from the old app
 
-Prophet forecasting; login/identity system (`X-Actor-Name`); watchlists; alerts; audit log; the full
+~~Prophet forecasting~~ (reinstated 2026-10-01 as an opt-in, untested method, 0151); login/identity system (`X-Actor-Name`); watchlists; alerts; audit log; the full
 relational Postgres/Supabase schema and Alembic migrations; server-side multi-user portfolio storage.
 
 **Two corrections, 2026-09-22.** This list had gone stale in a way that made the `Research` / `/ops`

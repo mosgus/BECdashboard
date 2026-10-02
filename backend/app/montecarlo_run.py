@@ -65,6 +65,81 @@ class MonteCarloResult:
     warnings: list[str]
 
 
+@dataclass(frozen=True)
+class PortfolioSeries:
+    tickers: list[str]
+    weights: dict[str, float]
+    cash_weight: float
+    returns: pd.Series
+    fit_start: date
+    fit_end: date
+    warnings: list[str]
+
+
+def portfolio_series(
+    weights: dict[str, float], cash: float, closes: dict[str, pd.Series], *, lookback_days: int
+) -> PortfolioSeries:
+    """Validate inputs and build constant-mix daily simple portfolio returns."""
+    if error := lookback_error(lookback_days):
+        raise MonteCarloInputError(error)
+    if not weights or any(not math.isfinite(weight) or weight <= 0 for weight in weights.values()):
+        raise MonteCarloInputError("weights must be finite and greater than zero")
+    if not (math.isfinite(cash) and cash >= 0):
+        raise MonteCarloInputError("cash must be finite and zero or more")
+    for ticker in weights:
+        if ticker not in closes or closes[ticker].empty:
+            raise MonteCarloInputError(f"missing closes for weighted ticker {ticker!r}")
+
+    tickers = list(weights)
+    total = sum(weights.values()) + cash
+    portfolio_weights = {ticker: float(weights[ticker] / total) for ticker in tickers}
+    cash_weight = float(cash / total)
+    end = min(closes[ticker].index[-1] for ticker in tickers)
+    lookback_start = end - timedelta(days=lookback_days)
+    prices = pd.DataFrame({ticker: closes[ticker] for ticker in tickers})
+    prices = prices.loc[(prices.index >= lookback_start) & (prices.index <= end)].sort_index().ffill()
+    returns = prices.pct_change().dropna()
+
+    fit_start, fit_end = returns.index[0], returns.index[-1]
+    latest_ticker = max(tickers, key=lambda ticker: closes[ticker].index[0])
+    first_bar = closes[latest_ticker].index[0]
+    warnings = []
+    if first_bar > lookback_start + timedelta(days=PIN_GRACE_DAYS):
+        warnings.append(
+            f"The simulation uses returns from {fit_start} onward: {latest_ticker} has prices only from {first_bar}."
+        )
+    port = returns.values @ np.array([portfolio_weights[ticker] for ticker in tickers])
+    return PortfolioSeries(
+        tickers=tickers, weights=portfolio_weights, cash_weight=cash_weight,
+        returns=pd.Series(port, index=returns.index), fit_start=fit_start, fit_end=fit_end, warnings=warnings,
+    )
+
+
+def summarize_paths(
+    paths_array: np.ndarray, initial_value: float, horizon_days: int
+) -> tuple[list[PathPoint], TerminalStats]:
+    """Thin simulated paths and calculate their percentile bands and terminal statistics."""
+    step = max(1, horizon_days // 60)
+    days = list(range(0, horizon_days + 1, step))
+    if days[-1] != horizon_days:
+        days.append(horizon_days)
+    paths = []
+    for day in days:
+        p5, p25, p50, p75, p95 = np.percentile(paths_array[:, day], [5, 25, 50, 75, 95])
+        paths.append(PathPoint(day=int(day), p5=float(p5), p25=float(p25), p50=float(p50), p75=float(p75), p95=float(p95)))
+
+    terminal_values = paths_array[:, -1]
+    p5, p25, p75, p95 = np.percentile(terminal_values, [5, 25, 75, 95])
+    mean = float(terminal_values.mean())
+    median = float(np.median(terminal_values))
+    terminal = TerminalStats(
+        mean=mean, median=median, p5=float(p5), p25=float(p25), p75=float(p75), p95=float(p95),
+        prob_loss=float(np.mean(terminal_values < initial_value)),
+        mean_return=float(mean / initial_value - 1), median_return=float(median / initial_value - 1),
+    )
+    return paths, terminal
+
+
 def run_monte_carlo(
     weights: dict[str, float],
     cash: float,
@@ -88,40 +163,14 @@ def run_monte_carlo(
         raise MonteCarloInputError("num_simulations must be between 100 and 10000")
     if not (math.isfinite(initial_value) and initial_value > 0):
         raise MonteCarloInputError("initial_value must be finite and greater than zero")
-    if not weights or any(not math.isfinite(weight) or weight <= 0 for weight in weights.values()):
-        raise MonteCarloInputError("weights must be finite and greater than zero")
-    if not (math.isfinite(cash) and cash >= 0):
-        raise MonteCarloInputError("cash must be finite and zero or more")
-    for ticker in weights:
-        if ticker not in closes or closes[ticker].empty:
-            raise MonteCarloInputError(f"missing closes for weighted ticker {ticker!r}")
-
-    tickers = list(weights)
-    total = sum(weights.values()) + cash
-    portfolio_weights = {ticker: float(weights[ticker] / total) for ticker in tickers}
-    cash_weight = float(cash / total)
-    end = min(closes[ticker].index[-1] for ticker in tickers)
-    lookback_start = end - timedelta(days=lookback_days)
-    prices = pd.DataFrame({ticker: closes[ticker] for ticker in tickers})
-    prices = prices.loc[(prices.index >= lookback_start) & (prices.index <= end)].sort_index().ffill()
-    returns = prices.pct_change().dropna()
-    n_returns = len(returns)
+    series = portfolio_series(weights, cash, closes, lookback_days=lookback_days)
+    n_returns = len(series.returns)
     if n_returns < MIN_RETURNS:
         raise MonteCarloInputError(
             f"Need at least {MIN_RETURNS} daily returns to simulate, but the holdings share only {n_returns}."
         )
 
-    fit_start, fit_end = returns.index[0], returns.index[-1]
-    latest_ticker = max(tickers, key=lambda ticker: closes[ticker].index[0])
-    first_bar = closes[latest_ticker].index[0]
-    warnings = []
-    if first_bar > lookback_start + timedelta(days=PIN_GRACE_DAYS):
-        warnings.append(
-            f"The simulation uses returns from {fit_start} onward: {latest_ticker} has prices only from {first_bar}."
-        )
-
-    w = np.array([portfolio_weights[ticker] for ticker in tickers])
-    port = returns.values @ w
+    port = series.returns.values
     daily_mean = float(port.mean())
     daily_vol = float(port.std(ddof=1))
     rng = np.random.default_rng(seed)
@@ -132,46 +181,23 @@ def run_monte_carlo(
     values = initial_value * np.cumprod(np.maximum(1 + draws, 0.0), axis=1)
     paths_array = np.hstack([np.full((num_simulations, 1), initial_value), values])
 
-    step = max(1, horizon_days // 60)
-    days = list(range(0, horizon_days + 1, step))
-    if days[-1] != horizon_days:
-        days.append(horizon_days)
-    paths = []
-    for day in days:
-        p5, p25, p50, p75, p95 = np.percentile(paths_array[:, day], [5, 25, 50, 75, 95])
-        paths.append(PathPoint(day=int(day), p5=float(p5), p25=float(p25), p50=float(p50), p75=float(p75), p95=float(p95)))
-
-    terminal_values = paths_array[:, -1]
-    p5, p25, p75, p95 = np.percentile(terminal_values, [5, 25, 75, 95])
-    mean = float(terminal_values.mean())
-    median = float(np.median(terminal_values))
-    terminal = TerminalStats(
-        mean=mean,
-        median=median,
-        p5=float(p5),
-        p25=float(p25),
-        p75=float(p75),
-        p95=float(p95),
-        prob_loss=float(np.mean(terminal_values < initial_value)),
-        mean_return=float(mean / initial_value - 1),
-        median_return=float(median / initial_value - 1),
-    )
+    paths, terminal = summarize_paths(paths_array, initial_value, horizon_days)
     return MonteCarloResult(
-        tickers=tickers,
-        weights=portfolio_weights,
-        cash_weight=cash_weight,
+        tickers=series.tickers,
+        weights=series.weights,
+        cash_weight=series.cash_weight,
         model=model,
         seed=seed,
         horizon_days=horizon_days,
         num_simulations=num_simulations,
         initial_value=initial_value,
         lookback_days=lookback_days,
-        fit_start=fit_start,
-        fit_end=fit_end,
+        fit_start=series.fit_start,
+        fit_end=series.fit_end,
         n_returns=n_returns,
         daily_mean=daily_mean,
         daily_vol=daily_vol,
         paths=paths,
         terminal=terminal,
-        warnings=warnings,
+        warnings=series.warnings,
     )
