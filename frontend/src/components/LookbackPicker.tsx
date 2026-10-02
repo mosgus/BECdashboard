@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { JSX } from 'react'
-import { customLookbackDays, LOOKBACK_OPTIONS } from '../lib/optimize'
+import { customLookbackDays, DEFAULT_LOOKBACK_FLOOR, LOOKBACK_OPTIONS } from '../lib/optimize'
+import type { LookbackFloor } from '../lib/optimize'
 import { Tooltip } from './Tooltip'
 import { LookbackDialog } from './LookbackDialog'
 export function LookbackPicker({
@@ -8,11 +9,13 @@ export function LookbackPicker({
   onChange,
   optionTooltip,
   customTooltip,
+  floor = DEFAULT_LOOKBACK_FLOOR,
 }: {
   lookbackDays: number
   onChange: (days: number) => void
   optionTooltip: (option: { label: string; days: number }) => string
   customTooltip: string
+  floor?: LookbackFloor
 }): JSX.Element {
   const [customDate, setCustomDate] = useState<string | null>(null)
   const [open, setOpen] = useState(false)
@@ -45,6 +48,7 @@ export function LookbackPicker({
       {open && (
         <LookbackDialog
           initialDate={customDate}
+          floor={floor}
           onCancel={() => setOpen(false)}
           onConfirm={(date) => {
             onChange(customLookbackDays(date, new Date()))

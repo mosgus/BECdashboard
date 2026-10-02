@@ -424,6 +424,31 @@ export async function capmPortfolio(body: CapmRequest): Promise<CapmResponse> {
   return request<CapmResponse>('/portfolio/capm', { method: 'POST', body })
 }
 
+export interface MonteCarloRequest {
+  tickers: string[]
+  weights: number[]
+  cash: number
+  initial_value: number
+  horizon_days: number
+  num_simulations: number
+  lookback_days: number
+  model: string
+}
+export interface MonteCarloPathPoint { day: number; p5: number; p25: number; p50: number; p75: number; p95: number }
+export interface MonteCarloTerminal {
+  mean: number; median: number; p5: number; p25: number; p75: number; p95: number
+  prob_loss: number; mean_return: number; median_return: number
+}
+export interface MonteCarloResponse {
+  tickers: string[]; weights: Record<string, number>; cash_weight: number; model: string; seed: number
+  horizon_days: number; num_simulations: number; initial_value: number; lookback_days: number
+  fit_start: string; fit_end: string; n_returns: number; daily_mean: number; daily_vol: number
+  paths: MonteCarloPathPoint[]; terminal: MonteCarloTerminal; warnings: string[]
+}
+export async function monteCarloPortfolio(body: MonteCarloRequest): Promise<MonteCarloResponse> {
+  return request<MonteCarloResponse>('/portfolio/montecarlo', { method: 'POST', body })
+}
+
 export async function getPortfolioSeries(
   tickers: string[], weights: number[], cash: number, include: string[],
 ): Promise<PortfolioSeriesResponse> {

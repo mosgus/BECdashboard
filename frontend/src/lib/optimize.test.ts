@@ -23,6 +23,7 @@ import {
   pinnedBannerLines,
   runSummary,
   customLookbackDays, presetLookbackDate, customLookbackError, lookbackLabel,
+  type LookbackFloor,
   sameSettings,
   scoreWindowNote,
   tradeBasis,
@@ -102,6 +103,28 @@ describe('cashSplit', () => {
     expect(split.cashBeforeDollars).toBe(0)
     expect(split.cashAfterDollars).toBe(0)
     expect(split.sizedValue).toBeCloseTo(900, 6)
+  })
+})
+
+describe('custom lookback floors', () => {
+  const today = new Date(2026, 9, 1)
+  const mc: LookbackFloor = { days: 89, label: '3 months' }
+
+  it('uses the supplied floor while retaining the default', () => {
+    expect(customLookbackError('2026-07-05', today, mc)).toBe('Choose a date at least 3 months ago.')
+    expect(customLookbackError('2026-07-04', today, mc)).toBeNull()
+    expect(customLookbackError('2026-09-04', today)).toBe('Choose a date at least 4 weeks ago.')
+  })
+
+  it('always permits 3M and blocks 1M at the Monte Carlo floor', () => {
+    for (const year of [2027, 2028]) {
+      const days = year === 2028 ? 366 : 365
+      for (let index = 0; index < days; index += 1) {
+        const date = new Date(year, 0, 1 + index)
+        expect(customLookbackDays(presetLookbackDate('3M', date), date)).toBeGreaterThanOrEqual(89)
+        expect(customLookbackDays(presetLookbackDate('1M', date), date)).toBeLessThan(89)
+      }
+    }
   })
 })
 

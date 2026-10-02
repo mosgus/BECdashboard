@@ -2,10 +2,11 @@ import { useState } from 'react'
 import type { JSX } from 'react'
 import { Tooltip } from '../../components/Tooltip'
 import { CapmSection } from './outlook/CapmSection'
+import { MonteCarloSection } from './outlook/MonteCarloSection'
 
 const TABS = [
   ['capm', 'CAPM Optimizer', 'Optimize weights on CAPM expected returns and your views'],
-  ['montecarlo', 'Monte Carlo', 'Simulate many possible paths for this portfolio (not built yet)'],
+  ['montecarlo', 'Monte Carlo', 'Simulate many possible paths for this portfolio'],
   ['forecast', 'Forecast', 'Project this portfolio with statistical forecasting models (not built yet)'],
 ] as const
 
@@ -30,9 +31,7 @@ export function OutlookPage(): JSX.Element {
           </Tooltip>
         ))}
       </div>
-      {tab === 'capm' ? (
-        <CapmSection />
-      ) : (
+      {tab === 'capm' ? <CapmSection /> : tab === 'montecarlo' ? <MonteCarloSection /> : (
         <div className="bg-brand-surface border border-brand-border rounded-[var(--radius-card)] p-16 text-center">
           <h2 className="text-lg font-semibold text-foreground mb-2">{placeholder}</h2>
           <p className="text-sm text-[var(--color-muted)]">{placeholder} — not built yet.</p>

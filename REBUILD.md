@@ -1865,7 +1865,7 @@ What was deliberately *not* ported into it is in the next bullet but one.
       that knowingly. But Optimize and CAPM refuse to run when `n_returns <= n_fitted_holdings`,
       because there the covariance is singular and the weights are arbitrary.
     - **Monte Carlo keeps `MIN_RETURNS = 60`.** Bootstrapping from 20 days just replays them. So
-      its effective floor is about 3 months, and its future picker should reflect that.
+      its effective floor is about 3 months. Its picker passes a floor of 89 days / "3 months" (the shortest "3 months ago" span), so 1 Mo is disabled there (0146). Optimize and CAPM keep the 28-day default.
     - **Wire format:** `lookback_days` stays the field. The frontend converts the chosen date into
       days before today, and the backend counts back from the last common close, so `fit_start` can
       land a few days before the chosen date. The run summary shows the real fit window.
@@ -2048,6 +2048,12 @@ risk-free rate to the 3-month T-bill and limits portfolios to holdable tickers.
   - It warns when a holding's history is shorter than the lookback, and it refuses to run on fewer than 60 daily returns.
   - **`main`'s "Brier score" is not ported.** `mean((prob_above − 0.5)²)` scores no outcome and is minimised by predicting 50/50. Its coverage figure comes from one autocorrelated hold-out path.
   - It accepts any `lookback_days` from 28 to 3650 (0145). Its 60-return floor makes the effective minimum about 3 months.
+- **The Monte Carlo section is `pages/analysis/outlook/MonteCarloSection.tsx`, with its logic in `lib/monteCarlo.ts`** (0146, 2026-10-01).
+  - **Settings:** the shared `LookbackPicker` with a `floor` of 89 days / "3 months", so 1 Mo is disabled. Model (Bootstrap/Normal), Horizon (3 Mo/6 Mo/1 Yr/2 Yr), Simulations (100–10,000) and Starting value.
+  - **Units:** the starting value defaults to holdings plus cash on a dollar basis, and to a hypothetical $10,000 for weights-only portfolios. The request sends dollars or weights to match; the backend only needs consistent units.
+  - **Results:** a summary, the stale-settings note, warnings, the chance of a loss, a lazy fan chart (`components/MonteCarloChart.tsx`, 5–95 and 25–75 bands plus the median), a terminal-value table and a CSV of the percentile paths.
+  - **Read-only:** nothing is applied to the portfolio. Help comes with 0147.
+  - **Lookback floor:** `customLookbackError` and `LookbackDialog` take a `LookbackFloor`. The default is 28 days / "4 weeks", for Optimize and CAPM.
   - **Calibration comes later, as its own contract** (Gunnar, 2026-10-01), after the Monte Carlo tab works. It must be a real check, not `main`'s formula. The planned design fits on the history before each of many past start dates, then measures how often the realised outcome landed inside the predicted p5–p95 and p25–p75 bands (expect about 90% and 50%), and shows how many start dates that used.
 - **The efficient-frontier chart is kept, but not in Monte Carlo** (Gunnar, 2026-10-01: "I still want it"). `main` draws it inside its Monte Carlo section, but it answers an optimization question: the best risk/return mix of your holdings, with Max Sharpe, Min Variance and Risk Parity marked. It simulates nothing. The planner's proposed home is the Optimize tab, whose modes are the points it marks. It is ported later with its own backend route (`main`'s `efficient_frontier`, around line 905 of `portfolios_optimize.py`), and it has no contract yet.
 

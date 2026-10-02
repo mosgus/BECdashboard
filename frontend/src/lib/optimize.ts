@@ -29,6 +29,8 @@ export const LOOKBACK_OPTIONS: ReadonlyArray<{ label: string; days: number }> = 
 ]
 export const MIN_LOOKBACK_DAYS = 28
 export const MAX_LOOKBACK_DAYS = 3650
+export interface LookbackFloor { days: number; label: string }
+export const DEFAULT_LOOKBACK_FLOOR: LookbackFloor = { days: MIN_LOOKBACK_DAYS, label: '4 weeks' }
 export type LookbackPreset = '1M' | '3M' | '6M' | 'YTD'
 
 function localDateParts(today: Date): [number, number, number] { return [today.getFullYear(), today.getMonth(), today.getDate()] }
@@ -56,10 +58,10 @@ export function presetLookbackDate(preset: LookbackPreset, today: Date): string 
   const lastDay = new Date(targetYear, normalizedMonth + 1, 0).getDate()
   return dateText(targetYear, normalizedMonth, Math.min(day, lastDay))
 }
-export function customLookbackError(date: string, today: Date): string | null {
+export function customLookbackError(date: string, today: Date, floor: LookbackFloor = DEFAULT_LOOKBACK_FLOOR): string | null {
   if (!parseDate(date)) return 'Choose a start date.'
   const days = customLookbackDays(date, today)
-  if (days < MIN_LOOKBACK_DAYS) return 'Choose a date at least 4 weeks ago.'
+  if (days < floor.days) return `Choose a date at least ${floor.label} ago.`
   if (days > MAX_LOOKBACK_DAYS) return 'Choose a date within the last 10 years.'
   return null
 }

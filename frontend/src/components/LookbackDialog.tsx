@@ -1,25 +1,27 @@
 import { useEffect, useRef, useState } from 'react'
 import type { JSX } from 'react'
-import { customLookbackError, MAX_LOOKBACK_DAYS, MIN_LOOKBACK_DAYS, presetLookbackDate } from '../lib/optimize'
-import type { LookbackPreset } from '../lib/optimize'
+import { customLookbackError, DEFAULT_LOOKBACK_FLOOR, MAX_LOOKBACK_DAYS, presetLookbackDate } from '../lib/optimize'
+import type { LookbackFloor, LookbackPreset } from '../lib/optimize'
 import { Tooltip } from './Tooltip'
 
 export function LookbackDialog({
   initialDate,
   onConfirm,
   onCancel,
+  floor = DEFAULT_LOOKBACK_FLOOR,
 }: {
   initialDate: string | null
   onConfirm: (date: string) => void
   onCancel: () => void
+  floor?: LookbackFloor
 }): JSX.Element {
   const today = new Date()
-  const [value, setValue] = useState(initialDate ?? presetLookbackDate('6M', today))
+  const [value, setValue] = useState(initialDate ?? (customLookbackError(presetLookbackDate('6M', today), today, floor) === null ? presetLookbackDate('6M', today) : presetLookbackDate('3M', today)))
   const [activePreset, setActivePreset] = useState<LookbackPreset | null>(null)
   const dialogRef = useRef<HTMLDivElement>(null)
   const priorRef = useRef<HTMLElement | null>(null)
   const onCancelRef = useRef(onCancel)
-  const error = customLookbackError(value, today)
+  const error = customLookbackError(value, today, floor)
   useEffect(() => {
     priorRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
     dialogRef.current?.focus()
@@ -37,13 +39,15 @@ export function LookbackDialog({
     priorRef.current?.focus()
   }
   const max = (() => {
-    const d = new Date(today.getFullYear(), today.getMonth(), today.getDate() - MIN_LOOKBACK_DAYS)
+    const d = new Date(today.getFullYear(), today.getMonth(), today.getDate() - floor.days)
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
   })()
   const oldest = (() => {
     const d = new Date(today.getFullYear(), today.getMonth(), today.getDate() - MAX_LOOKBACK_DAYS)
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
   })()
+  const presetButtonClass = (preset: LookbackPreset) =>
+    `w-full px-3 py-2 text-sm font-medium border rounded-[var(--radius-btn)] disabled:opacity-50 ${activePreset === preset ? 'bg-btn-action text-btn-action-text border-btn-action' : 'border-brand-border text-[var(--color-muted)] hover:bg-brand-border hover:text-foreground'}`
   return (
     <div
       className="fixed inset-0 bg-overlay flex items-center justify-center p-4 z-[100]"
@@ -85,20 +89,26 @@ export function LookbackDialog({
         </label>
         <div className="grid grid-cols-4 gap-2 mt-3">
           {([['1M', '1 Mo'], ['3M', '3 Mo'], ['6M', '6 Mo'], ['YTD', 'YTD']] as const).map(([preset, label]) => {
-            const disabled = preset === 'YTD' && customLookbackError(presetLookbackDate(preset, today), today) !== null
+            const disabled = customLookbackError(presetLookbackDate(preset, today), today, floor) !== null
+            const tooltip = disabled
+              ? `This analysis needs at least ${floor.label} of prices.`
+              : preset === 'YTD'
+                ? 'Set the start date to January 1 of this year'
+                : `Set the start date to ${preset === '1M' ? '1 month' : preset === '3M' ? '3 months' : '6 months'} ago`
             return (
-              <button
-                key={preset}
-                type="button"
-                disabled={disabled}
-                onClick={() => {
-                  setValue(presetLookbackDate(preset, today))
-                  setActivePreset(preset)
-                }}
-                className={`w-full px-3 py-2 text-sm font-medium border rounded-[var(--radius-btn)] disabled:opacity-50 ${activePreset === preset ? 'bg-btn-action text-btn-action-text border-btn-action' : 'border-brand-border text-[var(--color-muted)] hover:bg-brand-border hover:text-foreground'}`}
-              >
-                {label}
-              </button>
+              <Tooltip key={preset} block label={tooltip}>
+                <button
+                  type="button"
+                  disabled={disabled}
+                  onClick={() => {
+                    setValue(presetLookbackDate(preset, today))
+                    setActivePreset(preset)
+                  }}
+                  className={presetButtonClass(preset)}
+                >
+                  {label}
+                </button>
+              </Tooltip>
             )
           })}
         </div>
