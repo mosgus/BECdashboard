@@ -181,6 +181,16 @@ def optimize_portfolio(body: OptimizeRequest) -> dict:
         "rf": result.rf,
         "rf_source": rf_source,
         "warnings": result.warnings,
+        "frontier": None if result.frontier is None else {
+            "points": [{"vol": vol, "ret": ret} for vol, ret in result.frontier.points],
+            "cloud": [{"vol": vol, "ret": ret} for vol, ret in result.frontier.cloud],
+            "current": {"vol": result.frontier.current[0], "ret": result.frontier.current[1]},
+            "optimized": {"vol": result.frontier.optimized[0], "ret": result.frontier.optimized[1]},
+            "min_variance": {"vol": result.frontier.min_variance[0], "ret": result.frontier.min_variance[1]},
+            "max_sharpe": None if result.frontier.max_sharpe is None else {"vol": result.frontier.max_sharpe[0], "ret": result.frontier.max_sharpe[1]},
+            "tickers": result.frontier.tickers,
+            "excluded": result.frontier.excluded,
+        },
     }
 
 

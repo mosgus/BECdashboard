@@ -2055,7 +2055,11 @@ risk-free rate to the 3-month T-bill and limits portfolios to holdable tickers.
   - **Read-only:** nothing is applied to the portfolio. Help comes with 0147.
   - **Lookback floor:** `customLookbackError` and `LookbackDialog` take a `LookbackFloor`. The default is 28 days / "4 weeks", for Optimize and CAPM.
   - **Calibration comes later, as its own contract** (Gunnar, 2026-10-01), after the Monte Carlo tab works. It must be a real check, not `main`'s formula. The planned design fits on the history before each of many past start dates, then measures how often the realised outcome landed inside the predicted p5–p95 and p25–p75 bands (expect about 90% and 50%), and shows how many start dates that used.
-- **The efficient-frontier chart is kept, but not in Monte Carlo** (Gunnar, 2026-10-01: "I still want it"). `main` draws it inside its Monte Carlo section, but it answers an optimization question: the best risk/return mix of your holdings, with Max Sharpe, Min Variance and Risk Parity marked. It simulates nothing. The planner's proposed home is the Optimize tab, whose modes are the points it marks. It is ported later with its own backend route (`main`'s `efficient_frontier`, around line 905 of `portfolios_optimize.py`), and it has no contract yet.
+- **The efficient-frontier chart is kept, but not in Monte Carlo** (Gunnar, 2026-10-01: "I still want it"). `main` draws it inside its Monte Carlo section, but it answers an optimization question: the best risk/return mix of your holdings, with Max Sharpe, Min Variance and Risk Parity marked. It simulates nothing. **Decided (Gunnar, 2026-10-01): it goes on the Optimize tab, below the backtest chart (0148).** Holdings was considered and rejected: it has no lookback and would recompute on every visit.
+  - **No separate route.** It is computed inside every `/portfolio/optimize` run, from the same returns, bounds and short cap. A 25-point sweep takes about 0.2 s at 30 holdings.
+  - **Historical means, not `main`'s CAPM returns,** so the Max Sharpe dot lands on the curve.
+  - **Fitted holdings only.** Pinned holdings are listed as excluded.
+  - **Dropped from `main`:** the Risk Parity dot. The random-portfolio cloud was dropped at first, then restored in 0148 Rework 1, because Gunnar found the chart unreadable without it. It is now sampled inside the run's limits, so it is no longer misleading under bounds.
 
 ## Open questions (not decided)
 

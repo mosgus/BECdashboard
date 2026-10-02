@@ -64,6 +64,9 @@ def test_optimize_accepts_lowercase_tickers(client, db_mode):
     assert body["pinned"] == []
     assert body["curves"]["benchmark"][0] == pytest.approx(100)
     assert body["fit_start"] == "2024-01-03"
+    assert {"points", "current", "optimized", "min_variance", "max_sharpe", "tickers", "excluded"} <= body["frontier"].keys()
+    assert {"vol", "ret"} <= body["frontier"]["points"][0].keys()
+    assert isinstance(body["frontier"]["cloud"], list)
 
 
 def test_optimize_pins_young_holding(client, db_mode):

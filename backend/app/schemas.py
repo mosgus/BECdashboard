@@ -167,6 +167,22 @@ class OptimizeCurvesOut(BaseModel):
     benchmark: list[float] | None
 
 
+class FrontierPointOut(BaseModel):
+    vol: float
+    ret: float
+
+
+class FrontierOut(BaseModel):
+    points: list[FrontierPointOut]
+    cloud: list[FrontierPointOut]
+    current: FrontierPointOut
+    optimized: FrontierPointOut
+    min_variance: FrontierPointOut
+    max_sharpe: FrontierPointOut | None
+    tickers: list[str]
+    excluded: list[str]
+
+
 class OptimizeResponse(BaseModel):
     tickers: list[str]
     current_weights: dict[str, float]
@@ -186,6 +202,7 @@ class OptimizeResponse(BaseModel):
     rf: float
     rf_source: str
     warnings: list[str]
+    frontier: FrontierOut | None
 
 
 class CapmHoldingConfigIn(BaseModel):

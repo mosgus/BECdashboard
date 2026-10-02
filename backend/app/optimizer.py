@@ -146,6 +146,98 @@ def optimize_max_sharpe(returns: pd.DataFrame, rf: float = 0.0, max_weight: floa
     return dict(zip(tickers, _run_optimizer(_neg_sharpe_hist, len(tickers), bounds, mean_ret, cov, rf, extra_constraints=_short_cap_constraint(max_short)).tolist()))
 
 
+def efficient_frontier(
+    returns: pd.DataFrame,
+    *,
+    min_weight: float,
+    max_weight: float,
+    max_short: float | None = None,
+    num_points: int = 25,
+) -> list[tuple[float, float]]:
+    """(vol, ret) pairs, annualized, from the min-variance mix up to the max-return mix."""
+    mu = returns.mean().values * 252
+    cov = returns.cov().values * 252
+    n = len(returns.columns)
+    bounds = tuple((min_weight, max_weight) for _ in range(n))
+    constraints = [{"type": "eq", "fun": lambda w: w.sum() - 1.0}, *_short_cap_constraint(max_short)]
+
+    def variance(w: np.ndarray) -> float:
+        return float(w @ cov @ w)
+
+    min_variance = minimize(
+        variance,
+        np.ones(n) / n,
+        method="SLSQP",
+        bounds=bounds,
+        constraints=constraints,
+        options={"ftol": 1e-10, "maxiter": 2000},
+    )
+    if not min_variance.success:
+        raise RuntimeError(f"Optimizer did not converge: {min_variance.message}")
+    max_return = minimize(
+        lambda w: -float(w @ mu),
+        min_variance.x,
+        method="SLSQP",
+        bounds=bounds,
+        constraints=constraints,
+        options={"ftol": 1e-10, "maxiter": 2000},
+    )
+    if not max_return.success:
+        raise RuntimeError(f"Optimizer did not converge: {max_return.message}")
+
+    min_ret = float(min_variance.x @ mu)
+    max_ret = float(max_return.x @ mu)
+    point = lambda w: (float(np.sqrt(w @ cov @ w)), float(w @ mu))
+    if max_ret - min_ret < 1e-9:
+        return [point(min_variance.x)]
+
+    points = [point(min_variance.x)]
+    previous = min_variance.x
+    for target in np.linspace(min_ret, max_ret, num_points)[1:]:
+        target_constraints = [
+            *constraints,
+            {"type": "eq", "fun": lambda w, target=target: float(w @ mu) - target},
+        ]
+        result = minimize(
+            variance,
+            previous,
+            method="SLSQP",
+            bounds=bounds,
+            constraints=target_constraints,
+            options={"ftol": 1e-10, "maxiter": 2000},
+        )
+        if result.success:
+            previous = result.x
+            points.append(point(result.x))
+    return sorted(points, key=lambda item: item[1])
+
+
+def random_portfolios(
+    returns: pd.DataFrame,
+    *,
+    min_weight: float,
+    max_weight: float,
+    count: int = 500,
+    seed: int = 42,
+) -> list[tuple[float, float]]:
+    """(vol, ret) of random long-only mixes inside [min_weight, max_weight], annualized."""
+    mu = returns.mean().values * 252
+    cov = returns.cov().values * 252
+    n = len(returns.columns)
+    free = 1 - n * min_weight
+    if free < 0:
+        return []
+    rng = np.random.default_rng(seed)
+    points: list[tuple[float, float]] = []
+    for _ in range(10):
+        weights = min_weight + free * rng.dirichlet(np.ones(n), 2000)
+        accepted = weights[weights.max(axis=1) <= max_weight + 1e-12]
+        points.extend((float(np.sqrt(w @ cov @ w)), float(w @ mu)) for w in accepted)
+        if len(points) >= count:
+            break
+    return points[:count]
+
+
 # FLAG(custom): the method is standard (max Sharpe on CAPM expected returns). The custom part is
 # the expected-returns input, which carries the view bumps — see compute_capm_expected_returns.
 def optimize_max_sharpe_capm(returns: pd.DataFrame, expected_returns: dict[str, float], rf: float = 0.04, max_weight: float = 1.0, min_weight: float = 0.0, asset_bounds: Optional[dict[str, tuple[float, float]]] = None, max_short: float | None = None) -> dict[str, float]:

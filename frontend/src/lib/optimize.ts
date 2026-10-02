@@ -1,4 +1,4 @@
-import type { OptimizeCurves, OptimizeMetrics, OptimizeRebalance, OptimizeRequest, OptimizeResponse, PinnedHolding } from '../api/client'
+import type { Frontier, OptimizeCurves, OptimizeMetrics, OptimizeRebalance, OptimizeRequest, OptimizeResponse, PinnedHolding } from '../api/client'
 import { downsample } from './chart'
 import { isValidCurrentPortfolio } from './portfolio'
 import type { Portfolio } from './portfolio'
@@ -107,6 +107,11 @@ export interface TradeRow extends WeightRow {
 }
 export interface CurveRow { date: string; current: number; optimized: number; benchmark: number | null }
 export interface MetricItem { label: string; value: string; tooltip: string }
+export interface FrontierChartData {
+  curve: { vol: number; ret: number }[]
+  cloud: { vol: number; ret: number }[]
+  markers: { name: string; vol: number; ret: number }[]
+}
 
 export const APPLY_MIN_FRACTION = 0.0005
 
@@ -364,6 +369,22 @@ export function curveRows(curves: OptimizeCurves): CurveRow[] {
     benchmark: curves.benchmark === null ? null : (curves.benchmark[index] / curves.benchmark[0] - 1) * 100,
   }))
   return downsample(rows)
+}
+
+export function frontierChartData(frontier: Frontier, modeName: string): FrontierChartData {
+  const point = ({ vol, ret }: { vol: number; ret: number }) => ({ vol: vol * 100, ret: ret * 100 })
+  const markers = [
+    { name: 'Current', ...point(frontier.current) },
+    { name: `Optimized (${modeName})`, ...point(frontier.optimized) },
+    { name: 'Min Variance', ...point(frontier.min_variance) },
+  ]
+  if (frontier.max_sharpe !== null) markers.push({ name: 'Max Sharpe', ...point(frontier.max_sharpe) })
+  return { curve: frontier.points.map(point), cloud: frontier.cloud.map(point), markers }
+}
+
+export function frontierNote(frontier: Frontier): string | null {
+  if (frontier.excluded.length === 0) return null
+  return `Covers ${frontier.tickers.join(', ')} only. ${frontier.excluded.join(', ')} ${frontier.excluded.length === 1 ? 'is' : 'are'} left out for short history, so these points show the other holdings' mix, scaled to 100%.`
 }
 
 export function metricItems(metrics: OptimizeMetrics | null, rf: number, rfSource: 'live' | 'fallback'): MetricItem[] {

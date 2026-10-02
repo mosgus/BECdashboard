@@ -20,6 +20,8 @@ import {
   buildOptimizeRequest,
   canOptimize,
   curveRows,
+  frontierChartData,
+  frontierNote,
   formatChangePp,
   formatMoney,
   formatSignedMoney,
@@ -45,6 +47,7 @@ import { downloadTextFile } from '../../lib/download'
 import { isLegacyPortfolio, listPortfolios, savePortfolio } from '../../lib/portfolioStore'
 
 const OptimizeChart = lazy(() => import('../../components/OptimizeChart'))
+const FrontierChart = lazy(() => import('../../components/FrontierChart'))
 
 const TH = 'text-left font-medium text-[11px] tracking-wide uppercase text-[var(--color-muted)] px-3 py-2 border-b border-brand-border whitespace-nowrap'
 const TD = 'px-3 py-2.5 border-b border-brand-border'
@@ -361,6 +364,8 @@ function OptimizeResults({
     ? portfolioShareRows(tradeRows(response, basis, split!.sizedValue), portfolio.cashWeight, cashAfter)
     : null
   const note = scoreWindowNote(response)
+  const frontierData = response.frontier === null ? null : frontierChartData(response.frontier, modeLabel(response.mode))
+  const excludedFrontierNote = response.frontier === null ? null : frontierNote(response.frontier)
 
   return (
     <div className="space-y-5">
@@ -442,17 +447,41 @@ function OptimizeResults({
                 <thead><tr><th className={TH}>Ticker</th><th className={`${TH} text-right`}>Current</th><th className={`${TH} text-right`}>Optimized</th><th className={`${TH} text-right`}>Change</th></tr></thead>
                 <tbody>{rows.map((row) => {
                   const changeText = formatChangePp(row.change)
-                  return <tr key={row.ticker}><TickerCell row={row} /><td className={`${TD} text-right tabular-nums whitespace-nowrap`}>{formatWeight(row.current)}</td><td className={`${TD} text-right tabular-nums whitespace-nowrap`}>{formatWeight(row.target)}</td><td className={`${TD} text-right tabular-nums whitespace-nowrap ${changeColor(changeText)}`}>{changeText}</td></tr>
+                  return <tr key={row.ticker}>
+                    <TickerCell row={row} />
+                    <td className={`${TD} text-right tabular-nums whitespace-nowrap`}>{formatWeight(row.current)}</td>
+                    <td className={`${TD} text-right tabular-nums whitespace-nowrap`}>{formatWeight(row.target)}</td>
+                    <td className={`${TD} text-right tabular-nums whitespace-nowrap ${changeColor(changeText)}`}>{changeText}</td>
+                  </tr>
                 })}{portfolio.cashWeight > 0 && <WeightCashRow cashWeight={portfolio.cashWeight} cashAfter={cashAfter} />}</tbody>
               </>
             ) : (
               <>
-                <thead><tr><th className={TH}>Ticker</th><th className={`${TH} text-right`}>Price</th><th className={`${TH} text-right`}>Current shares</th><th className={`${TH} text-right`}>Current value</th><th className={`${TH} text-right`}>Current</th><th className={`${TH} text-right`}>Optimized shares</th><th className={`${TH} text-right`}>Optimized value</th><th className={`${TH} text-right`}>Optimized</th><th className={`${TH} text-right`}>Trade shares</th><th className={`${TH} text-right`}>Trade $</th><th className={`${TH} text-right`}>Change</th></tr></thead>
+                <thead><tr>
+                  <th className={TH}>Ticker</th><th className={`${TH} text-right`}>Price</th>
+                  <th className={`${TH} text-right`}>Current shares</th><th className={`${TH} text-right`}>Current value</th>
+                  <th className={`${TH} text-right`}>Current</th><th className={`${TH} text-right`}>Optimized shares</th>
+                  <th className={`${TH} text-right`}>Optimized value</th><th className={`${TH} text-right`}>Optimized</th>
+                  <th className={`${TH} text-right`}>Trade shares</th><th className={`${TH} text-right`}>Trade $</th>
+                  <th className={`${TH} text-right`}>Change</th>
+                </tr></thead>
                 <tbody>{dollarRows.map((row) => {
                   const changeText = formatChangePp(row.change)
                   const tradeSharesText = formatSignedShares(row.tradeShares)
                   const tradeMoneyText = formatSignedMoney(row.tradeValue)
-                  return <tr key={row.ticker}><TickerCell row={row} /><td className={`${TD} text-right tabular-nums whitespace-nowrap`}>{formatPrice(row.price)}</td><td className={`${TD} text-right tabular-nums whitespace-nowrap`}>{formatShares(row.currentShares)}</td><td className={`${TD} text-right tabular-nums whitespace-nowrap`}>{formatMoney(row.currentValue)}</td><td className={`${TD} text-right tabular-nums whitespace-nowrap`}>{formatWeight(row.current)}</td><td className={`${TD} text-right tabular-nums whitespace-nowrap`}>{formatShares(row.targetShares)}</td><td className={`${TD} text-right tabular-nums whitespace-nowrap`}>{formatMoney(row.targetValue)}</td><td className={`${TD} text-right tabular-nums whitespace-nowrap`}>{formatWeight(row.target)}</td><td className={`${TD} text-right tabular-nums whitespace-nowrap ${changeColor(tradeSharesText)}`}>{tradeSharesText}</td><td className={`${TD} text-right tabular-nums whitespace-nowrap ${changeColor(tradeMoneyText)}`}>{tradeMoneyText}</td><td className={`${TD} text-right tabular-nums whitespace-nowrap ${changeColor(changeText)}`}>{changeText}</td></tr>
+                  return <tr key={row.ticker}>
+                    <TickerCell row={row} />
+                    <td className={`${TD} text-right tabular-nums whitespace-nowrap`}>{formatPrice(row.price)}</td>
+                    <td className={`${TD} text-right tabular-nums whitespace-nowrap`}>{formatShares(row.currentShares)}</td>
+                    <td className={`${TD} text-right tabular-nums whitespace-nowrap`}>{formatMoney(row.currentValue)}</td>
+                    <td className={`${TD} text-right tabular-nums whitespace-nowrap`}>{formatWeight(row.current)}</td>
+                    <td className={`${TD} text-right tabular-nums whitespace-nowrap`}>{formatShares(row.targetShares)}</td>
+                    <td className={`${TD} text-right tabular-nums whitespace-nowrap`}>{formatMoney(row.targetValue)}</td>
+                    <td className={`${TD} text-right tabular-nums whitespace-nowrap`}>{formatWeight(row.target)}</td>
+                    <td className={`${TD} text-right tabular-nums whitespace-nowrap ${changeColor(tradeSharesText)}`}>{tradeSharesText}</td>
+                    <td className={`${TD} text-right tabular-nums whitespace-nowrap ${changeColor(tradeMoneyText)}`}>{tradeMoneyText}</td>
+                    <td className={`${TD} text-right tabular-nums whitespace-nowrap ${changeColor(changeText)}`}>{changeText}</td>
+                  </tr>
                 })}{portfolio.cashWeight > 0 && split !== null && <DollarCashRow cashWeight={portfolio.cashWeight} cashAfter={cashAfter} beforeDollars={split.cashBeforeDollars} afterDollars={split.cashAfterDollars} />}</tbody>
               </>
             )}
@@ -494,6 +523,24 @@ function OptimizeResults({
           </Suspense>
         </div>
       </div>
+
+      {frontierData !== null && (
+        <div className="bg-brand-surface border border-brand-border rounded-[var(--radius-card)] p-4">
+          <h3 className="text-sm font-semibold mb-1">Efficient frontier</h3>
+          <p className="text-xs text-[var(--color-muted)]">
+            In-sample, over the fit window. Each point on the curve is the lowest volatility these holdings could have had for that average return, within your weight limits. Returns here are annualized daily averages, not the CAGR shown above. Past behavior, not a forecast.
+            {frontierData.cloud.length > 0 && ' Gray dots are random mixes within your limits.'} Short lookbacks make this curve jumpy; a longer lookback gives a steadier picture.
+          </p>
+          {excludedFrontierNote !== null && <p className="mt-1 text-xs text-[var(--color-muted)]">{excludedFrontierNote}</p>}
+          <div className="mt-3">
+            <Suspense fallback={<p className="h-[22rem] flex items-center justify-center text-sm text-[var(--color-muted)]">Loading chart…</p>}>
+              <ExpandableChart title="Efficient frontier">
+                {(expanded) => <FrontierChart data={frontierData} size={expanded ? 'expanded' : 'inline'} />}
+              </ExpandableChart>
+            </Suspense>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

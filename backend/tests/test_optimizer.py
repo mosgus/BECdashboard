@@ -4,7 +4,7 @@ import pytest
 
 from app.optimizer import (
     compute_betas, compute_capm_expected_returns, compute_drawdown, compute_equity_curve,
-    compute_metrics, compute_portfolio_returns, compute_returns,
+    compute_metrics, compute_portfolio_returns, compute_returns, efficient_frontier, random_portfolios,
     compute_rolling_vol, optimize_equal_weight, optimize_max_diversification,
     optimize_max_sharpe, optimize_max_sharpe_capm, optimize_max_sortino, optimize_min_cvar,
     optimize_min_variance, optimize_risk_parity, optimize_target_volatility,
@@ -46,6 +46,78 @@ def test_equal_weight():
 def test_min_variance_analytic_and_bound():
     assert_weights(optimize_min_variance(UNCORR), {"A": .8, "B": .2})
     assert_weights(optimize_min_variance(UNCORR, max_weight=.6), {"A": .6, "B": .4})
+
+
+def test_efficient_frontier_uses_historical_means_and_bounds():
+    a = np.tile([.01, -.01, .01, -.01], 65) + .0002
+    b = np.tile([.02, .02, -.02, -.02], 65) + .0006
+    returns = pd.DataFrame({"A": a, "B": b})
+    frontier = efficient_frontier(returns, min_weight=0, max_weight=1)
+
+    assert len(frontier) == 25
+    assert frontier[0] == pytest.approx((.142260, .07056), abs=1e-4)
+    assert frontier[-1] == pytest.approx((.318102, .1512), abs=1e-4)
+    assert all(left[1] < right[1] for left, right in zip(frontier, frontier[1:]))
+    assert all(left[0] <= right[0] + 1e-6 for left, right in zip(frontier, frontier[1:]))
+
+    capped = efficient_frontier(returns, min_weight=0, max_weight=.6)
+    assert capped[-1] == pytest.approx((.201186, .11088), abs=1e-4)
+
+    equal_means = pd.DataFrame({"A": a, "B": b - .0004})
+    assert len(efficient_frontier(equal_means, min_weight=0, max_weight=1)) == 1
+
+
+def test_max_sharpe_lies_on_the_efficient_frontier():
+    returns = pd.DataFrame({
+        "A": np.tile([.01, -.01, .01, -.01], 65) + .0002,
+        "B": np.tile([.02, .02, -.02, -.02], 65) + .0006,
+    })
+    frontier = efficient_frontier(returns, min_weight=0, max_weight=1)
+    sharpe = optimize_max_sharpe(returns, rf=0)
+    weights = np.array([sharpe[ticker] for ticker in returns.columns])
+    mu, cov = returns.mean().values * 252, returns.cov().values * 252
+    sharpe_ret = float(weights @ mu)
+    sharpe_vol = float(np.sqrt(weights @ cov @ weights))
+    lower, upper = next((left, right) for left, right in zip(frontier, frontier[1:]) if left[1] <= sharpe_ret <= right[1])
+    interpolated = lower[0] + (upper[0] - lower[0]) * (sharpe_ret - lower[1]) / (upper[1] - lower[1])
+    assert sharpe_vol == pytest.approx(interpolated, abs=1e-3)
+
+
+def random_fixture():
+    a = np.tile([.01, -.01, .01, -.01], 65) + .0002
+    b = np.tile([.02, .02, -.02, -.02], 65) + .0006
+    return pd.DataFrame({"A": a, "B": b})
+
+
+def test_random_portfolios_fill_the_long_only_range():
+    cloud = random_portfolios(random_fixture(), min_weight=0, max_weight=1)
+    assert len(cloud) == 500
+    assert all(vol >= .142260 - 1e-6 for vol, _ in cloud)
+    assert all(.0504 - 1e-6 <= ret <= .1512 + 1e-6 for _, ret in cloud)
+
+
+def test_random_portfolios_are_deterministic():
+    returns = random_fixture()
+    assert random_portfolios(returns, min_weight=0, max_weight=1) == random_portfolios(returns, min_weight=0, max_weight=1)
+
+
+def test_random_portfolios_honor_a_maximum_weight():
+    cloud = random_portfolios(random_fixture(), min_weight=0, max_weight=.6)
+    assert len(cloud) == 500
+    assert all(.09072 - 1e-6 <= ret <= .11088 + 1e-6 for _, ret in cloud)
+
+
+def test_random_portfolios_honor_a_minimum_weight():
+    cloud = random_portfolios(random_fixture(), min_weight=.3, max_weight=1)
+    assert all(.08064 - 1e-6 <= ret <= .12096 + 1e-6 for _, ret in cloud)
+
+
+def test_random_portfolios_return_empty_when_only_a_single_exact_mix_fits():
+    assert random_portfolios(random_fixture(), min_weight=0, max_weight=.5) == []
+
+
+def test_random_portfolios_return_empty_when_minimums_are_infeasible():
+    assert random_portfolios(random_fixture(), min_weight=.6, max_weight=1) == []
 
 
 def test_risk_parity_inverse_volatility():

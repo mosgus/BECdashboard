@@ -129,6 +129,12 @@ export function OptimizerGuide({ onClose }: { onClose: () => void }): JSX.Elemen
             Every mode picks constant-mix weights: proportions assumed to be held every day. The curves then score
             those weights as bought and held, or rebalanced on the schedule you choose.
           </p>
+          <p className="text-xs text-[var(--color-muted)]">
+            The efficient frontier chart draws, for each level of average return, the lowest-volatility mix of your
+            holdings within your weight limits. Points on the curve are efficient. Points below or to the right of it
+            take more risk for the same return. Max Sharpe always sits on the curve. Modes that ignore expected return,
+            like Risk Parity or Min CVaR, usually sit inside it.
+          </p>
         </div>
       </div>
     </div>

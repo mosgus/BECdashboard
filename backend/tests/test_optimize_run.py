@@ -39,6 +39,44 @@ def test_min_variance_without_pinning_has_analytic_result():
     assert len(result.curves.dates) == 261
 
 
+def test_frontier_uses_fitted_holdings_and_contains_max_sharpe():
+    minimum = run_optimize({"A": 1, "B": 1}, {"A": A, "B": B}, SPY, lookback_days=365)
+    assert minimum.frontier is not None
+    assert minimum.frontier.tickers == ["A", "B"]
+    assert minimum.frontier.excluded == []
+    assert len(minimum.frontier.points) == 1
+    assert minimum.frontier.min_variance == minimum.frontier.points[0]
+    assert minimum.frontier.optimized == pytest.approx(minimum.frontier.points[0], abs=1e-4)
+
+    pinned = run_optimize({"A": 1, "B": 1, "Y": 2}, CLOSES, SPY, lookback_days=365)
+    assert pinned.frontier is not None
+    assert pinned.frontier.excluded == ["Y"]
+    assert "Y" not in pinned.frontier.tickers
+
+    sharpe = run_optimize({"A": 1, "B": 1}, {"A": A, "B": B}, SPY, mode="max_sharpe", lookback_days=365)
+    assert sharpe.frontier is not None
+    assert sharpe.frontier.max_sharpe == sharpe.frontier.optimized
+
+
+def test_frontier_includes_a_random_cloud_for_long_only_runs():
+    result = run_optimize({"A": 1, "B": 1}, {"A": A, "B": B}, SPY, lookback_days=365)
+    assert result.frontier is not None
+    assert result.frontier.cloud
+
+
+def test_frontier_omits_the_random_cloud_when_shorting_is_enabled():
+    result = run_optimize({"A": 1, "B": 1}, {"A": A, "B": B}, SPY, lookback_days=365, allow_short=True)
+    assert result.frontier is not None
+    assert result.frontier.cloud == []
+
+
+def test_frontier_failure_is_contained(monkeypatch):
+    monkeypatch.setattr("app.optimize_run.efficient_frontier", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("boom")))
+    result = run_optimize({"A": 1, "B": 1}, {"A": A, "B": B}, SPY, lookback_days=365)
+    assert result.frontier is None
+    assert "The efficient frontier could not be computed for this run." in result.warnings
+
+
 def test_custom_lookbacks_and_bounds():
     result = run_optimize({"A": 1, "B": 1}, {"A": A, "B": B}, SPY, lookback_days=180)
     assert result.lookback_days == 180

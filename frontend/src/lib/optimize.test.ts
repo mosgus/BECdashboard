@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { OptimizeResponse } from '../api/client'
+import type { Frontier, OptimizeResponse } from '../api/client'
 import type { Portfolio } from './portfolio'
 import { parsePortfolioCsv } from './portfolioCsv'
 import {
@@ -12,6 +12,8 @@ import {
   cashAfterDeploy,
   cashSplit,
   curveRows,
+  frontierChartData,
+  frontierNote,
   deployedInvestedValue,
   formatChangePp,
   formatMoney,
@@ -56,6 +58,7 @@ const RESPONSE: OptimizeResponse = {
   rf: 0.0427,
   rf_source: 'live',
   warnings: ['In-sample: the optimized weights were chosen using the same prices they are scored on.'],
+  frontier: null,
 }
 const PORTFOLIO: Portfolio = {
   id: 'p1', name: 'Test', cashWeight: 10, updatedAt: '2026-09-24T00:00:00Z',
@@ -73,6 +76,38 @@ const SHARES_BASED: Portfolio = {
 }
 const SB_CLOSES = new Map<string, number | null>([['AAA', 45], ['BBB', 15]])
 const SB_RESPONSE = { tickers: ['AAA', 'BBB'], target_weights: { AAA: 0.6, BBB: 0.4 }, feasible: true }
+const FRONTIER: Frontier = {
+  points: [{ vol: 0.1, ret: 0.05 }, { vol: 0.2, ret: 0.1 }],
+  cloud: [{ vol: 0.12, ret: 0.06 }],
+  current: { vol: 0.18, ret: 0.06 },
+  optimized: { vol: 0.1, ret: 0.05 },
+  min_variance: { vol: 0.1, ret: 0.05 },
+  max_sharpe: null,
+  tickers: ['AAA', 'BBB'],
+  excluded: [],
+}
+
+describe('efficient frontier helpers', () => {
+  it('maps annualized fractions to percent chart data and omits a missing Max Sharpe marker', () => {
+    const data = frontierChartData(FRONTIER, 'Min Variance')
+    expect(data.curve).toEqual([{ vol: 10, ret: 5 }, { vol: 20, ret: 10 }])
+    expect(data.cloud).toEqual([{ vol: 12, ret: 6 }])
+    expect(data.markers.map((marker) => marker.name)).toEqual([
+      'Current', 'Optimized (Min Variance)', 'Min Variance',
+    ])
+  })
+
+  it('includes Max Sharpe and describes excluded short-history holdings', () => {
+    const withSharpe = { ...FRONTIER, max_sharpe: { vol: 0.15, ret: 0.08 } }
+    expect(frontierChartData(withSharpe, 'Min Variance').markers.at(-1)).toEqual({
+      name: 'Max Sharpe', vol: 15, ret: 8,
+    })
+    expect(frontierNote(FRONTIER)).toBeNull()
+    expect(frontierNote({ ...FRONTIER, excluded: ['YYY'] })).toBe(
+      'Covers AAA, BBB only. YYY is left out for short history, so these points show the other holdings\' mix, scaled to 100%.',
+    )
+  })
+})
 
 describe('cashSplit', () => {
   it('uses fixed cash dollars to size deployed holdings', () => {

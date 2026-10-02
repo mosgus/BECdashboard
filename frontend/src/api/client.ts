@@ -340,6 +340,22 @@ export interface OptimizeCurves {
   benchmark: number[] | null
 }
 
+export interface FrontierPoint {
+  vol: number
+  ret: number
+}
+
+export interface Frontier {
+  points: FrontierPoint[]
+  cloud: FrontierPoint[]
+  current: FrontierPoint
+  optimized: FrontierPoint
+  min_variance: FrontierPoint
+  max_sharpe: FrontierPoint | null
+  tickers: string[]
+  excluded: string[]
+}
+
 export type OptimizeMetrics = Record<string, number | null>
 
 export interface OptimizeResponse {
@@ -364,6 +380,7 @@ export interface OptimizeResponse {
   rf: number
   rf_source: 'live' | 'fallback'
   warnings: string[]
+  frontier: Frontier | null
 }
 
 export async function optimizePortfolio(body: OptimizeRequest): Promise<OptimizeResponse> {
