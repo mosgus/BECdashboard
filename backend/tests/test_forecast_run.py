@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from app.forecast_run import ForecastFitError, ForecastInputError, ewma_variance, fit_ar1, fit_garch, run_forecast
+from app.forecast_run import PROPHET_WARNING, ForecastFitError, ForecastInputError, ewma_variance, fit_ar1, fit_garch, run_forecast
 from app.montecarlo_run import run_monte_carlo
 
 
@@ -37,7 +37,7 @@ def run(weights, cash=0, closes=None, **kwargs):
                         initial_value=1000, **kwargs)
 
 
-@pytest.mark.parametrize("model", ["ewma", "garch", "arima", "ensemble"])
+@pytest.mark.parametrize("model", ["ewma", "garch", "arima", "ensemble", "prophet"])
 def test_constant_growth(model):
     result = run({"C": 1}, closes={"C": C}, model=model, horizon_days=63, num_simulations=100)
     assert result.terminal.median == pytest.approx(1064.99331, abs=1e-4)
@@ -85,6 +85,45 @@ def test_regime_and_ensemble():
     assert min(ensemble.member_medians.values()) - 5 <= ensemble.terminal.median <= max(ensemble.member_medians.values()) + 5
 
 
+def test_prophet_on_regime():
+    result = run({"R": 1}, closes={"R": REGIME}, model="prophet", lookback_days=800, horizon_days=63, num_simulations=500)
+    assert result.current_vol is None
+    assert result.vol_forecast == []
+    assert result.members == ["prophet"]
+    assert result.paths[0].p5 == result.paths[0].p25 == result.paths[0].p50 == result.paths[0].p75 == result.paths[0].p95 == 1000
+    assert all(point.p5 <= point.p25 <= point.p50 <= point.p75 <= point.p95 for point in result.paths)
+    assert result.paths[-1].day == 63
+    assert "end_gap" in result.params
+    assert PROPHET_WARNING in result.warnings
+    assert result.num_simulations == 500
+
+
+def test_prophet_caps_samples():
+    result = run({"R": 1}, closes={"R": REGIME}, model="prophet", lookback_days=800, horizon_days=63, num_simulations=5000)
+    assert result.num_simulations == 2000
+    assert "Prophet draws at most 2,000 samples, so this forecast uses 2,000." in result.warnings
+
+
+def test_prophet_is_deterministic():
+    options = dict(closes={"R": REGIME}, model="prophet", lookback_days=800, horizon_days=63, num_simulations=500)
+    assert run({"R": 1}, **options).terminal == run({"R": 1}, **options).terminal
+
+
+def test_prophet_not_installed(monkeypatch):
+    def missing():
+        raise ForecastInputError("Prophet is not installed on this server.")
+    monkeypatch.setattr("app.forecast_run._load_prophet", missing)
+    with pytest.raises(ForecastInputError, match="Prophet is not installed on this server."):
+        run({"R": 1}, closes={"R": REGIME}, model="prophet", lookback_days=800, num_simulations=100)
+    assert run({"R": 1}, closes={"R": REGIME}, model="ewma", lookback_days=800, num_simulations=100).model == "ewma"
+
+
+def test_prophet_minimum_returns():
+    short = from_log(0.01 * np.random.default_rng(2).standard_normal(100))
+    with pytest.raises(ForecastInputError, match=re.escape("Prophet needs at least 250 daily returns, but the holdings share only 100. Choose a longer lookback.")):
+        run({"S": 1}, closes={"S": short}, model="prophet")
+
+
 def test_ensemble_drops_failed_member(monkeypatch):
     def fail(_):
         raise ForecastFitError("GARCH could not be fitted")
@@ -111,7 +150,7 @@ def test_minimum_determinism_warning_validation_and_history():
     assert result.history[-1].day == 0 and result.history[0].day == -259
     assert result.vol_history[-1].day == 0 and result.vol_history[0].day == -239
     assert len(result.history) <= 251
-    with pytest.raises(ForecastInputError, match=re.escape('model must be one of "ewma", "garch", "arima" or "ensemble"')):
+    with pytest.raises(ForecastInputError, match=re.escape('model must be one of "ewma", "garch", "arima", "ensemble" or "prophet"')):
         run({"C": 1}, closes={"C": C}, model="nope")
     with pytest.raises(ForecastInputError, match="num_simulations must be between 100 and 10000"):
         run({"C": 1}, closes={"C": C}, model="ewma", num_simulations=99)

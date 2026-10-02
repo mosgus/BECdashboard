@@ -357,7 +357,7 @@ class ForecastResponse(BaseModel):
     fit_end: date
     n_returns: int
     daily_drift: float
-    current_vol: float
+    current_vol: float | None
     lookback_vol: float
     params: dict[str, float]
     members: list[str]

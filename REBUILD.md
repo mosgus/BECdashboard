@@ -2006,7 +2006,10 @@ risk-free rate to the 3-month T-bill and limits portfolios to holdable tickers.
 
   No statsmodels: it is not installed, and the methods above do not need it. Contracts: 0149
   (backend), 0150 (frontend and guide), 0151 (Prophet). 0149 was accepted on 2026-10-02. 0150 was
-  accepted on 2026-10-02 after two reworks, pending Gunnar's browser check.
+  accepted on 2026-10-02 after two reworks, pending Gunnar's browser check. 0151 was accepted on
+  2026-10-02 (prophet 1.4.0 in requirements.txt; lazy import; at most 2,000 samples, because 10,000
+  peaked at 413 MB against Render's 512 MB). It is pending Gunnar's browser check and the first
+  Render build with Prophet.
 - **Tilt is removed** (Gunnar, 2026-09-24; contract 0113). `POST /portfolio/tilt`, `TiltRequest`,
   `optimizer.compute_tilt` and their five tests are deleted. `main` never made tilt reachable, so there
   was no reference behaviour to keep, and no rebuild UI called it. Gunnar first chose to keep it,

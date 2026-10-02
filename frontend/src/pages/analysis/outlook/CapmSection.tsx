@@ -198,100 +198,102 @@ export function CapmSection(): JSX.Element | null {
           Forward-looking: uses CAPM expected returns and your views, not a historical backtest. Results are model-based
           projections, not guarantees.
         </p>
-        <div className="grid gap-4 md:grid-cols-4">
-          <LookbackPicker
-            lookbackDays={settings.lookbackDays}
-            onChange={(lookbackDays) => setSettings({ ...settings, lookbackDays })}
-            optionTooltip={(option) =>
-              `Estimate betas and covariances from the last ${option.days / 365} ${option.days === 365 ? 'year' : 'years'} of daily prices`
-            }
-            customTooltip="Estimate betas and covariances from a start date you choose"
-          />
-          <Field
-            label="Risk-free rate (%)"
-            tip="Annual risk-free rate in percent. Leave blank to use the live 3-month Treasury bill yield."
-          >
-            <input
-              inputMode="decimal"
-              placeholder="Live"
-              value={settings.rfPct}
-              onChange={(event) => setSettings({ ...settings, rfPct: event.target.value })}
-              className="w-full rounded-[var(--radius-btn)] border border-brand-border px-3 py-2 text-sm bg-brand-surface text-foreground"
+        <div className="space-y-3">
+          <div className="grid min-w-0 gap-3 sm:grid-cols-2 xl:grid-cols-5">
+            <LookbackPicker
+              lookbackDays={settings.lookbackDays}
+              onChange={(lookbackDays) => setSettings({ ...settings, lookbackDays })}
+              optionTooltip={(option) =>
+                `Estimate betas and covariances from the last ${option.days / 365} ${option.days === 365 ? 'year' : 'years'} of daily prices`
+              }
+              customTooltip="Estimate betas and covariances from a start date you choose"
             />
-          </Field>
-          <Field
-            label="Market risk premium (%)"
-            tip="Market risk premium: how much more than the risk-free rate the market is expected to return each year, in percent"
-          >
-            <input
-              inputMode="decimal"
-              value={settings.mrpPct}
-              onChange={(event) => setSettings({ ...settings, mrpPct: event.target.value })}
-              className="w-full rounded-[var(--radius-btn)] border border-brand-border px-3 py-2 text-sm bg-brand-surface text-foreground"
-            />
-          </Field>
-          <Field
-            label="Market ticker"
-            tip="The index or fund that betas are measured against. Only Universe tickers can be chosen."
-          >
-            <select
-              disabled={universe.status === 'loading'}
-              value={settings.marketTicker}
-              onChange={(event) => setSettings({ ...settings, marketTicker: event.target.value })}
-              className="w-full rounded-[var(--radius-btn)] border border-brand-border px-3 py-2 text-sm bg-brand-surface text-foreground"
-            >
-              {(universe.status === 'loading' ? ['SPY'] : tickers).map((ticker) => (
-                <option key={ticker}>{ticker}</option>
-              ))}
-            </select>
-          </Field>
-        </div>
-        <div className="flex flex-wrap items-end gap-3 mt-4">
-          <div>
             <Field
-              label="Target value ($)"
-              tip="Portfolio value to size trades and dollar VaR. Defaults to what your holdings are worth now. Changing it doesn't change the optimization, so there's no need to run again."
+              label="Risk-free rate (%)"
+              tip="Annual risk-free rate in percent. Leave blank to use the live 3-month Treasury bill yield."
             >
               <input
                 inputMode="decimal"
-                value={targetText ?? defaultTargetValue(liveBasis)}
-                onChange={(event) => setTargetText(event.target.value)}
-                className="w-40 rounded-[var(--radius-btn)] border border-brand-border px-3 py-2 text-sm bg-brand-surface text-foreground"
+                placeholder="Live"
+                value={settings.rfPct}
+                onChange={(event) => setSettings({ ...settings, rfPct: event.target.value })}
+                className="w-full rounded-[var(--radius-btn)] border border-brand-border px-3 py-2 text-sm bg-brand-surface text-foreground"
               />
             </Field>
-            {!targetResult.ok && <p className="text-xs text-brand-negative">{targetResult.message}</p>}
-          </div>
-          <Field
-            label="Min % for all"
-            tip="Minimum weight to give every holding that isn't frozen when you press Apply to all"
-          >
-            <input
-              inputMode="decimal"
-              value={minimum}
-              onChange={(event) => setMinimum(event.target.value)}
-              className="w-24 rounded-[var(--radius-btn)] border border-brand-border px-3 py-2 text-sm bg-brand-surface text-foreground"
-            />
-          </Field>
-          <Field
-            label="Max % for all"
-            tip="Maximum weight to give every holding that isn't frozen when you press Apply to all"
-          >
-            <input
-              inputMode="decimal"
-              value={maximum}
-              onChange={(event) => setMaximum(event.target.value)}
-              className="w-24 rounded-[var(--radius-btn)] border border-brand-border px-3 py-2 text-sm bg-brand-surface text-foreground"
-            />
-          </Field>
-          <Tooltip label="Copy these limits to every holding that isn't frozen">
-            <button
-              type="button"
-              onClick={() => setInputs(applyGlobalBounds(inputs, minimum, maximum))}
-              className="border border-brand-border rounded-[var(--radius-btn)] px-3 py-2 text-xs hover:bg-brand-border"
+            <Field
+              label="Market risk premium (%)"
+              tip="Market risk premium: how much more than the risk-free rate the market is expected to return each year, in percent"
             >
-              Apply to all
-            </button>
-          </Tooltip>
+              <input
+                inputMode="decimal"
+                value={settings.mrpPct}
+                onChange={(event) => setSettings({ ...settings, mrpPct: event.target.value })}
+                className="w-full rounded-[var(--radius-btn)] border border-brand-border px-3 py-2 text-sm bg-brand-surface text-foreground"
+              />
+            </Field>
+            <Field
+              label="Market ticker"
+              tip="The index or fund that betas are measured against. Only Universe tickers can be chosen."
+            >
+              <select
+                disabled={universe.status === 'loading'}
+                value={settings.marketTicker}
+                onChange={(event) => setSettings({ ...settings, marketTicker: event.target.value })}
+                className="w-full rounded-[var(--radius-btn)] border border-brand-border px-3 py-2 text-sm bg-brand-surface text-foreground"
+              >
+                {(universe.status === 'loading' ? ['SPY'] : tickers).map((ticker) => (
+                  <option key={ticker}>{ticker}</option>
+                ))}
+              </select>
+            </Field>
+            <div>
+              <Field
+                label="Target value ($)"
+                tip="Portfolio value to size trades and dollar VaR. Defaults to what your holdings are worth now. Changing it doesn't change the optimization, so there's no need to run again."
+              >
+                <input
+                  inputMode="decimal"
+                  value={targetText ?? defaultTargetValue(liveBasis)}
+                  onChange={(event) => setTargetText(event.target.value)}
+                  className="w-full rounded-[var(--radius-btn)] border border-brand-border px-3 py-2 text-sm bg-brand-surface text-foreground"
+                />
+              </Field>
+              {!targetResult.ok && <p className="text-xs text-brand-negative">{targetResult.message}</p>}
+            </div>
+          </div>
+          <div className="ml-auto grid grid-cols-[6rem_6rem_auto] items-end gap-3">
+            <Field
+              label="Min % for all"
+              tip="Minimum weight to give every holding that isn't frozen when you press Apply to all"
+            >
+              <input
+                inputMode="decimal"
+                value={minimum}
+                onChange={(event) => setMinimum(event.target.value)}
+                className="w-full rounded-[var(--radius-btn)] border border-brand-border px-3 py-2 text-sm bg-brand-surface text-foreground"
+              />
+            </Field>
+            <Field
+              label="Max % for all"
+              tip="Maximum weight to give every holding that isn't frozen when you press Apply to all"
+            >
+              <input
+                inputMode="decimal"
+                value={maximum}
+                onChange={(event) => setMaximum(event.target.value)}
+                className="w-full rounded-[var(--radius-btn)] border border-brand-border px-3 py-2 text-sm bg-brand-surface text-foreground"
+              />
+            </Field>
+            <Tooltip label="Copy these limits to every holding that isn't frozen">
+              <button
+                type="button"
+                onClick={() => setInputs(applyGlobalBounds(inputs, minimum, maximum))}
+                className="self-end border border-brand-border rounded-[var(--radius-btn)] px-3 py-2 text-xs hover:bg-brand-border"
+              >
+                Apply to all
+              </button>
+            </Tooltip>
+          </div>
         </div>
         <HoldingsTable portfolio={current} inputs={inputs} onUpdate={update} />
         <Tooltip

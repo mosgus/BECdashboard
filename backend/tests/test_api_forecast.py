@@ -35,7 +35,12 @@ def test_forecast_api(client, db_mode):
     response = client.post("/portfolio/forecast", json=body)
     assert response.status_code == 200
     assert {"paths", "terminal", "vol_forecast", "vol_history", "history", "params", "members", "member_medians"} <= response.json().keys()
+    body.update({"model": "prophet", "lookback_days": 730})
+    response = client.post("/portfolio/forecast", json=body)
+    assert response.status_code == 200
+    assert response.json()["current_vol"] == 0
+    assert any(warning.startswith("Prophet is unstable and untested here.") for warning in response.json()["warnings"])
     body["model"] = "nope"
     response = client.post("/portfolio/forecast", json=body)
     assert response.status_code == 422
-    assert response.json()["detail"] == 'model must be one of "ewma", "garch", "arima" or "ensemble"'
+    assert response.json()["detail"] == 'model must be one of "ewma", "garch", "arima", "ensemble" or "prophet"'

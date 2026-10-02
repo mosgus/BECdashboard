@@ -473,7 +473,7 @@ export interface ForecastHistoryPoint { date: string; day: number; value: number
 export interface ForecastResponse {
   tickers: string[]; weights: Record<string, number>; cash_weight: number; model: string; seed: number
   horizon_days: number; num_simulations: number; initial_value: number; lookback_days: number
-  fit_start: string; fit_end: string; n_returns: number; daily_drift: number; current_vol: number; lookback_vol: number
+  fit_start: string; fit_end: string; n_returns: number; daily_drift: number; current_vol: number | null; lookback_vol: number
   params: Record<string, number>; members: string[]; member_medians: Record<string, number>
   paths: MonteCarloPathPoint[]; terminal: MonteCarloTerminal; vol_forecast: ForecastVolForecastPoint[]
   vol_history: ForecastVolPoint[]; history: ForecastHistoryPoint[]; warnings: string[]

@@ -4,6 +4,7 @@ import {
   forecastCsv,
   forecastCsvFilename,
   forecastSummary,
+  FORECAST_MODELS,
   formatVol,
   memberMedianRows,
   paramRows,
@@ -78,6 +79,9 @@ describe('forecast helpers', () => {
     expect(volatilitySummary({ ...RESPONSE, current_vol: 0 })).toBe(
       'These returns have no variation, so every path is the same.',
     )
+    expect(volatilitySummary({ ...RESPONSE, current_vol: null })).toBe(
+      'Prophet does not forecast volatility. Its bands come from how uncertain the trend is, so they widen with the horizon.',
+    )
   })
   it('builds value chart data', () => {
     const data = valueChartData(RESPONSE)
@@ -103,11 +107,21 @@ describe('forecast helpers', () => {
       { label: 'GARCH Half-life', value: '24.4 days' },
       { label: 'ARIMA φ (autocorrelation)', value: '0.003681' },
     ]))
+  it('formats Prophet fitted trend gap', () =>
+    expect(paramRows({ ...RESPONSE, params: { end_gap: 0.0096 } })).toEqual([
+      { label: 'Fitted trend vs last close', value: '+0.96%' },
+    ]))
   it('exports forecast CSV', () => {
     const rows = forecastCsv(RESPONSE).split('\n')
     expect(rows).toHaveLength(4)
     expect(rows[0]).toBe('day,p5,p25,p50,p75,p95,vol')
     expect(rows[3].endsWith(',0.24')).toBe(true)
+    expect(
+      forecastCsv({ ...RESPONSE, vol_forecast: [] })
+        .split('\n')
+        .slice(1)
+        .every((row) => row.endsWith(',')),
+    ).toBe(true)
   })
   it('builds a forecast CSV filename', () =>
     expect(forecastCsvFilename('My: Fund', new Date(2026, 9, 2))).toBe('My Fund-forecast-2026-10-02.csv'))
@@ -115,4 +129,6 @@ describe('forecast helpers', () => {
     expect(forecastSummary(RESPONSE).startsWith('1,000 Ensemble paths over 2 trading days from ')).toBe(true)
     expect(forecastSummary(RESPONSE)).toContain('Seed 42')
   })
+  it('lists Prophet after the established models', () =>
+    expect(FORECAST_MODELS.map((model) => model.value)).toEqual(['ewma', 'garch', 'arima', 'ensemble', 'prophet']))
 })

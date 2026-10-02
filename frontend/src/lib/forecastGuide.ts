@@ -36,6 +36,14 @@ export const FORECAST_GUIDE: GuideSection[] = [
         term: 'Ensemble',
         text: 'Pools paths from EWMA, GARCH and ARIMA in equal shares, so its bands sit between theirs. If a member can’t be fitted, the ensemble uses the others and a note says so. It needs at least 250 shared daily returns.',
       },
+      {
+        term: 'Prophet (untested)',
+        text:
+          'Unstable and untested. Prophet, a forecasting library from Meta, fits a trend with occasional bends, plus a yearly pattern, to the portfolio’s value and extends them forward. ' +
+          'Its bands come from how much the trend might bend and from day-to-day noise, not from the portfolio’s volatility, so they are often much wider than the other models’ at long horizons, ' +
+          'and the first day can jump if the fitted trend ends away from the last close. It is not part of the Ensemble and has not been checked against what happened. ' +
+          'It draws at most 2,000 samples and needs at least 250 shared daily returns.',
+      },
     ],
   },
   {
@@ -46,7 +54,7 @@ export const FORECAST_GUIDE: GuideSection[] = [
         term: 'Lookback',
         text: 'The window of daily returns the model is fitted to: 1, 3 or 5 years, or a custom start date at least 3 months ago. It sets the expected return and, for GARCH and ARIMA, the average volatility the forecast settles at. GARCH and Ensemble need about a year.',
       },
-      { term: 'Model', text: 'EWMA, GARCH, ARIMA or Ensemble. See The models.' },
+      { term: 'Model', text: 'EWMA, GARCH, ARIMA, Ensemble or Prophet (untested). See The models.' },
       {
         term: 'Horizon',
         text: 'How far ahead each path runs: 3 months (63 trading days), 6 months (126), 1 year (252) or 2 years (504).',
@@ -65,7 +73,7 @@ export const FORECAST_GUIDE: GuideSection[] = [
     heading: 'Short history',
     paragraphs: [
       'Every holding needs a price on every day the model uses. If a holding’s prices start more than a week after the lookback start, the model uses only the days from that holding’s first price onward, ' +
-        'and a note under the results says so. EWMA and ARIMA need at least 60 shared daily returns; GARCH and Ensemble need 250.',
+        'and a note under the results says so. EWMA and ARIMA need at least 60 shared daily returns; GARCH, Ensemble and Prophet need 250.',
     ],
     entries: [],
   },
@@ -95,7 +103,10 @@ export const FORECAST_GUIDE: GuideSection[] = [
       },
       {
         term: 'Fitted parameters',
-        text: 'The numbers each model was fitted with. For GARCH, α is how strongly one day’s move raises the next day’s volatility, α + β is how long that lasts, and the half-life is the number of trading days for half of today’s gap to the average to close.',
+        text:
+          'The numbers each model was fitted with. For GARCH, α is how strongly one day’s move raises the next day’s volatility, ' +
+          'α + β is how long that lasts, and the half-life is the number of trading days for half of today’s gap to the average to close. ' +
+          'For Prophet, the gap between the fitted trend and the last close shows how far the first forecast day may jump.',
       },
       { term: 'Export CSV', text: 'Downloads the percentile paths and the forecast volatility for each day shown.' },
     ],

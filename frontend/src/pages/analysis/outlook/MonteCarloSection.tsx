@@ -123,7 +123,7 @@ export function MonteCarloSection(): JSX.Element | null {
             onClick={() => setGuideOpen(true)}
           />
         </div>
-        <div className="grid gap-4 md:grid-cols-4">
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[minmax(13rem,1.6fr)_repeat(4,minmax(8rem,1fr))]">
           <LookbackPicker
             floor={MONTE_CARLO_LOOKBACK_FLOOR}
             lookbackDays={settings.lookbackDays}
@@ -185,24 +185,24 @@ export function MonteCarloSection(): JSX.Element | null {
               className="w-full rounded-[var(--radius-btn)] border border-brand-border px-3 py-2 text-sm bg-brand-surface text-foreground"
             />
           </Field>
-        </div>
-        <div className="mt-4 max-w-xs">
-          <Field
-            label="Starting value ($)"
-            tip="Portfolio value on day 0. Defaults to the holdings at their last close plus cash."
-          >
-            <input
-              inputMode="decimal"
-              value={currentStartingText}
-              onChange={(event) => setStartingText(event.target.value)}
-              className="w-full rounded-[var(--radius-btn)] border border-brand-border px-3 py-2 text-sm bg-brand-surface text-foreground"
-            />
-          </Field>
-          {liveBasis.kind === 'weights' && (
-            <p className="mt-1 text-xs text-[var(--color-muted)]">
-              These holdings have no share counts or prices, so this is a hypothetical starting value.
-            </p>
-          )}
+          <div>
+            <Field
+              label="Starting value ($)"
+              tip="Portfolio value on day 0. Defaults to the holdings at their last close plus cash."
+            >
+              <input
+                inputMode="decimal"
+                value={currentStartingText}
+                onChange={(event) => setStartingText(event.target.value)}
+                className="w-full rounded-[var(--radius-btn)] border border-brand-border px-3 py-2 text-sm bg-brand-surface text-foreground"
+              />
+            </Field>
+            {liveBasis.kind === 'weights' && (
+              <p className="mt-1 text-xs text-[var(--color-muted)]">
+                These holdings have no share counts or prices, so this is a hypothetical starting value.
+              </p>
+            )}
+          </div>
         </div>
         <Tooltip block label={runTooltip}>
           <button

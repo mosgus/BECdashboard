@@ -3,7 +3,7 @@ import { csvNumber, formatMoney, lookbackLabel } from './optimize'
 import { datePart, filenameSafeName } from './portfolioCsv'
 import { fanChartData } from './monteCarlo'
 
-export type ForecastModel = 'ewma' | 'garch' | 'arima' | 'ensemble'
+export type ForecastModel = 'ewma' | 'garch' | 'arima' | 'ensemble' | 'prophet'
 export const FORECAST_MODELS: ReadonlyArray<{ value: ForecastModel; label: string; tooltip: string }> = [
   {
     value: 'ewma',
@@ -21,6 +21,12 @@ export const FORECAST_MODELS: ReadonlyArray<{ value: ForecastModel; label: strin
     tooltip: 'Constant volatility at the lookback average. The baseline that ignores current conditions.',
   },
   { value: 'ensemble', label: 'Ensemble', tooltip: 'Pools paths from EWMA, GARCH and ARIMA in equal shares.' },
+  {
+    value: 'prophet',
+    label: 'Prophet (untested)',
+    tooltip:
+      'Unstable and untested. Extrapolates the trend and yearly pattern of the portfolio’s value. Its bands are not based on volatility.',
+  },
 ]
 export interface ForecastSettings {
   lookbackDays: number
@@ -44,6 +50,8 @@ export function forecastSummary(response: ForecastResponse): string {
   return `${prefix}${fitted} Seed ${response.seed}, so the same settings give the same result.`
 }
 export function volatilitySummary(response: ForecastResponse): string {
+  if (response.current_vol === null)
+    return 'Prophet does not forecast volatility. Its bands come from how uncertain the trend is, so they widen with the horizon.'
   if (response.current_vol === 0) return 'These returns have no variation, so every path is the same.'
   const halfLife = response.params.half_life_days ?? response.params['garch.half_life_days']
   return `Forecast volatility today: ${formatVol(response.current_vol)} a year, against ${formatVol(response.lookback_vol)} over the lookback.${halfLife === undefined ? '' : ` GARCH expects volatility to close half the gap in about ${Math.round(halfLife)} trading days.`}`
@@ -100,16 +108,19 @@ const PARAM_LABELS: Record<string, string> = {
   c: 'Constant (c)',
   phi: 'φ (autocorrelation)',
   sigma: 'σ (daily)',
+  end_gap: 'Fitted trend vs last close',
 }
 export function paramRows(response: ForecastResponse): Array<{ label: string; value: string }> {
   return Object.entries(response.params).map(([key, number]) => {
     const [member, base] = key.includes('.') ? key.split('.', 2) : ['', key]
     const value =
-      base === 'lambda' || base === 'persistence'
-        ? number.toFixed(2)
-        : base === 'half_life_days'
-          ? `${number.toFixed(1)} days`
-          : number.toPrecision(4)
+      base === 'end_gap'
+        ? `${number > 0 ? '+' : ''}${(number * 100).toFixed(2)}%`
+        : base === 'lambda' || base === 'persistence'
+          ? number.toFixed(2)
+          : base === 'half_life_days'
+            ? `${number.toFixed(1)} days`
+            : number.toPrecision(4)
     return { label: member ? `${label(member)} ${PARAM_LABELS[base] ?? base}` : (PARAM_LABELS[base] ?? key), value }
   })
 }
@@ -121,7 +132,7 @@ export function forecastCsv(response: ForecastResponse): string {
       (point) =>
         [point.day, point.p5, point.p25, point.p50, point.p75, point.p95]
           .map((value) => csvNumber(value, 2))
-          .join(',') + `,${csvNumber(vols.get(point.day) ?? 0, 6)}`,
+          .join(',') + (vols.has(point.day) ? `,${csvNumber(vols.get(point.day)!, 6)}` : ','),
     ),
   ].join('\n')
 }

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import logging
 from dataclasses import dataclass
 from datetime import date
 
@@ -21,10 +22,15 @@ from app.montecarlo_run import (
 )
 
 
-MODELS = ("ewma", "garch", "arima", "ensemble")
+MODELS = ("ewma", "garch", "arima", "ensemble", "prophet")
 EWMA_LAMBDA = 0.94
-MIN_RETURNS = {"ewma": 60, "arima": 60, "garch": 250, "ensemble": 250}
-MODEL_LABELS = {"ewma": "EWMA", "garch": "GARCH", "arima": "ARIMA", "ensemble": "Ensemble"}
+MIN_RETURNS = {"ewma": 60, "arima": 60, "garch": 250, "ensemble": 250, "prophet": 250}
+MODEL_LABELS = {"ewma": "EWMA", "garch": "GARCH", "arima": "ARIMA", "ensemble": "Ensemble", "prophet": "Prophet"}
+PROPHET_MAX_SAMPLES = 2000
+PROPHET_WARNING = (
+    "Prophet is unstable and untested here. Its bands come from extrapolating the trend of the "
+    "portfolio's value, not from its volatility, and have not been checked against what happened."
+)
 
 
 class ForecastInputError(ValueError):
@@ -85,7 +91,7 @@ class ForecastResult:
     fit_end: date
     n_returns: int
     daily_drift: float
-    current_vol: float
+    current_vol: float | None
     lookback_vol: float
     params: dict[str, float]
     members: list[str]
@@ -157,6 +163,17 @@ def _forecast_days(horizon_days: int) -> list[int]:
     return days if days[-1] == horizon_days else days + [horizon_days]
 
 
+def _load_prophet():
+    """Import Prophet only when its opt-in forecast model is selected."""
+    logging.getLogger("cmdstanpy").setLevel(logging.WARNING)
+    logging.getLogger("prophet.plot").disabled = True
+    try:
+        from prophet import Prophet
+    except ImportError as exc:
+        raise ForecastInputError("Prophet is not installed on this server.") from exc
+    return Prophet
+
+
 def _model_paths(model: str, x: np.ndarray, n_paths: int, horizon_days: int, seed: int) -> tuple[np.ndarray, np.ndarray, dict[str, float]]:
     mean = float(x.mean())
     if float(x.var(ddof=1)) < 1e-18:
@@ -211,9 +228,9 @@ def run_forecast(
     horizon_days: int = 252, num_simulations: int = 1000, lookback_days: int = 1825,
     model: str = "garch", seed: int = 42,
 ) -> ForecastResult:
-    """Simulate a constant-mix portfolio using the requested daily-return model."""
+    """Simulate a constant-mix portfolio; Prophet samples each day independently, not as coherent paths."""
     if model not in MODELS:
-        raise ForecastInputError('model must be one of "ewma", "garch", "arima" or "ensemble"')
+        raise ForecastInputError('model must be one of "ewma", "garch", "arima", "ensemble" or "prophet"')
     if not 1 <= horizon_days <= MAX_HORIZON_DAYS:
         raise ForecastInputError(f"horizon_days must be between 1 and {MAX_HORIZON_DAYS}")
     if not 100 <= num_simulations <= 10000:
@@ -235,7 +252,40 @@ def run_forecast(
     warnings = list(series.warnings)
     days = _forecast_days(horizon_days)
 
-    if model != "ensemble":
+    if model == "prophet":
+        samples = min(num_simulations, PROPHET_MAX_SAMPLES)
+        if samples != num_simulations:
+            warnings.append(f"Prophet draws at most {PROPHET_MAX_SAMPLES:,} samples, so this forecast uses {PROPHET_MAX_SAMPLES:,}.")
+        if float(x.var(ddof=1)) < 1e-18:
+            array = _paths_from_returns(np.full((samples, horizon_days), daily_drift), initial_value)
+            vol = np.zeros(horizon_days)
+            params = {}
+        else:
+            Prophet = _load_prophet()
+            y = np.cumsum(x)
+            ds = pd.to_datetime(series.returns.index)
+            try:
+                fitted = Prophet(
+                    growth="linear", yearly_seasonality="auto", weekly_seasonality=False, daily_seasonality=False,
+                    uncertainty_samples=samples,
+                ).fit(pd.DataFrame({"ds": ds, "y": y}))
+                future = pd.DataFrame({"ds": pd.bdate_range(ds[-1] + pd.offsets.BDay(1), periods=horizon_days)})
+                np.random.seed(seed)
+                yhat = fitted.predictive_samples(future)["yhat"]
+                end_gap = float(math.exp(fitted.predict(pd.DataFrame({"ds": ds[-1:]}))["yhat"].iloc[0] - y[-1]) - 1)
+            except Exception as exc:
+                raise ForecastInputError(
+                    "Prophet could not be fitted to this lookback. Try a longer lookback or the EWMA model."
+                ) from exc
+            array = np.hstack([np.full((samples, 1), initial_value), initial_value * np.exp(yhat.T - y[-1])])
+            vol = np.empty(0)
+            params = {"end_gap": end_gap}
+        paths, terminal = summarize_paths(array, initial_value, horizon_days)
+        members, medians = [model], {}
+        vol_forecast = []
+        current_vol = 0.0 if float(x.var(ddof=1)) < 1e-18 else None
+        warnings.append(PROPHET_WARNING)
+    elif model != "ensemble":
         try:
             simulated, vol, params = _model_paths(model, x, num_simulations, horizon_days, seed)
         except ForecastFitError as exc:
@@ -243,6 +293,8 @@ def run_forecast(
         array = _paths_from_returns(simulated, initial_value)
         paths, terminal = summarize_paths(array, initial_value, horizon_days)
         members, medians = [model], {}
+        vol_forecast = [VolForecastPoint(day=day, vol=float(vol[0 if day == 0 else day - 1])) for day in days]
+        current_vol = float(vol[0])
     else:
         fitted: list[str] = []
         for member in ("ewma", "garch", "arima"):
@@ -276,14 +328,15 @@ def run_forecast(
         params = {f"{member}.{key}": value for member, values in params_by_member.items() for key, value in values.items()}
         paths, terminal = summarize_paths(array, initial_value, horizon_days)
         members = fitted
+        vol_forecast = [VolForecastPoint(day=day, vol=float(vol[0 if day == 0 else day - 1])) for day in days]
+        current_vol = float(vol[0])
 
-    vol_forecast = [VolForecastPoint(day=day, vol=float(vol[0 if day == 0 else day - 1])) for day in days]
     rolling = pd.Series(x, index=series.returns.index).rolling(21).std(ddof=1).dropna() * math.sqrt(252)
     return ForecastResult(
         tickers=series.tickers, weights=series.weights, cash_weight=series.cash_weight, model=model, seed=seed,
-        horizon_days=horizon_days, num_simulations=num_simulations, initial_value=initial_value, lookback_days=lookback_days,
+        horizon_days=horizon_days, num_simulations=samples if model == "prophet" else num_simulations, initial_value=initial_value, lookback_days=lookback_days,
         fit_start=series.fit_start, fit_end=series.fit_end, n_returns=n_returns, daily_drift=daily_drift,
-        current_vol=float(vol[0]), lookback_vol=lookback_vol, params=params, members=members,
+        current_vol=current_vol, lookback_vol=lookback_vol, params=params, members=members,
         member_medians=medians, paths=paths, terminal=terminal, vol_forecast=vol_forecast,
         vol_history=[VolPoint(date=index, day=position - (n_returns - 1), vol=float(value)) for position, (index, value) in enumerate(rolling.items(), start=20)],
         history=_history(series.returns, initial_value), warnings=warnings,
