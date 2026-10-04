@@ -477,6 +477,41 @@ export async function capmPortfolio(body: CapmRequest): Promise<CapmResponse> {
   return request<CapmResponse>('/portfolio/capm', { method: 'POST', body })
 }
 
+export interface RiskRequest {
+  tickers: string[]
+  weights: number[]
+  cash: number
+  lookback_days: number
+  market_ticker: string
+}
+export interface RiskHoldingOut {
+  ticker: string
+  weight: number
+  invested_weight: number
+  vol: number
+  beta: number
+  risk_share: number | null
+}
+export interface RiskResponse {
+  tickers: string[]
+  holdings: RiskHoldingOut[]
+  market_ticker: string
+  lookback_days: number
+  start: string
+  end: string
+  n_returns: number
+  cash_weight: number
+  portfolio_vol: number
+  portfolio_beta: number
+  hhi: number
+  effective_holdings: number
+  top5_weight: number
+  warnings: string[]
+}
+export async function riskPortfolio(body: RiskRequest): Promise<RiskResponse> {
+  return request<RiskResponse>('/portfolio/risk', { method: 'POST', body })
+}
+
 export interface MonteCarloRequest {
   tickers: string[]
   weights: number[]

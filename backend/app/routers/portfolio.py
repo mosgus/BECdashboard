@@ -9,6 +9,7 @@ from sqlalchemy import select
 
 from app.db import is_enabled, session
 from app.capm_run import CapmInputError, HoldingConfig, run_capm
+from app.risk_run import RiskInputError, run_risk
 from app.indicators import CLOSE_ONLY_INDICATORS, indicator_series
 from app.models import PriceBar
 from app.montecarlo_run import MonteCarloInputError, run_monte_carlo
@@ -19,7 +20,7 @@ from app.portfolio_series import build_portfolio_series
 from app.rates import fetch_risk_free_rate_with_source
 from app.schemas import (
     CalibrationRequest, CalibrationResponse, CapmRequest, CapmResponse, ForecastRequest, ForecastResponse, MonteCarloRequest, MonteCarloResponse,
-    OptimizeRequest, OptimizeResponse, PortfolioSeriesResponse,
+    OptimizeRequest, OptimizeResponse, PortfolioSeriesResponse, RiskRequest, RiskResponse,
 )
 from app.signals import compute_all_signals
 
@@ -249,6 +250,30 @@ def capm_portfolio(body: CapmRequest) -> dict:
         "score_start": result.score_start,
         "warnings": result.warnings,
     }
+
+
+@router.post("/risk", response_model=RiskResponse)
+def risk_portfolio(body: RiskRequest) -> dict:
+    _require_database()
+    tickers, weights = _normalise_request(body.tickers, body.weights)
+    market_ticker = body.market_ticker.strip().upper()
+    closes = _load_stored_closes(tickers)
+    market = closes.get(market_ticker)
+    if market is None:
+        market = _load_stored_closes([market_ticker], required=False).get(market_ticker)
+    if market is None:
+        raise HTTPException(
+            status_code=422,
+            detail=f"No stored price history for market ticker {market_ticker}. Add it to the Universe first.",
+        )
+    try:
+        result = run_risk(
+            dict(zip(tickers, weights, strict=True)), body.cash, closes, market,
+            market_ticker=market_ticker, lookback_days=body.lookback_days,
+        )
+    except RiskInputError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return asdict(result)
 
 
 @router.post("/montecarlo", response_model=MonteCarloResponse)

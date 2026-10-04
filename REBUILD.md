@@ -78,7 +78,7 @@ docstrings carry the reasoning instead.
 App.tsx        Header + TickerStrip (chrome, outside <Routes>) + the routes
 pages/         LaunchPage, UniversePage, TickerPage, PortfoliosPage, OpsPage
 pages/analysis/  AnalysisLayout (the tab bar) + HoldingsPage, OptimizePage,
-               and OutlookPage / MonitorPage / RiskPage (stubs)
+               OutlookPage, and RiskPage (risk breakdown, 0162). MonitorPage was removed in 0161
 components/    chrome:    Header, NavItem, SettingsIcon, BackendStatus, Tooltip, DownloadIcon,
                           TickerStrip, HelpSidebar
                launch:    NewsSection, EntryCard
@@ -2366,6 +2366,23 @@ contract 0075, matching `main:frontend/app/portfolios/[id]/`. Five tabs: Holding
 (renamed **Optimize** in 0107, slug `optimize`), Outlook, Monitor, Risk & Perf. The labels match `main`'s tab bar, where "Backtest" is the `targets`
 slug and is an optimizer (see the buy-and-hold entry). `main` also has an unlinked `rebalance` page.
 *(Corrected 2026-09-24. This previously said the reference had no backtest.)*
+**Monitor is dropped (0161, Gunnar's decision, 2026-10-04).** `main`'s Monitor had Technicals and a
+per-portfolio Candidates watchlist. The Ticker page already covers Technicals. The watchlist is not
+rebuilt; if it is wanted later, it fits better as a Universe-level watchlist than as a portfolio tab.
+`/portfolios/:id/monitor` redirects to Holdings.
+
+**Risk & Perf (0162, 2026-10-04).** This is a risk breakdown served by `POST /portfolio/risk`
+(`backend/app/risk_run.py`).
+
+The tab shows:
+- volatility and beta, with cash counted;
+- effective holdings and top-5 weight;
+- each holding's share of risk next to its weight;
+- a linear beta × market-move estimate.
+
+Left out of `main`'s Risk tab on purpose: Performance (Historical Optimize covers it), the uniform
+Market Shock and Vol Shock (both just restate their input), the Mitigation panel, and Fama-French
+attribution. Historical stress replay is next (0163). The dead header Research link was removed too.
 
 **Current portfolio tab labels (2026-10-02):** `Historical Optimize`, `Forward Models`, and, within
 Forward Models, `CAPM Allocation`. The route slugs remain `optimize` and `outlook`. Historical
@@ -2420,7 +2437,7 @@ controls that are not on screen is worse than a shorter one.** Each returns when
 | Validation Suite (7 Tests) | the optimizer's validation pass |
 | Forecast Methods | the Outlook tab |
 | HHI, N_eff, RC, MCTR | portfolio risk decomposition |
-| Market Shock / Vol Shock / Historical Replay | the Monitor tab's scenarios |
+| Market Shock / Vol Shock / Historical Replay | the Risk tab's scenarios (main: `risk/page.tsx`, `research/stress`) |
 
 Copy them from `git show main:frontend/components/HelpSidebar.tsx` when the time comes; several of
 the definitions there are good and the numbers in them (a 3.64% risk-free rate, a 0.15/0.25 HHI

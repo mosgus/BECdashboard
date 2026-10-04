@@ -3,7 +3,6 @@ import { Header } from './components/Header'
 import { TickerStrip } from './components/TickerStrip'
 import { AnalysisLayout } from './pages/analysis/AnalysisLayout'
 import { HoldingsPage } from './pages/analysis/HoldingsPage'
-import { MonitorPage } from './pages/analysis/MonitorPage'
 import { OptimizePage } from './pages/analysis/OptimizePage'
 import { OutlookPage } from './pages/analysis/OutlookPage'
 import { RiskPage } from './pages/analysis/RiskPage'
@@ -29,7 +28,7 @@ export default function App() {
           <Route path="holdings" element={<HoldingsPage />} />
           <Route path="optimize" element={<OptimizePage />} />
           <Route path="outlook" element={<OutlookPage />} />
-          <Route path="monitor" element={<MonitorPage />} />
+          <Route path="monitor" element={<Navigate to="../holdings" replace />} />
           <Route path="risk" element={<RiskPage />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />

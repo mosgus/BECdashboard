@@ -1,8 +1,8 @@
 // Headless render smoke check against the running Vite dev server (localhost:5173).
 // Uses a throwaway Chrome profile under /tmp and a fake portfolio, so no real browser data is touched.
-// Usage: node contracts/tools/smoke-render.mjs outlook   (or holdings, optimize, monitor, risk)
+// Usage: node contracts/tools/smoke-render.mjs outlook   (or holdings, optimize, risk)
 //        node contracts/tools/smoke-render.mjs outlook "Monte Carlo"   (also clicks the in-page tab with that label)
-// Prints any uncaught exception and console error, then the first 400 characters of #root.
+// Prints any uncaught exception and console error, the final URL (to check redirects), then the first 400 characters of #root.
 // An empty ROOT TEXT means the page rendered blank.
 import { spawn } from 'node:child_process'
 
@@ -79,8 +79,15 @@ try {
     console.log('SUB-TAB CLICKED:', clicked.result.value)
     await sleep(3000)
   }
+  const url = await send('Runtime.evaluate', { expression: 'location.href' })
+  console.log('FINAL URL:', url.result.value)
   const root = await send('Runtime.evaluate', { expression: `document.getElementById('root')?.innerText.slice(0, 400)` })
   console.log('ROOT TEXT:', JSON.stringify(root.result.value))
+  // The header ticker tape fills ROOT TEXT, so also print the page body: <main> if present, else #root.
+  const body = await send('Runtime.evaluate', {
+    expression: `(document.querySelector('main') ?? document.getElementById('root'))?.innerText.slice(0, 1500)`,
+  })
+  console.log('PAGE TEXT:', JSON.stringify(body.result.value))
   ws.close()
 } finally {
   chrome.kill()

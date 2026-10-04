@@ -323,6 +323,40 @@ class CapmResponse(BaseModel):
     warnings: list[str]
 
 
+class RiskRequest(BaseModel):
+    tickers: list[str]
+    weights: list[float]
+    cash: float = 0.0
+    lookback_days: int = 365
+    market_ticker: str = "SPY"
+
+
+class RiskHoldingOut(BaseModel):
+    ticker: str
+    weight: float
+    invested_weight: float
+    vol: float
+    beta: float
+    risk_share: float | None
+
+
+class RiskResponse(BaseModel):
+    tickers: list[str]
+    holdings: list[RiskHoldingOut]
+    market_ticker: str
+    lookback_days: int
+    start: date
+    end: date
+    n_returns: int
+    cash_weight: float
+    portfolio_vol: float
+    portfolio_beta: float
+    hhi: float
+    effective_holdings: float
+    top5_weight: float
+    warnings: list[str]
+
+
 class MonteCarloRequest(BaseModel):
     tickers: list[str]
     weights: list[float]

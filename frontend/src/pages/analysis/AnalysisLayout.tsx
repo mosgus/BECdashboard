@@ -6,7 +6,6 @@ const ANALYSIS_TABS = [
   { path: 'holdings', label: 'Holdings' },
   { path: 'optimize', label: 'Historical Optimize' },
   { path: 'outlook', label: 'Forward Models' },
-  { path: 'monitor', label: 'Monitor' },
   { path: 'risk', label: 'Risk & Perf' },
 ] as const
 
