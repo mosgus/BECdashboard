@@ -10,6 +10,7 @@ from sqlalchemy import select
 from app.db import is_enabled, session
 from app.capm_run import CapmInputError, HoldingConfig, run_capm
 from app.risk_run import RiskInputError, run_risk
+from app.stress_run import StressInputError, run_stress
 from app.indicators import CLOSE_ONLY_INDICATORS, indicator_series
 from app.models import PriceBar
 from app.montecarlo_run import MonteCarloInputError, run_monte_carlo
@@ -20,7 +21,7 @@ from app.portfolio_series import build_portfolio_series
 from app.rates import fetch_risk_free_rate_with_source
 from app.schemas import (
     CalibrationRequest, CalibrationResponse, CapmRequest, CapmResponse, ForecastRequest, ForecastResponse, MonteCarloRequest, MonteCarloResponse,
-    OptimizeRequest, OptimizeResponse, PortfolioSeriesResponse, RiskRequest, RiskResponse,
+    OptimizeRequest, OptimizeResponse, PortfolioSeriesResponse, RiskRequest, RiskResponse, StressRequest, StressResponse,
 )
 from app.signals import compute_all_signals
 
@@ -272,6 +273,30 @@ def risk_portfolio(body: RiskRequest) -> dict:
             market_ticker=market_ticker, lookback_days=body.lookback_days,
         )
     except RiskInputError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return asdict(result)
+
+
+@router.post("/stress", response_model=StressResponse)
+def stress_portfolio(body: StressRequest) -> dict:
+    _require_database()
+    tickers, weights = _normalise_request(body.tickers, body.weights)
+    market_ticker = body.market_ticker.strip().upper()
+    closes = _load_stored_closes(tickers)
+    market = closes.get(market_ticker)
+    if market is None:
+        market = _load_stored_closes([market_ticker], required=False).get(market_ticker)
+    if market is None:
+        raise HTTPException(
+            status_code=422,
+            detail=f"No stored price history for market ticker {market_ticker}. Add it to the Universe first.",
+        )
+    try:
+        result = run_stress(
+            dict(zip(tickers, weights, strict=True)), body.cash, closes, market,
+            market_ticker=market_ticker, start=body.start, end=body.end,
+        )
+    except StressInputError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return asdict(result)
 

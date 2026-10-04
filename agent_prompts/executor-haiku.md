@@ -78,9 +78,20 @@ points you at old code, read it in place with `git show main:path/to/file.py`.
 Report `Outcome: BLOCKED` in chat, say exactly where you stopped and why, and stop.
 A BLOCKED report is a good outcome. It's information. Nobody is disappointed by one.
 
+## Never launch a browser
+
+Gunnar decided this on 2026-10-04. Do not start Chrome, Safari, or any other browser, including
+headless ones, and do not run `contracts/tools/smoke-render.mjs`.
+
+If a contract lists a render or smoke check:
+- skip it;
+- write "browser checks left for the Planner" under "Not done".
+
+The Planner runs every render check. A skipped browser check doesn't make the outcome PARTIAL.
+
 ## Verification scaffolding: new files only, never edits to app files
 
-To drive a browser or measure a component you may need a harness. Build it as **new files you
+To measure a component you may need a harness. Build it as **new files you
 delete afterwards** — never by editing a tracked application file.
 
 **Never modify `frontend/src/main.tsx`.** On 2026-09-15 a contract stalled mid-run with 48 lines of

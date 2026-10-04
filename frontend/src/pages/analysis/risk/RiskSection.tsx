@@ -18,6 +18,7 @@ import {
   riskSummary,
   riskTiles,
   sameRiskRequest,
+  shockLabel,
   shockImpact,
 } from '../../../lib/risk'
 import type { RiskSettings } from '../../../lib/risk'
@@ -36,7 +37,7 @@ type RunState =
 type UniverseState =
   { status: 'loading' } | { status: 'ready'; lastClose: Map<string, number | null>; tickers: string[] }
 
-function Tiles({ items }: { items: MetricItem[] }): JSX.Element {
+export function Tiles({ items }: { items: MetricItem[] }): JSX.Element {
   return (
     <dl className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
       {items.map((item) => (
@@ -217,9 +218,7 @@ function Results({
               <th className={`${TH} text-right`}>Beta</th>
               <th className={`${TH} text-right`}>Share of risk</th>
               <th className={`${TH} text-right`}>Risk ÷ weight</th>
-              <th className={`${TH} text-right`}>
-                If {response.market_ticker} moves {shockText}%
-              </th>
+              <th className={`${TH} text-right`}>{shockLabel(response.market_ticker, shock)}</th>
             </tr>
           </thead>
           <tbody>
@@ -241,8 +240,9 @@ function Results({
           </tbody>
         </table>
         <p className="mt-3 text-xs text-[var(--color-muted)]">
-          Share of risk is each holding&apos;s contribution to the portfolio&apos;s volatility; the shares add up to
-          100%. Risk ÷ weight above 1 means the holding adds more risk than its size suggests. Cash adds no risk.
+          Weight is each holding&apos;s share of the invested money (cash excluded). Share of risk is its contribution to
+          the portfolio&apos;s volatility; the shares add up to 100%. Risk ÷ weight above 1 means the holding adds more
+          risk than its size suggests.
         </p>
       </section>
       <section className="bg-brand-surface border border-brand-border rounded-[var(--radius-card)] p-4">

@@ -100,9 +100,23 @@ Do not: invent a workaround outside the contract, stub the hard part and report 
 a test until it passes, or `try/except` around the thing that's failing. Every one of those turns
 a visible problem into an invisible one.
 
+## Never launch a browser
+
+Gunnar decided this on 2026-10-04. Do not start Chrome, Safari, or any other browser, including
+headless ones, and do not run `contracts/tools/smoke-render.mjs`. Your sandbox blocks the launch
+anyway.
+
+If a contract lists a render or smoke check:
+- skip it;
+- write "browser checks left for the Planner" under "Not done";
+- don't retry it and don't look for a workaround.
+
+The Planner runs every render check during the audit. A skipped browser check doesn't make the
+outcome PARTIAL. Report COMPLETE when everything else passes.
+
 ## Verification scaffolding: new files only, never edits to app files
 
-To drive a browser or measure a component you may need a harness. Build it as **new files you delete
+To measure a component you may need a harness. Build it as **new files you delete
 afterwards** — never by editing a tracked application file.
 
 **Never modify `frontend/src/main.tsx`.** On 2026-09-15 a contract stalled mid-run with 48 lines of

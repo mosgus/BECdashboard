@@ -11,6 +11,16 @@ export interface RiskSettings {
 export const DEFAULT_RISK_SETTINGS: RiskSettings = { lookbackDays: 365, marketTicker: 'SPY' }
 export const DEFAULT_SHOCK_TEXT = '-20'
 
+export function portfolioAmounts(portfolio: Portfolio, basis: TradeBasis): { tickers: string[]; weights: number[]; cash: number } {
+  return {
+    tickers: portfolio.positions.map((position) => position.ticker),
+    weights: basis.kind === 'dollar'
+      ? portfolio.positions.map((position) => basis.shares[position.ticker] * basis.prices[position.ticker])
+      : portfolio.positions.map((position) => position.weight),
+    cash: basis.kind === 'dollar' ? cashDollars(portfolio, basis) : portfolio.cashWeight,
+  }
+}
+
 export function buildRiskRequest(
   portfolio: Portfolio,
   settings: RiskSettings,
@@ -22,12 +32,7 @@ export function buildRiskRequest(
   return {
     ok: true,
     request: {
-      tickers: portfolio.positions.map((position) => position.ticker),
-      weights:
-        basis.kind === 'dollar'
-          ? portfolio.positions.map((position) => basis.shares[position.ticker] * basis.prices[position.ticker])
-          : portfolio.positions.map((position) => position.weight),
-      cash: basis.kind === 'dollar' ? cashDollars(portfolio, basis) : portfolio.cashWeight,
+      ...portfolioAmounts(portfolio, basis),
       market_ticker: marketTicker,
       lookback_days: settings.lookbackDays,
     },
@@ -84,11 +89,11 @@ export function riskRows(response: RiskResponse): RiskRow[] {
   return response.holdings
     .map((holding) => ({
       ticker: holding.ticker,
-      weight: holding.weight,
+      weight: holding.invested_weight,
       vol: holding.vol,
       beta: holding.beta,
       riskShare: holding.risk_share,
-      ratio: holding.risk_share !== null && holding.weight > 0 ? holding.risk_share / holding.weight : null,
+      ratio: holding.risk_share !== null && holding.invested_weight > 0 ? holding.risk_share / holding.invested_weight : null,
     }))
     .sort((a, b) => (b.riskShare ?? -Infinity) - (a.riskShare ?? -Infinity))
 }
@@ -117,6 +122,10 @@ export function shockImpact(
 export function formatSigned(value: number): string {
   const rounded = Number(value.toFixed(1))
   return rounded > 0 ? `+${rounded.toFixed(1)}%` : `${rounded.toFixed(1)}%`
+}
+
+export function shockLabel(marketTicker: string, shock: ReturnType<typeof parseShock>): string {
+  return shock.ok ? `If ${marketTicker} moves ${formatSigned(shock.value)}` : `If ${marketTicker} moves …`
 }
 
 export function riskSummary(response: RiskResponse): string {

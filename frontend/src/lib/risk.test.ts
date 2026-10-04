@@ -11,6 +11,7 @@ import {
   riskSummary,
   riskTiles,
   sameRiskRequest,
+  shockLabel,
   shockImpact,
 } from './risk'
 
@@ -58,7 +59,8 @@ describe('risk helpers', () => {
   })
   it('maps and orders rows by risk contribution', () => {
     expect(riskRows(R).map((row) => row.ticker)).toEqual(['A', 'B', 'C'])
-    expect(riskRows(R)[0].ratio).toBeCloseTo(1.55)
+    expect(riskRows(R)[0].ratio).toBeCloseTo(1.24)
+    expect(riskRows(R)[0].weight).toBe(0.5)
     expect(
       riskRows({ ...R, holdings: [...R.holdings.slice(0, 2), { ...R.holdings[2], risk_share: null }] }).at(-1),
     ).toMatchObject({ ticker: 'C', ratio: null })
@@ -90,6 +92,10 @@ describe('risk helpers', () => {
       '0.0%',
       '0.0%',
     ])
+  })
+  it('labels shocks without repeating percent signs', () => {
+    expect(shockLabel('SPY', parseShock('-20%'))).toBe('If SPY moves -20.0%')
+    expect(shockLabel('SPY', parseShock('abc'))).toBe('If SPY moves …')
   })
   it('builds requests for weights and dollars', () => {
     const weights = buildRiskRequest(

@@ -357,6 +357,47 @@ class RiskResponse(BaseModel):
     warnings: list[str]
 
 
+class StressRequest(BaseModel):
+    tickers: list[str]
+    weights: list[float]
+    cash: float = 0.0
+    start: date
+    end: date
+    market_ticker: str = "SPY"
+
+
+class StressHoldingOut(BaseModel):
+    ticker: str
+    weight: float
+    covered: bool
+    asset_return: float | None
+    contribution: float | None
+
+
+class StressPointOut(BaseModel):
+    date: date
+    value: float
+    market: float | None
+
+
+class StressResponse(BaseModel):
+    tickers: list[str]
+    holdings: list[StressHoldingOut]
+    market_ticker: str
+    start: date
+    end: date
+    n_days: int
+    cash_weight: float
+    coverage: float
+    portfolio_return: float
+    max_drawdown: float
+    worst_day: float
+    worst_day_date: date
+    market_return: float | None
+    path: list[StressPointOut]
+    warnings: list[str]
+
+
 class MonteCarloRequest(BaseModel):
     tickers: list[str]
     weights: list[float]

@@ -512,6 +512,18 @@ export async function riskPortfolio(body: RiskRequest): Promise<RiskResponse> {
   return request<RiskResponse>('/portfolio/risk', { method: 'POST', body })
 }
 
+export interface StressRequest { tickers: string[]; weights: number[]; cash: number; start: string; end: string; market_ticker: string }
+export interface StressHoldingOut { ticker: string; weight: number; covered: boolean; asset_return: number | null; contribution: number | null }
+export interface StressPointOut { date: string; value: number; market: number | null }
+export interface StressResponse {
+  tickers: string[]; holdings: StressHoldingOut[]; market_ticker: string; start: string; end: string; n_days: number
+  cash_weight: number; coverage: number; portfolio_return: number; max_drawdown: number; worst_day: number; worst_day_date: string
+  market_return: number | null; path: StressPointOut[]; warnings: string[]
+}
+export async function stressPortfolio(body: StressRequest): Promise<StressResponse> {
+  return request<StressResponse>('/portfolio/stress', { method: 'POST', body })
+}
+
 export interface MonteCarloRequest {
   tickers: string[]
   weights: number[]

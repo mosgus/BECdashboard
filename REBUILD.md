@@ -78,7 +78,7 @@ docstrings carry the reasoning instead.
 App.tsx        Header + TickerStrip (chrome, outside <Routes>) + the routes
 pages/         LaunchPage, UniversePage, TickerPage, PortfoliosPage, OpsPage
 pages/analysis/  AnalysisLayout (the tab bar) + HoldingsPage, OptimizePage,
-               OutlookPage, and RiskPage (risk breakdown, 0162). MonitorPage was removed in 0161
+               OutlookPage, and RiskPage (Breakdown + Stress test, 0162–0163). MonitorPage was removed in 0161
 components/    chrome:    Header, NavItem, SettingsIcon, BackendStatus, Tooltip, DownloadIcon,
                           TickerStrip, HelpSidebar
                launch:    NewsSection, EntryCard
@@ -2383,6 +2383,18 @@ The tab shows:
 Left out of `main`'s Risk tab on purpose: Performance (Historical Optimize covers it), the uniform
 Market Shock and Vol Shock (both just restate their input), the Mitigation panel, and Fama-French
 attribution. Historical stress replay is next (0163). The dead header Research link was removed too.
+
+**Risk tab (0163, 2026-10-04).** "Risk & Perf" is renamed **Risk**. It has two sub-tabs.
+
+**Breakdown** is the 0162 section. Risk ÷ weight now uses the invested weight; before this fix,
+cash inflated every ratio.
+
+**Stress test** replays a past window on today's holdings, bought at the start and held
+(`POST /portfolio/stress`, `backend/app/stress_run.py`).
+- Holdings without prices for the whole window count as flat (0%), and a warning names them.
+- The run is refused when less than 80% of the invested money has prices (`MIN_COVERAGE`).
+- The presets are crashes from 2020 onward only, because stored prices start at `HISTORY_START`
+  (2020-01-01). `main`'s 2008, dot-com, 2011 and 2018 presets would need a price backfill.
 
 **Current portfolio tab labels (2026-10-02):** `Historical Optimize`, `Forward Models`, and, within
 Forward Models, `CAPM Allocation`. The route slugs remain `optimize` and `outlook`. Historical

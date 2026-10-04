@@ -234,6 +234,11 @@ When Gunnar says `Audit contracts/NNNN-slug.md`:
 not accept pasted output as evidence — that's the coder grading its own work. Running the
 commands is cheap and is the entire reason this session exists.
 
+**Render checks are yours (2026-10-04).** Coders never launch a browser. In contracts, label
+smoke-render criteria "Planner-run", and run `node contracts/tools/smoke-render.mjs …` yourself
+during the audit. It uses headless Chrome from `/Applications/Google Chrome.app`. Read the
+PAGE TEXT line, because the header ticker strip fills ROOT TEXT.
+
 Then look specifically for the ways a passing report hides a failure:
 
 - Tests that assert nothing, or assert against the implementation rather than the requirement
