@@ -7,7 +7,7 @@ import { AdminPasskeyDialog } from './AdminPasskeyDialog'
 
 const CARD = 'bg-brand-surface border border-brand-border rounded-[var(--radius-card)] p-5'
 const BUTTON =
-  'inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-[var(--radius-btn)] bg-brand-surface border border-brand-border text-[var(--color-muted)] hover:bg-brand-border hover:text-foreground'
+  'inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-[var(--radius-btn)] bg-yellow-400 border border-yellow-500 text-slate-950 hover:bg-yellow-300'
 
 function LockIcon({ open = false }: { open?: boolean }): JSX.Element {
   return (
