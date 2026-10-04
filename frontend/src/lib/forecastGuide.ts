@@ -109,6 +109,10 @@ export const FORECAST_GUIDE: GuideSection[] = [
           'For Prophet, the gap between the fitted trend and the last close shows how far the first forecast day may jump.',
       },
       { term: 'Export CSV', text: 'Downloads the percentile paths and the forecast volatility for each day shown.' },
+      {
+        term: 'Check calibration',
+        text: 'Reruns the method at past start dates, each using only the prices before it, and counts how often the real 1- and 3-month outcome landed inside the bands. A calibrated method lands inside the 90% band about 90% of the time and inside the middle band about half the time. The expected range allows for luck; a result outside it means the bands are too narrow or too wide for this portfolio. With few windows the check is coarse.',
+      },
     ],
   },
   {

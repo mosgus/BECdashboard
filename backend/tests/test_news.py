@@ -11,6 +11,7 @@ from app.news import (
     MARKET_NEWS_TICKERS,
     NEWS_REFRESH_KEY,
     cap_per_ticker,
+    fetch_news_for,
     get_newest_fetched_at,
     is_preferred_publisher,
     needs_news_refresh,
@@ -18,6 +19,7 @@ from app.news import (
     recent_articles,
     refresh_news_if_stale,
     run_news_refresh_if_due,
+    search_item_to_raw,
 )
 
 ET = ZoneInfo("America/New_York")
@@ -88,6 +90,12 @@ def test_needs_news_refresh_true_when_feed_empty_on_a_sunday():
     assert needs_news_refresh(None, None, now_et) is True
 
 
+def test_needs_news_refresh_empty_feed_waits_out_the_cool_down():
+    now_et = _et(10, 0)
+    assert needs_news_refresh(None, now_et - timedelta(minutes=5), now_et) is False
+    assert needs_news_refresh(None, now_et - timedelta(minutes=15), now_et) is True
+
+
 def test_needs_news_refresh_false_when_claimed_one_second_after_window_opened():
     now_et = _et(10, 0)
     last_claim_at = _utc(_et(9, 30) + timedelta(seconds=1))
@@ -120,6 +128,51 @@ def test_parse_article_well_formed():
         "source_ticker": "AAPL",
         "fetched_at": fetched_at,
     }
+
+
+def test_search_item_to_raw_round_trips_through_parse_article():
+    item = {"uuid": "709aaeaa-bdf3-3b24-b255-1dac8b8375d6", "title": "Michael Saylor Says Strategy's STRC Is Now Steadier", "publisher": "Stocktwits", "link": "https://finance.yahoo.com/markets/stocks/articles/michael-saylor-says-strategys-strc-174624982.html", "providerPublishTime": 1791049584, "type": "STORY", "thumbnail": {"resolutions": [{"url": "https://media.zenfs.com/en/stocktwits_383/5ea1f6ae78098f49a8b0cb1a3d5742a1", "width": 1280, "height": 853, "tag": "original"}]}, "relatedTickers": ["MSTR", "SPY"]}
+    row = parse_article(search_item_to_raw(item), "SPY", datetime.now(timezone.utc))
+    assert row is not None
+    assert row["id"] == item["uuid"]
+    assert row["title"] == item["title"]
+    assert row["publisher"] == "Stocktwits"
+    assert row["url"] == item["link"]
+    assert row["thumbnail_url"] == item["thumbnail"]["resolutions"][0]["url"]
+    assert row["summary"] is None
+    assert row["pub_date"] == datetime.fromtimestamp(1791049584, timezone.utc)
+
+
+def test_search_item_to_raw_tolerates_missing_fields():
+    row = parse_article(search_item_to_raw({"uuid": "x", "title": "t"}), "SPY", datetime.now(timezone.utc))
+    assert row is not None
+    assert row["publisher"] is row["url"] is row["thumbnail_url"] is row["pub_date"] is None
+    assert search_item_to_raw("nope") is None
+    assert parse_article(search_item_to_raw({"title": "t"}), "SPY", datetime.now(timezone.utc)) is None
+
+
+def test_fetch_news_for_uses_search_only_when_ticker_news_is_empty(monkeypatch):
+    search_item = {"uuid": "x", "title": "Search title"}
+
+    class EmptyTicker:
+        news = []
+
+    class Search:
+        news = [search_item]
+
+        def __init__(self, *args, **kwargs):
+            pass
+
+    monkeypatch.setattr("app.news.yf.Ticker", lambda ticker: EmptyTicker())
+    monkeypatch.setattr("app.news.yf.Search", Search)
+    assert fetch_news_for("SPY") == [search_item_to_raw(search_item)]
+
+    class FullTicker:
+        news = [{"id": "native"}]
+
+    monkeypatch.setattr("app.news.yf.Ticker", lambda ticker: FullTicker())
+    monkeypatch.setattr("app.news.yf.Search", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("Search called")))
+    assert fetch_news_for("SPY") == [{"id": "native"}]
 
 
 def test_parse_article_missing_id_returns_none():
@@ -393,6 +446,17 @@ def test_one_feed_raising_records_partial_with_that_feed_in_errors(db_mode, monk
     assert run["detail"]["briefing"] is True
 
 
+def test_all_empty_feeds_record_partial(db_mode, monkeypatch):
+    monkeypatch.setattr("app.news.fetch_news_for", lambda ticker: [])
+    monkeypatch.setattr("app.briefing.refresh_briefing", lambda *a, **k: None)
+    now_et = _et(10, 0)
+    run_news_refresh_if_due(_utc(now_et), now_et)
+    run = _latest_job_run()
+    assert run is not None
+    assert run["status"] == "partial"
+    assert "all feeds returned no items" in run["detail"]["errors"]
+
+
 def test_a_body_that_raises_records_failure_and_still_reraises(db_mode, monkeypatch):
     monkeypatch.setattr("app.news.fetch_news_for", lambda ticker: [])
     monkeypatch.setattr(
@@ -413,7 +477,7 @@ def test_a_body_that_raises_records_failure_and_still_reraises(db_mode, monkeypa
 
 
 def test_run_records_success_with_briefing_true_when_refresh_briefing_completes(db_mode, monkeypatch):
-    monkeypatch.setattr("app.news.fetch_news_for", lambda ticker: [])
+    monkeypatch.setattr("app.news.fetch_news_for", lambda ticker: [_raw_item(f"{ticker}-1")])
     monkeypatch.setattr("app.briefing.refresh_briefing", lambda *a, **k: None)
 
     now_et = _et(10, 0)
@@ -423,7 +487,7 @@ def test_run_records_success_with_briefing_true_when_refresh_briefing_completes(
     assert run is not None
     assert run["status"] == "success"
     assert run["detail"]["feeds"] == len(MARKET_NEWS_TICKERS)
-    assert run["detail"]["stored"] == 0
+    assert run["detail"]["stored"] == len(MARKET_NEWS_TICKERS)
     assert run["detail"]["errors"] == []
     assert run["detail"]["briefing"] is True
 
@@ -432,7 +496,7 @@ def test_run_records_briefing_false_when_refresh_briefing_raises(db_mode, monkey
     """briefing is best-effort (contract 0044): recorded as whether the call completed without
     raising, not whether it actually produced a new summary — refresh_briefing itself returns
     nothing and may legitimately no-op."""
-    monkeypatch.setattr("app.news.fetch_news_for", lambda ticker: [])
+    monkeypatch.setattr("app.news.fetch_news_for", lambda ticker: [_raw_item(f"{ticker}-1")])
     monkeypatch.setattr(
         "app.briefing.refresh_briefing",
         lambda *a, **k: (_ for _ in ()).throw(RuntimeError("gemini boom")),

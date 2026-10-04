@@ -36,6 +36,7 @@ logger = logging.getLogger(__name__)
 
 NEWS_REFRESH_KEY = "news_refresh"
 NEWS_RETENTION_DAYS = 2
+EMPTY_FEED_RETRY_MINUTES = 15
 
 # One process, one refresh at a time (contract 0041) — a separate lock from
 # app/autorefresh.py's, so a running universe sweep never blocks a news refresh, and vice
@@ -111,19 +112,20 @@ def needs_news_refresh(
     last_claim_at: datetime | None,
     now_et: datetime,
 ) -> bool:
-    """True when the feed has never been populated, or the current window is unclaimed.
+    """True when an empty feed has passed its retry cool-down, or the current window is unclaimed.
 
     Two different timestamps, not one: `newest_fetched_at` is the newest stored article row;
     `last_claim_at` is app_state["news_refresh"] — the last time a refresh was *attempted*,
     successful or not. An attempt that fetched nothing new still claims the window, and must
     not be retried on the very next page load.
 
-    `newest_fetched_at is None` is checked first and wins regardless of the window or the day
-    — an empty feed on a fresh deploy must not stay blank until the next window opens, the
-    same rule needs_summary already follows for the briefing. Once that's ruled out, this
-    defers entirely to needs_auto_refresh, whose windows open every day, weekends included."""
+    An empty feed with no claim refreshes immediately on a fresh deploy. Once an attempted
+    refresh has claimed the feed, it waits fifteen minutes before retrying, preventing an
+    upstream empty response from causing one Yahoo request burst per page load. Once the feed
+    has rows, this defers entirely to needs_auto_refresh, whose windows open every day,
+    weekends included."""
     if newest_fetched_at is None:
-        return True
+        return last_claim_at is None or now_et - last_claim_at >= timedelta(minutes=EMPTY_FEED_RETRY_MINUTES)
     return needs_auto_refresh(last_claim_at, now_et)
 
 
@@ -223,9 +225,32 @@ def _set_news_claim(value_at: datetime) -> None:
         db.execute(stmt)
 
 
+def search_item_to_raw(item: dict) -> dict | None:
+    """One yf.Search news item -> the Ticker.news shape parse_article reads. None when it is not a dict."""
+    if not isinstance(item, dict):
+        return None
+    content: dict = {"title": item.get("title"), "thumbnail": item.get("thumbnail")}
+    publisher = item.get("publisher")
+    if isinstance(publisher, str):
+        content["provider"] = {"displayName": publisher}
+    link = item.get("link")
+    if isinstance(link, str):
+        content["canonicalUrl"] = {"url": link}
+    published_at = item.get("providerPublishTime")
+    if isinstance(published_at, (int, float)):
+        content["pubDate"] = datetime.fromtimestamp(published_at, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return {"id": item.get("uuid"), "content": content}
+
+
 def fetch_news_for(ticker: str) -> list[dict]:
-    """One yfinance call for one ticker's news feed."""
-    return yf.Ticker(ticker).news
+    """Fetch one ticker's news, falling back to Search after Yahoo's ncp endpoint began returning 404 on 2026-10-01.
+
+    The fallback can be removed if Yahoo restores Ticker.news; Search items are adapted to the
+    established shape so parsing and editorial filtering stay exactly the same."""
+    items = yf.Ticker(ticker).news
+    if isinstance(items, list) and items:
+        return items
+    return [raw for item in yf.Search(ticker, news_count=10).news if (raw := search_item_to_raw(item)) is not None]
 
 
 def _upsert_articles(records: list[dict]) -> None:
@@ -285,6 +310,7 @@ def refresh_news_if_stale(
 
     parsed_by_id: dict[str, dict] = {}
     errors: list[str] = []
+    raw_counts: list[int] = []
     for ticker in tickers:
         try:
             raw_items = fetch_news_for(ticker)
@@ -294,6 +320,8 @@ def refresh_news_if_stale(
             logger.exception("app.news: fetch_news_for(%s) failed; skipping", ticker)
             errors.append(ticker)
             continue
+
+        raw_counts.append(len(raw_items))
 
         for raw in raw_items:
             parsed = parse_article(raw, ticker, now_utc)
@@ -308,6 +336,9 @@ def refresh_news_if_stale(
             if not is_preferred_publisher(parsed["publisher"]):
                 continue
             parsed_by_id.setdefault(parsed["id"], parsed)
+
+    if raw_counts and all(count == 0 for count in raw_counts):
+        errors.append("all feeds returned no items")
 
     if parsed_by_id:
         _upsert_articles(list(parsed_by_id.values()))

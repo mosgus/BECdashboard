@@ -482,6 +482,26 @@ export async function forecastPortfolio(body: ForecastRequest): Promise<Forecast
   return request<ForecastResponse>('/portfolio/forecast', { method: 'POST', body })
 }
 
+export interface CalibrationRequest {
+  tickers: string[]
+  weights: number[]
+  cash: number
+  lookback_days: number
+  model: string
+}
+export interface CalibrationHorizon {
+  horizon_days: number; windows: number; first_origin: string | null; last_origin: string | null
+  inside_90: number | null; inside_50: number | null; below_90: number; above_90: number
+  range_90: number[] | null; range_50: number[] | null; verdict_90: string; verdict_50: string
+}
+export interface CalibrationResponse {
+  tickers: string[]; model: string; lookback_days: number; num_simulations: number
+  horizons: CalibrationHorizon[]; warnings: string[]
+}
+export async function calibratePortfolio(body: CalibrationRequest): Promise<CalibrationResponse> {
+  return request<CalibrationResponse>('/portfolio/calibration', { method: 'POST', body })
+}
+
 export async function getPortfolioSeries(
   tickers: string[], weights: number[], cash: number, include: string[],
 ): Promise<PortfolioSeriesResponse> {

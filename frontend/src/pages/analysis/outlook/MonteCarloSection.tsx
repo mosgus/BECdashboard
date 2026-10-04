@@ -28,6 +28,7 @@ import { formatMoney, tradeBasis } from '../../../lib/optimize'
 import type { TradeBasis } from '../../../lib/optimize'
 import { isLegacyPortfolio, listPortfolios } from '../../../lib/portfolioStore'
 import { MonteCarloGuide } from './MonteCarloGuide'
+import CalibrationPanel from './CalibrationPanel'
 
 const MonteCarloChart = lazy(() => import('../../../components/MonteCarloChart'))
 const TH =
@@ -217,11 +218,14 @@ export function MonteCarloSection(): JSX.Element | null {
         {run.status === 'error' && <p className="mt-3 text-sm text-brand-negative">{run.message}</p>}
       </div>
       {run.status === 'ready' && (
-        <Results
-          response={run.response}
-          changed={!built.ok || !sameMonteCarloRequest(built.request, run.request)}
-          portfolioName={portfolio.name}
-        />
+        <>
+          <Results
+            response={run.response}
+            changed={!built.ok || !sameMonteCarloRequest(built.request, run.request)}
+            portfolioName={portfolio.name}
+          />
+          <CalibrationPanel key={JSON.stringify(run.request)} request={run.request} />
+        </>
       )}
       {guideOpen && <MonteCarloGuide onClose={() => setGuideOpen(false)} />}
     </div>

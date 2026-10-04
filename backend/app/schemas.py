@@ -370,6 +370,38 @@ class ForecastResponse(BaseModel):
     warnings: list[str]
 
 
+class CalibrationRequest(BaseModel):
+    tickers: list[str]
+    weights: list[float]
+    cash: float = 0.0
+    lookback_days: int = 1825
+    model: str
+
+
+class CalibrationHorizonOut(BaseModel):
+    horizon_days: int
+    windows: int
+    first_origin: date | None
+    last_origin: date | None
+    inside_90: float | None
+    inside_50: float | None
+    below_90: int
+    above_90: int
+    range_90: list[float] | None
+    range_50: list[float] | None
+    verdict_90: str
+    verdict_50: str
+
+
+class CalibrationResponse(BaseModel):
+    tickers: list[str]
+    model: str
+    lookback_days: int
+    num_simulations: int
+    horizons: list[CalibrationHorizonOut]
+    warnings: list[str]
+
+
 class TickerSignals(BaseModel):
     ticker: str
     signals: list[SignalOut]

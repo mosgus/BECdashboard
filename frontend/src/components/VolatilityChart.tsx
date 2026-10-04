@@ -43,14 +43,16 @@ export default function VolatilityChart({
             dot={false}
             isAnimationActive={false}
           />
-          <Line
-            dataKey="forecast"
-            name="Forecast"
-            stroke="var(--color-primary)"
-            connectNulls
-            dot={false}
-            isAnimationActive={false}
-          />
+          {data.some((point) => point.forecast !== null && point.forecast !== undefined) && (
+            <Line
+              dataKey="forecast"
+              name="Forecast"
+              stroke="var(--color-primary)"
+              connectNulls
+              dot={false}
+              isAnimationActive={false}
+            />
+          )}
           <ReferenceLine y={lookbackVol} label="Lookback average" stroke="var(--color-muted)" strokeDasharray="6 3" />
           <ReferenceLine x={0} />
           <Legend />

@@ -57,6 +57,10 @@ export const MONTE_CARLO_GUIDE: GuideSection[] = [
       { term: 'Terminal values', text: 'Where the paths end at the horizon: the 5th, 25th, 75th and 95th percentiles, the median and the mean, each with its change from the starting value. The 5th percentile means 1 path in 20 ended lower.' },
       { term: 'Mean and median', text: 'Compounding stretches the upside, so the mean usually sits a little above the median: a few strong paths pull the average up. Read the median as the typical outcome.' },
       { term: 'Export CSV', text: 'Downloads the percentile paths shown in the chart.' },
+      {
+        term: 'Check calibration',
+        text: 'Reruns the method at past start dates, each using only the prices before it, and counts how often the real 1- and 3-month outcome landed inside the bands. A calibrated method lands inside the 90% band about 90% of the time and inside the middle band about half the time. The expected range allows for luck; a result outside it means the bands are too narrow or too wide for this portfolio. With few windows the check is coarse.',
+      },
     ],
   },
   {

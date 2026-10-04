@@ -13,11 +13,12 @@ from app.indicators import CLOSE_ONLY_INDICATORS, indicator_series
 from app.models import PriceBar
 from app.montecarlo_run import MonteCarloInputError, run_monte_carlo
 from app.forecast_run import ForecastInputError, run_forecast
+from app.calibration_run import CalibrationInputError, run_calibration
 from app.optimize_run import OptimizeInputError, run_optimize
 from app.portfolio_series import build_portfolio_series
 from app.rates import fetch_risk_free_rate_with_source
 from app.schemas import (
-    CapmRequest, CapmResponse, ForecastRequest, ForecastResponse, MonteCarloRequest, MonteCarloResponse,
+    CalibrationRequest, CalibrationResponse, CapmRequest, CapmResponse, ForecastRequest, ForecastResponse, MonteCarloRequest, MonteCarloResponse,
     OptimizeRequest, OptimizeResponse, PortfolioSeriesResponse,
 )
 from app.signals import compute_all_signals
@@ -278,5 +279,20 @@ def forecast_portfolio(body: ForecastRequest) -> dict:
             num_simulations=body.num_simulations, lookback_days=body.lookback_days, model=body.model,
         )
     except ForecastInputError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return asdict(result)
+
+
+@router.post("/calibration", response_model=CalibrationResponse)
+def calibrate_portfolio(body: CalibrationRequest) -> dict:
+    _require_database()
+    tickers, weights = _normalise_request(body.tickers, body.weights)
+    closes = _load_stored_closes(tickers)
+    try:
+        result = run_calibration(
+            dict(zip(tickers, weights, strict=True)), body.cash, closes,
+            lookback_days=body.lookback_days, model=body.model,
+        )
+    except CalibrationInputError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return asdict(result)

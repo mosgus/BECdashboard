@@ -2078,6 +2078,12 @@ risk-free rate to the 3-month T-bill and limits portfolios to holdable tickers.
   - **Read-only:** nothing is applied to the portfolio. Help: a "Monte Carlo guide" panel (0147) describes the engine as built (bootstrap or normal on the constant-mix daily series; cash earns 0), not `main`'s GBM, frontier or Brier copy.
   - **Lookback floor:** `customLookbackError` and `LookbackDialog` take a `LookbackFloor`. The default is 28 days / "4 weeks", for Optimize and CAPM.
   - **Calibration comes later, as its own contract** (Gunnar, 2026-10-01), after the Monte Carlo tab works. It must be a real check, not `main`'s formula. The planned design fits on the history before each of many past start dates, then measures how often the realised outcome landed inside the predicted p5–p95 and p25–p75 bands (expect about 90% and 50%), and shows how many start dates that used.
+    **Shipped in 0152 (accepted 2026-10-03; pending Gunnar's browser check).** It runs from a "Check calibration" button under Monte Carlo and
+    Forecast results, at 21 and 63 days only, whatever horizon is selected. Windows don't overlap (start dates are h trading days apart, at most 60 per
+    horizon), so the outcomes are independent. A 1-year check on 5 years of data would have about 4 outcomes, which proves nothing. Each verdict uses a
+    95% binomial range: with 60 windows the 90% band's acceptable range is 82–97%, so the check is coarse by construction.
+    It calls `run_monte_carlo` and `run_forecast` unchanged on prices truncated at each start date. Prophet is excluded.
+    With fewer than 10 windows the verdict is "too few".
 - **The efficient-frontier chart is kept, but not in Monte Carlo** (Gunnar, 2026-10-01: "I still want it"). `main` draws it inside its Monte Carlo section, but it answers an optimization question: the best risk/return mix of your holdings, with Max Sharpe, Min Variance and Risk Parity marked. It simulates nothing. **Decided (Gunnar, 2026-10-01): it goes on the Optimize tab, below the backtest chart (0148).** Holdings was considered and rejected: it has no lookback and would recompute on every visit.
   - **No separate route.** It is computed inside every `/portfolio/optimize` run, from the same returns, bounds and short cap. A 25-point sweep takes about 0.2 s at 30 holdings.
   - **Historical means, not `main`'s CAPM returns,** so the Max Sharpe dot lands on the curve.

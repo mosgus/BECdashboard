@@ -181,7 +181,7 @@ export function NewsSection(): JSX.Element | null {
     }
   }, [])
 
-  if (failed || articles.length === 0) return null
+  if (failed || (articles.length === 0 && !summary?.text)) return null
 
   const now = new Date()
   // Every thumbnailed article is a card now (0032 capped this at 6 and pushed the rest into
