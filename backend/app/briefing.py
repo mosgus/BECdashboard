@@ -227,7 +227,7 @@ def _prune_old_summaries(now_utc: datetime, keep_id: int) -> None:
         )
 
 
-def refresh_briefing(now_utc: datetime, now_et: datetime, articles_refreshed: bool) -> None:
+def refresh_briefing(now_utc: datetime, now_et: datetime, articles_refreshed: bool, *, force: bool = False) -> None:
     """Regenerates the briefing from the most recently stored headlines. Never wipes: a failed
     or empty generation returns before writing anything, so the previous briefing — stale, but
     present — stays on the page instead of it going blank.
@@ -235,14 +235,15 @@ def refresh_briefing(now_utc: datetime, now_et: datetime, articles_refreshed: bo
     `articles_refreshed` is forwarded straight to needs_summary: it is what lets a newly-set
     GEMINI_KEY produce a briefing on the very next request (no prior summary exists, so
     needs_summary's first rule fires regardless of this flag) while still stopping every later
-    page load from spending a Gemini call on unchanged headlines."""
+    page load from spending a Gemini call on unchanged headlines. `force` exists for the Ops
+    page's manual update and bypasses only the age and articles-moved gate."""
     settings = Settings()
     if not is_enabled() or settings.gemini_key is None:
         return
 
     latest = latest_briefing()
     latest_created_at = latest["created_at"] if latest else None
-    if not needs_summary(latest_created_at, now_utc, articles_refreshed):
+    if not force and not needs_summary(latest_created_at, now_utc, articles_refreshed):
         return
 
     # Over-select then prefer (contract 0039), the same shape as app/news.py's

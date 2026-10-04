@@ -111,7 +111,7 @@ export function SystemHealthCard({ onSweepFinished }: { onSweepFinished?: () => 
       <div className="flex items-center justify-between gap-3 mb-4">
         <h2 className="text-[17px] font-semibold text-foreground">System Health</h2>
         <div className="flex items-center gap-2">
-          <Tooltip label="Bring every universe ticker's price history and quotes up to date now, without waiting for the next refresh window">
+          <Tooltip label="Bring every universe ticker's price history and quotes up to date, fetch the latest news and write a fresh briefing now, without waiting for the next refresh window">
             <button
               type="button"
               onClick={handleForceUpdateClick}

@@ -277,7 +277,7 @@ def _prune_old_articles(now_utc: datetime) -> None:
 
 
 def refresh_news_if_stale(
-    tickers: list[str], now_utc: datetime, now_et: datetime, detail: dict | None = None
+    tickers: list[str], now_utc: datetime, now_et: datetime, detail: dict | None = None, *, force_briefing: bool = False
 ) -> None:
     """The impure work itself: fetch/parse/upsert/prune articles for the given tickers, then
     refresh the briefing. Unconditional — no staleness check lives here any more. Contract
@@ -358,7 +358,10 @@ def refresh_news_if_stale(
 
     briefing_completed = True
     try:
-        refresh_briefing(now_utc, now_et, True)
+        if force_briefing:
+            refresh_briefing(now_utc, now_et, True, force=True)
+        else:
+            refresh_briefing(now_utc, now_et, True)
     except Exception:
         # Broad on purpose: a briefing failure must never affect the article refresh above,
         # which has already committed by this point.
@@ -407,6 +410,26 @@ def run_news_refresh_if_due(now_utc: datetime, now_et: datetime) -> None:
 
         with record_run("news_refresh", now_utc) as detail:
             refresh_news_if_stale(list(MARKET_NEWS_TICKERS), now_utc, now_et, detail=detail)
+    finally:
+        _LOCK.release()
+
+
+def run_forced_news_refresh(now_utc: datetime, now_et: datetime) -> None:
+    """Run from autorefresh.run_manual_refresh; skip rather than wait for scheduled news work.
+
+    The run remains a news_refresh job and marks its detail as forced, while claiming the
+    current window so the subsequent page load does not immediately refresh news again."""
+    if not _LOCK.acquire(blocking=False):
+        return
+    try:
+        if not is_enabled():
+            return
+        _set_news_claim(now_utc)
+        with record_run("news_refresh", now_utc) as detail:
+            detail["forced"] = True
+            refresh_news_if_stale(
+                list(MARKET_NEWS_TICKERS), now_utc, now_et, detail=detail, force_briefing=True
+            )
     finally:
         _LOCK.release()
 

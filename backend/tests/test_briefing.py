@@ -369,6 +369,27 @@ def test_refresh_briefing_skips_when_summary_is_recent(db_mode, monkeypatch):
     assert latest["summary"] == "Existing briefing"
 
 
+def test_refresh_briefing_force_bypasses_a_recent_summary(db_mode, monkeypatch):
+    monkeypatch.setenv("GEMINI_KEY", "fake-key")
+    now = datetime(2026, 9, 15, 12, 0, tzinfo=timezone.utc)
+    _add_summary("Existing briefing", created_at=now - timedelta(minutes=5))
+    _add_article("a1")
+    monkeypatch.setattr("app.briefing.genai.Client", _fake_client_returning("Forced briefing"))
+
+    refresh_briefing(now, now.astimezone(ET), True, force=True)
+
+    assert latest_briefing()["summary"] == "Forced briefing"
+
+
+def test_refresh_briefing_force_still_noops_without_gemini_key(db_mode, monkeypatch):
+    monkeypatch.delenv("GEMINI_KEY", raising=False)
+    _add_article("a1")
+
+    refresh_briefing(datetime.now(timezone.utc), datetime.now(ET), True, force=True)
+
+    assert latest_briefing() is None
+
+
 # --- refresh_briefing: failed generation writes nothing, deletes nothing -----------------------
 
 

@@ -19,6 +19,7 @@ from app.db import is_enabled, session
 from app.jobrun import record_run
 from app.market_data import clear_last_session_cache
 from app.models import AppState, UniverseTicker
+from app.news import run_forced_news_refresh
 from app.cache import store_quotes
 from app.quotes import fetch_quotes, refresh_quotes_if_stale
 from app.schedule import needs_auto_refresh
@@ -163,10 +164,17 @@ def run_auto_refresh_if_due(now_utc: datetime, now_et: datetime) -> None:
 
 
 def run_manual_refresh(now_utc: datetime, now_et: datetime) -> None:
-    """Run a manual universe sweep while the caller-owned _LOCK is held."""
+    """Refresh news and the briefing first, then run a manual universe sweep while the caller-owned _LOCK is held."""
     try:
         if not is_enabled():
             return
+
+        try:
+            run_forced_news_refresh(now_utc, now_et)
+        except Exception:
+            # Broad on purpose: news and the briefing are extras on a manual update; they must never
+            # stop the price sweep or leave _LOCK held.
+            logger.exception("app.autorefresh: forced news refresh failed; continuing with the sweep")
 
         clear_last_session_cache()
         if needs_auto_refresh(_get_state(AUTO_REFRESH_KEY), now_et):

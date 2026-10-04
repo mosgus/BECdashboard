@@ -26,6 +26,11 @@ def db_mode(tmp_path, monkeypatch):
     yield engine
 
 
+@pytest.fixture(autouse=True)
+def _skip_forced_news(monkeypatch):
+    monkeypatch.setattr("app.autorefresh.run_forced_news_refresh", lambda now_utc, now_et: None)
+
+
 def _add_ticker(ticker: str) -> None:
     with session() as db:
         db.add(UniverseTicker(ticker=ticker, active=True))
@@ -164,6 +169,40 @@ def test_manual_refresh_keeps_an_existing_window_claim(db_mode, monkeypatch):
     assert _state() == claimed_at
     assert refreshed == ["AAPL"]
     assert _latest_run()["job_name"] == MANUAL_JOB_NAME
+
+
+def test_manual_refresh_runs_news_before_the_sweep(db_mode, monkeypatch):
+    _add_ticker("AAPL")
+    order = []
+    monkeypatch.setattr("app.autorefresh.run_forced_news_refresh", lambda now_utc, now_et: order.append("news"))
+    monkeypatch.setattr("app.autorefresh.clear_last_session_cache", lambda: None)
+    monkeypatch.setattr("app.autorefresh.refresh", lambda ticker: order.append(f"sweep:{ticker}") or {"action": "none"})
+    monkeypatch.setattr("app.autorefresh.fetch_quotes", lambda tickers: {})
+    now_utc, now_et = _now()
+
+    _begin()
+    run_manual_refresh(now_utc, now_et)
+
+    assert order == ["news", "sweep:AAPL"]
+    assert _LOCK.locked() is False
+
+
+def test_manual_refresh_sweeps_even_when_news_raises(db_mode, monkeypatch):
+    _add_ticker("AAPL")
+    swept = []
+    monkeypatch.setattr("app.autorefresh.run_forced_news_refresh", lambda now_utc, now_et: (_ for _ in ()).throw(RuntimeError("yahoo down")))
+    monkeypatch.setattr("app.autorefresh.clear_last_session_cache", lambda: None)
+    monkeypatch.setattr("app.autorefresh.refresh", lambda ticker: swept.append(ticker) or {"action": "none"})
+    monkeypatch.setattr("app.autorefresh.fetch_quotes", lambda tickers: {})
+    now_utc, now_et = _now()
+
+    _begin()
+    run_manual_refresh(now_utc, now_et)
+
+    assert swept == ["AAPL"]
+    assert _latest_run()["job_name"] == MANUAL_JOB_NAME
+    assert _latest_run()["status"] == "success"
+    assert _LOCK.locked() is False
 
 
 def test_is_sweep_active_covers_locked_due_claimed_and_disabled_states(db_mode):

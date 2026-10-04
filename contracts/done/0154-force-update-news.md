@@ -1,6 +1,6 @@
 # Contract 0154 — Force update also refreshes news and forces a new briefing
 
-**Status:** open
+**Status:** reported
 **Assigned to:** sonnet
 **Author:** planner (opus)
 

@@ -10,6 +10,8 @@ from app.news import (
     _LOCK,
     MARKET_NEWS_TICKERS,
     NEWS_REFRESH_KEY,
+    _get_news_claim,
+    _set_news_claim,
     cap_per_ticker,
     fetch_news_for,
     get_newest_fetched_at,
@@ -19,6 +21,7 @@ from app.news import (
     recent_articles,
     refresh_news_if_stale,
     run_news_refresh_if_due,
+    run_forced_news_refresh,
     search_item_to_raw,
 )
 
@@ -455,6 +458,39 @@ def test_all_empty_feeds_record_partial(db_mode, monkeypatch):
     assert run is not None
     assert run["status"] == "partial"
     assert "all feeds returned no items" in run["detail"]["errors"]
+
+
+def test_forced_news_refresh_claims_records_and_forces_the_briefing(db_mode, monkeypatch):
+    now_et = _et(10, 0)
+    now_utc = _utc(now_et)
+    _set_news_claim(now_utc - timedelta(minutes=5))
+    calls = []
+    monkeypatch.setattr("app.news.fetch_news_for", lambda ticker: [_raw_item(f"{ticker}-1")])
+    monkeypatch.setattr("app.briefing.refresh_briefing", lambda *args, **kwargs: calls.append((args, kwargs)))
+
+    run_forced_news_refresh(now_utc, now_et)
+
+    run = _latest_job_run()
+    assert calls == [((now_utc, now_et, True), {"force": True})]
+    assert run is not None
+    assert run["job_name"] == "news_refresh"
+    assert run["status"] == "success"
+    assert run["detail"]["forced"] is True
+    assert run["detail"]["stored"] == len(MARKET_NEWS_TICKERS)
+    assert _get_news_claim() == now_utc
+
+
+def test_forced_news_refresh_skips_while_a_news_refresh_holds_the_lock(db_mode, monkeypatch):
+    called = []
+    monkeypatch.setattr("app.news.fetch_news_for", lambda ticker: called.append(ticker) or [])
+    assert _LOCK.acquire(blocking=False)
+    try:
+        now_et = _et(10, 0)
+        run_forced_news_refresh(_utc(now_et), now_et)
+    finally:
+        _LOCK.release()
+    assert called == []
+    assert _latest_job_run() is None
 
 
 def test_a_body_that_raises_records_failure_and_still_reraises(db_mode, monkeypatch):
