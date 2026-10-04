@@ -16,6 +16,7 @@ import {
   forecastCsv,
   forecastCsvFilename,
   forecastSummary,
+  lossChanceText,
   memberMedianRows,
   paramRows,
   valueChartData,
@@ -270,9 +271,7 @@ function Results({
             </p>
           ))}
           <p className="text-sm">{volatilitySummary(response)}</p>
-          <p className="text-sm">
-            Chance of ending below the starting value: {(response.terminal.prob_loss * 100).toFixed(1)}%
-          </p>
+          <p className="text-sm">{lossChanceText(response)}</p>
         </div>
       </Card>
       <div className="grid gap-5 lg:grid-cols-2">

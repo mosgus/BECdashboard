@@ -56,6 +56,13 @@ export function volatilitySummary(response: ForecastResponse): string {
   const halfLife = response.params.half_life_days ?? response.params['garch.half_life_days']
   return `Forecast volatility today: ${formatVol(response.current_vol)} a year, against ${formatVol(response.lookback_vol)} over the lookback.${halfLife === undefined ? '' : ` GARCH expects volatility to close half the gap in about ${Math.round(halfLife)} trading days.`}`
 }
+/** The results line about finishing below the starting value. Prophet's figure is withheld:
+ *  its bands only reflect trend uncertainty and calibration does not cover it. */
+export function lossChanceText(response: ForecastResponse): string {
+  if (response.model === 'prophet')
+    return 'Chance of ending below the starting value: not estimated for Prophet. Its bands only reflect how uncertain the trend is, and they have not been checked against real outcomes.'
+  return `Chance of ending below the starting value: ${(response.terminal.prob_loss * 100).toFixed(1)}%`
+}
 export interface ValuePoint {
   day: number
   history?: number

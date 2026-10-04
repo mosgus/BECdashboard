@@ -6,6 +6,7 @@ import {
   forecastSummary,
   FORECAST_MODELS,
   formatVol,
+  lossChanceText,
   memberMedianRows,
   paramRows,
   valueChartData,
@@ -82,6 +83,17 @@ describe('forecast helpers', () => {
     expect(volatilitySummary({ ...RESPONSE, current_vol: null })).toBe(
       'Prophet does not forecast volatility. Its bands come from how uncertain the trend is, so they widen with the horizon.',
     )
+  })
+  it('formats the estimated chance of loss for non-Prophet models', () =>
+    expect(lossChanceText({ ...RESPONSE, terminal: { ...RESPONSE.terminal, prob_loss: 0.123 } })).toBe(
+      'Chance of ending below the starting value: 12.3%',
+    ))
+  it('withholds the chance of loss for Prophet', () => {
+    const text = lossChanceText({ ...RESPONSE, model: 'prophet', terminal: { ...RESPONSE.terminal, prob_loss: 0.123 } })
+    expect(text).toBe(
+      'Chance of ending below the starting value: not estimated for Prophet. Its bands only reflect how uncertain the trend is, and they have not been checked against real outcomes.',
+    )
+    expect(text).not.toContain('%')
   })
   it('builds value chart data', () => {
     const data = valueChartData(RESPONSE)

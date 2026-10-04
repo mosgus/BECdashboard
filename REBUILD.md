@@ -2009,10 +2009,11 @@ risk-free rate to the 3-month T-bill and limits portfolios to holdable tickers.
 
   No statsmodels: it is not installed, and the methods above do not need it. Contracts: 0149
   (backend), 0150 (frontend and guide), 0151 (Prophet). 0149 was accepted on 2026-10-02. 0150 was
-  accepted on 2026-10-02 after two reworks, pending Gunnar's browser check. 0151 was accepted on
+  accepted on 2026-10-02 after two reworks; Gunnar's browser check passed 2026-10-04. 0151 was accepted on
   2026-10-02 (prophet 1.4.0 in requirements.txt; lazy import; at most 2,000 samples, because 10,000
-  peaked at 413 MB against Render's 512 MB). It is pending Gunnar's browser check and the first
-  Render build with Prophet.
+  peaked at 413 MB against Render's 512 MB). Gunnar's browser check passed 2026-10-04. A Prophet run on
+  Render (512 MB, slow first call) has not been explicitly confirmed. Contract 0159 shows
+  Prophet's loss chance as "not estimated".
 - **Tilt is removed** (Gunnar, 2026-09-24; contract 0113). `POST /portfolio/tilt`, `TiltRequest`,
   `optimizer.compute_tilt` and their five tests are deleted. `main` never made tilt reachable, so there
   was no reference behaviour to keep, and no rebuild UI called it. Gunnar first chose to keep it,
@@ -2081,7 +2082,7 @@ risk-free rate to the 3-month T-bill and limits portfolios to holdable tickers.
   - **Read-only:** nothing is applied to the portfolio. Help: a "Monte Carlo guide" panel (0147) describes the engine as built (bootstrap or normal on the constant-mix daily series; cash earns 0), not `main`'s GBM, frontier or Brier copy.
   - **Lookback floor:** `customLookbackError` and `LookbackDialog` take a `LookbackFloor`. The default is 28 days / "4 weeks", for Optimize and CAPM.
   - **Calibration comes later, as its own contract** (Gunnar, 2026-10-01), after the Monte Carlo tab works. It must be a real check, not `main`'s formula. The planned design fits on the history before each of many past start dates, then measures how often the realised outcome landed inside the predicted p5–p95 and p25–p75 bands (expect about 90% and 50%), and shows how many start dates that used.
-    **Shipped in 0152 (accepted 2026-10-03; pending Gunnar's browser check).** It runs from a "Check calibration" button under Monte Carlo and
+    **Shipped in 0152 (accepted 2026-10-03; Gunnar's browser check passed 2026-10-04).** It runs from a "Check calibration" button under Monte Carlo and
     Forecast results, at 21 and 63 days only, whatever horizon is selected. Windows don't overlap (start dates are h trading days apart, at most 60 per
     horizon), so the outcomes are independent. A 1-year check on 5 years of data would have about 4 outcomes, which proves nothing. Each verdict uses a
     95% binomial range: with 60 windows the 90% band's acceptable range is 82–97%, so the check is coarse by construction.
