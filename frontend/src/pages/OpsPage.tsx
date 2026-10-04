@@ -3,6 +3,7 @@ import type { JSX } from 'react'
 import { JobRunsCard } from '../components/JobRunsCard'
 import { SystemHealthCard } from '../components/SystemHealthCard'
 import { ThemeSelector } from '../components/ThemeSelector'
+import { AdminSection } from '../components/AdminSection'
 
 const CARD = 'bg-brand-surface border border-brand-border rounded-[var(--radius-card)] p-5'
 
@@ -31,6 +32,7 @@ export function OpsPage(): JSX.Element {
           </div>
 
           <JobRunsCard key={jobRunsVersion} />
+          <AdminSection />
         </div>
       </main>
     </div>
