@@ -96,9 +96,11 @@ def compute_betas(returns: pd.DataFrame, market_ticker: str) -> dict[str, float]
     return betas
 
 
-# FLAG(custom): the `mrp * view` term is not part of CAPM or Black-Litterman. It adds a flat
-# return bump per unit of conviction (view 0.20 → +1.0% at mrp 5%). Ported unchanged from main;
-# intent to be confirmed with its author before changing.
+# FLAG(custom): the `mrp * view` term comes from Zach's notebook (the team's original CAPM
+# allocation model) and is kept on purpose. A view is the analyst's "undervalued %"; it adds
+# mrp * view to the CAPM return (view 0.20 → +1.0%/yr at mrp 5%). It is not part of textbook
+# CAPM or Black-Litterman: there is no confidence or risk scaling, and its size follows mrp.
+# Only the Outlook CAPM tab (capm_run) uses it. Check with Zach before changing the formula.
 def compute_capm_expected_returns(
     betas: dict[str, float], rf: float = 0.04, mrp: float = 0.05, views: Optional[dict[str, float]] = None
 ) -> dict[str, float]:
@@ -239,7 +241,8 @@ def random_portfolios(
 
 
 # FLAG(custom): the method is standard (max Sharpe on CAPM expected returns). The custom part is
-# the expected-returns input, which carries the view bumps — see compute_capm_expected_returns.
+# the expected-returns input, which carries the view term from Zach's notebook — see
+# compute_capm_expected_returns.
 def optimize_max_sharpe_capm(returns: pd.DataFrame, expected_returns: dict[str, float], rf: float = 0.04, max_weight: float = 1.0, min_weight: float = 0.0, asset_bounds: Optional[dict[str, tuple[float, float]]] = None, max_short: float | None = None) -> dict[str, float]:
     tickers = [t for t in returns.columns if t in expected_returns]
     if not tickers:

@@ -191,6 +191,15 @@ export function formatView(fraction: number): string {
   return `${percent}%`
 }
 
+/** What a view adds to a holding's expected annual return: MRP × view (Zach's notebook formula).
+ *  Null when the view is 0 or the MRP text is not a valid premium (above 0, at most 20). */
+export function viewEffect(viewPct: number, mrpPct: string): string | null {
+  const mrp = parse(mrpPct)
+  if (viewPct === 0 || mrp === null || mrp <= 0 || mrp > 20) return null
+  const effect = (viewPct * mrp) / 100
+  return `${effect > 0 ? '+' : ''}${effect.toFixed(2)}%/yr`
+}
+
 export function formatBeta(beta: number): string {
   return beta.toFixed(2)
 }

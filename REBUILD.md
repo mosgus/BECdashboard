@@ -2065,6 +2065,7 @@ risk-free rate to the 3-month T-bill and limits portfolios to holdable tickers.
   - This also removes the double-counted view (`mrp × view` + `κ × view`) flagged in 0112.
   - CAPM lives only in `/portfolio/capm`, which applies each view once, through `mrp × view`.
   - The `mrp × view` `FLAG(custom)` stays: it is the documented meaning of a view in the CAPM guide.
+  - **Gunnar's decision, 2026-10-04 (0160):** the term comes from Zach's notebook, the team's original CAPM allocation model, and is kept on purpose. The notebook is gitignored and not in the repo. The comment credits Zach, and each View slider shows its effect in %/yr. Check with Zach before changing the formula.
   - The duplicate `isValidCurrentPortfolio` in `portfolioStore.ts` is merged into `lib/portfolio.ts`.
 - **Frontend audits render the page (from 0119).** `node contracts/tools/smoke-render.mjs <tab>` loads a portfolio tab in headless Chrome with a throwaway profile and a fake portfolio, then prints any uncaught exception.
   - **Why:** 0119 passed tests, build and lint but blanked the Outlook tab. `Tooltip` calls `Children.only`, and the Target value `Field` gave it two children.

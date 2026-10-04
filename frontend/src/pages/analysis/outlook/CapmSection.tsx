@@ -34,6 +34,7 @@ import {
   sameCapmRun,
   statItems,
   varItems,
+  viewEffect,
 } from '../../../lib/capm'
 import type { CapmInputs, CapmItem, CapmRun, CapmSettings } from '../../../lib/capm'
 import {
@@ -295,7 +296,7 @@ export function CapmSection(): JSX.Element | null {
             </Tooltip>
           </div>
         </div>
-        <HoldingsTable portfolio={current} inputs={inputs} onUpdate={update} />
+        <HoldingsTable portfolio={current} inputs={inputs} mrpPct={settings.mrpPct} onUpdate={update} />
         <Tooltip
           block
           label={
@@ -392,10 +393,12 @@ function Field({ label, tip, children }: { label: string; tip: string; children:
 function HoldingsTable({
   portfolio,
   inputs,
+  mrpPct,
   onUpdate,
 }: {
   portfolio: Portfolio
   inputs: CapmInputs
+  mrpPct: string
   onUpdate: (ticker: string, values: Partial<CapmInputs[string]>) => void
 }): JSX.Element {
   return (
@@ -430,7 +433,7 @@ function HoldingsTable({
                 <td className={TD}>
                   <div className="flex items-center gap-2">
                     <Tooltip
-                      label={`Your view on ${position.ticker}: how undervalued you think it is. Each +10% adds 10% of the market risk premium to its expected return.`}
+                      label={`Your view on ${position.ticker}: how undervalued you think it is. It adds market risk premium × view to its expected return; the grey figure shows how much per year.`}
                     >
                       <input
                         type="range"
@@ -447,6 +450,7 @@ function HoldingsTable({
                     >
                       {formatView(input.viewPct / 100)}
                     </span>
+                    <span className="w-20 text-right font-mono text-xs text-[var(--color-muted)]">{viewEffect(input.viewPct, mrpPct) ?? ''}</span>
                   </div>
                 </td>
                 <td className={TD}>
