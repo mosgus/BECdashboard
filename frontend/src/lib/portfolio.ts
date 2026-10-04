@@ -584,6 +584,30 @@ export function creationCashDollars(
   return implied === null ? undefined : implied * portfolio.cashWeight / 100
 }
 
+/** The Portfolio a valid draft produces, or null when the draft cannot be created. Shared by
+ *  New Portfolio's Create and the preset editor's Save so both serialise identically. */
+export function buildDraftPortfolio(
+  name: string,
+  mode: EntryMode,
+  summary: DraftSummary,
+  byTicker: Map<string, UniverseEntry>,
+  id: string,
+  updatedAt: string,
+): Portfolio | null {
+  if (!summary.canCreate || summary.cashWeight === null) return null
+
+  const positions: Position[] = summary.rows
+    .filter((row) => row.ticker !== '' && row.weight !== null)
+    .map((row) =>
+      row.shares !== null
+        ? { ticker: row.ticker, weight: row.weight as number, shares: row.shares }
+        : { ticker: row.ticker, weight: row.weight as number },
+    )
+  const portfolio: Portfolio = { id, name: name.trim(), cashWeight: summary.cashWeight, positions, updatedAt }
+  const cashDollars = creationCashDollars(mode, summary.cashDollars, portfolio, byTicker)
+  return cashDollars === undefined ? portfolio : { ...portfolio, cashDollars }
+}
+
 /** The mode-dependent part of a composer draft: what a mode switch rewrites. */
 export interface DraftFields {
   cash: string

@@ -8,6 +8,59 @@ from datetime import date, datetime
 from pydantic import BaseModel, field_validator
 
 
+class PresetIn(BaseModel):
+    name: str
+    description: str = ""
+    csv: str
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("name must not be empty")
+        if len(value) > 80:
+            raise ValueError("name must be at most 80 characters")
+        return value
+
+    @field_validator("description")
+    @classmethod
+    def validate_description(cls, value: str) -> str:
+        value = value.strip()
+        if len(value) > 200:
+            raise ValueError("description must be at most 200 characters")
+        return value
+
+    @field_validator("csv")
+    @classmethod
+    def validate_csv(cls, value: str) -> str:
+        value = value.lstrip()
+        if not value:
+            raise ValueError("csv must not be empty")
+        if len(value) > 20_000:
+            raise ValueError("csv must be at most 20000 characters")
+
+        first_line = value.split("\n", 1)[0]
+        normalized_header = "".join(first_line.lower().split())
+        if not normalized_header.startswith("ticker,"):
+            raise ValueError("csv must begin with a ticker header")
+
+        return value.rstrip("\n") + "\n"
+
+
+class PresetOut(BaseModel):
+    id: str
+    name: str
+    description: str
+    csv: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class PresetsResponse(BaseModel):
+    presets: list[PresetOut]
+
+
 class UniverseEntry(BaseModel):
     ticker: str
     short_name: str | None

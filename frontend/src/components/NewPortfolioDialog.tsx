@@ -1,20 +1,24 @@
 import { useEffect, useState } from 'react'
 import type { ChangeEvent, JSX } from 'react'
 import { Link } from 'react-router-dom'
-import type { UniverseEntry } from '../api/client'
+import { ApiError, getPresets, type Preset, type PresetInput, type UniverseEntry } from '../api/client'
 import { formatPercent } from '../lib/format'
-import { creationCashDollars, summariseDraft, switchEntryMode } from '../lib/portfolio'
-import type { DraftRow, EntryMode, ModeSwitch, Portfolio, Position } from '../lib/portfolio'
-import { parsePortfolioCsv, portfolioNameFromFilename as nameFromFilename } from '../lib/portfolioCsv'
+import { buildDraftPortfolio, summariseDraft, switchEntryMode } from '../lib/portfolio'
+import type { DraftRow, EntryMode, ModeSwitch, Portfolio } from '../lib/portfolio'
+import { parsePortfolioCsv, portfolioNameFromFilename as nameFromFilename, serializePortfolioCsv } from '../lib/portfolioCsv'
 import type { DraftSeed, DroppedRow, TargetAdjustment } from '../lib/portfolioCsv'
-import { PRESETS } from '../lib/presets'
 import { isHoldableType } from '../lib/tickerType'
 import { Tooltip } from './Tooltip'
 
 interface NewPortfolioDialogProps {
   universe: UniverseEntry[]
   onCancel: () => void
-  onCreate: (portfolio: Portfolio) => void
+  onCreate?: (portfolio: Portfolio) => void
+  presetEdit?: {
+    initial: Preset | null
+    onSave: (input: PresetInput) => Promise<void>
+    onDelete: (() => Promise<void>) | null
+  }
 }
 
 const FIELD = 'text-sm px-3 py-2 rounded-[var(--radius-btn)] border border-brand-border bg-brand-surface text-foreground'
@@ -24,16 +28,26 @@ function emptyRow(): DraftRow {
   return { id: crypto.randomUUID(), ticker: '', shares: '', weight: '' }
 }
 
-export function NewPortfolioDialog({ universe, onCancel, onCreate }: NewPortfolioDialogProps): JSX.Element {
-  const [name, setName] = useState('')
-  const [mode, setMode] = useState<EntryMode>('weight')
+export function NewPortfolioDialog({ universe, onCancel, onCreate, presetEdit }: NewPortfolioDialogProps): JSX.Element {
+  const [initialLoad] = useState(() =>
+    presetEdit?.initial
+      ? parsePortfolioCsv(presetEdit.initial.csv, new Set(universe.filter((entry) => isHoldableType(entry.quote_type)).map((entry) => entry.ticker)))
+      : null,
+  )
+  const [name, setName] = useState(() => initialLoad?.ok ? presetEdit!.initial!.name : '')
+  const [description, setDescription] = useState(() => presetEdit?.initial?.description ?? '')
+  const [mode, setMode] = useState<EntryMode>(() => initialLoad?.ok ? initialLoad.seed.mode : 'weight')
   const [lastSwitch, setLastSwitch] = useState<ModeSwitch | null>(null)
-  const [cashText, setCashText] = useState('')
-  const [rows, setRows] = useState<DraftRow[]>([])
-  const [importError, setImportError] = useState<string | null>(null)
-  const [droppedRows, setDroppedRows] = useState<DroppedRow[]>([])
-  const [adjustment, setAdjustment] = useState<TargetAdjustment | null>(null)
-  const [zeroTargets, setZeroTargets] = useState<string[]>([])
+  const [cashText, setCashText] = useState(() => initialLoad?.ok ? initialLoad.seed.cash : '')
+  const [rows, setRows] = useState<DraftRow[]>(() => initialLoad?.ok ? initialLoad.seed.rows.map((row) => ({ ...row, id: crypto.randomUUID() })) : [])
+  const [importError, setImportError] = useState<string | null>(() => initialLoad !== null && !initialLoad.ok ? `This preset could not be read: ${initialLoad.error}` : null)
+  const [droppedRows, setDroppedRows] = useState<DroppedRow[]>(() => initialLoad?.ok ? initialLoad.dropped : [])
+  const [adjustment, setAdjustment] = useState<TargetAdjustment | null>(() => initialLoad?.ok ? initialLoad.adjustment ?? null : null)
+  const [zeroTargets, setZeroTargets] = useState<string[]>(() => initialLoad?.ok ? initialLoad.zeroTargets ?? [] : [])
+  const [presets, setPresets] = useState<Preset[]>([])
+  const [busy, setBusy] = useState(false)
+  const [actionError, setActionError] = useState<string | null>(null)
+  const [confirmingDelete, setConfirmingDelete] = useState(false)
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent): void {
@@ -43,11 +57,25 @@ export function NewPortfolioDialog({ universe, onCancel, onCreate }: NewPortfoli
     return () => document.removeEventListener('keydown', handleKeyDown)
   }, [onCancel])
 
+  useEffect(() => {
+    let cancelled = false
+    getPresets()
+      .then((response) => {
+        if (!cancelled) setPresets(response.presets)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
   const holdable = universe.filter((entry) => isHoldableType(entry.quote_type))
   const byTicker = new Map(holdable.map((entry) => [entry.ticker, entry]))
   const summary = summariseDraft({ name, mode, cash: cashText, rows }, byTicker)
   const pristine = cashText === '' && rows.length === 0
   const tickerOnlyDrop = mode === 'weight' && droppedRows.every((row) => row.weightPct === null)
+  const loadFailed = initialLoad !== null && !initialLoad.ok
+  const blockedTickers = initialLoad?.ok ? initialLoad.dropped.map((row) => row.ticker) : []
 
   /** Apply a parsed CSV (or a future catalog selection) to the dialog's draft state. The only path
    *  by which a DraftSeed becomes an editable draft. */
@@ -89,7 +117,7 @@ export function NewPortfolioDialog({ universe, onCancel, onCreate }: NewPortfoli
   }
 
   function handlePresetSelection(event: ChangeEvent<HTMLSelectElement>): void {
-    const preset = PRESETS.find((candidate) => candidate.id === event.target.value)
+    const preset = presets.find((candidate) => candidate.id === event.target.value)
     if (preset === undefined) return
 
     const result = parsePortfolioCsv(preset.csv, new Set(holdable.map((entry) => entry.ticker)))
@@ -143,25 +171,38 @@ export function NewPortfolioDialog({ universe, onCancel, onCreate }: NewPortfoli
   }
 
   function handleCreate(): void {
-    if (!summary.canCreate || summary.cashWeight === null) return
+    const portfolio = buildDraftPortfolio(name, mode, summary, byTicker, crypto.randomUUID(), new Date().toISOString())
+    if (portfolio !== null) onCreate?.(portfolio)
+  }
 
-    const positions: Position[] = summary.rows
-      .filter((row) => row.ticker !== '' && row.weight !== null)
-      .map((row) =>
-        row.shares !== null
-          ? { ticker: row.ticker, weight: row.weight as number, shares: row.shares }
-          : { ticker: row.ticker, weight: row.weight as number },
-      )
-
-    const portfolio: Portfolio = {
-      id: crypto.randomUUID(),
-      name: name.trim(),
-      cashWeight: summary.cashWeight,
-      positions,
-      updatedAt: new Date().toISOString(),
+  async function handleSave(): Promise<void> {
+    if (presetEdit === undefined) return
+    const portfolio = buildDraftPortfolio(name, mode, summary, byTicker, presetEdit.initial?.id ?? 'new', new Date().toISOString())
+    if (portfolio === null) return
+    setBusy(true)
+    setActionError(null)
+    try {
+      await presetEdit.onSave({ name: name.trim(), description: description.trim(), csv: serializePortfolioCsv(portfolio) })
+    } catch (error) {
+      setActionError(error instanceof ApiError ? error.message : 'Could not save the preset.')
+      setBusy(false)
     }
-    const cashDollars = creationCashDollars(mode, summary.cashDollars, portfolio, byTicker)
-    onCreate(cashDollars === undefined ? portfolio : { ...portfolio, cashDollars })
+  }
+
+  async function handleDelete(): Promise<void> {
+    if (presetEdit?.onDelete === null || presetEdit === undefined) return
+    if (!confirmingDelete) {
+      setConfirmingDelete(true)
+      return
+    }
+    setBusy(true)
+    setActionError(null)
+    try {
+      await presetEdit.onDelete()
+    } catch (error) {
+      setActionError(error instanceof ApiError ? error.message : 'Could not delete the preset.')
+      setBusy(false)
+    }
   }
 
   return (
@@ -178,7 +219,7 @@ export function NewPortfolioDialog({ universe, onCancel, onCreate }: NewPortfoli
         className="bg-brand-surface border border-brand-border rounded-[var(--radius-card)] w-full max-w-2xl max-h-[85vh] overflow-y-auto shadow-xl p-5"
       >
         <h2 id="new-portfolio-heading" className="font-heading font-bold text-lg text-foreground mb-4">
-          New portfolio
+          {presetEdit === undefined ? 'New portfolio' : presetEdit.initial === null ? 'New preset' : 'Edit preset'}
         </h2>
 
         <div className="flex flex-col gap-4">
@@ -190,23 +231,25 @@ export function NewPortfolioDialog({ universe, onCancel, onCreate }: NewPortfoli
                   <input type="file" accept=".csv,text/csv" onChange={handleImport} className="sr-only" />
                 </label>
               </Tooltip>
-              <Tooltip label="Fill this form from a saved allocation — you still review and create the portfolio yourself">
-                <select
-                  defaultValue=""
-                  onChange={handlePresetSelection}
-                  className={`${FIELD} w-80 max-w-full`}
-                  aria-label="Select a preset portfolio"
-                >
-                  <option value="" disabled>Select a preset</option>
-                  {PRESETS.map((preset) => (
-                    <option key={preset.id} value={preset.id}>{preset.name} — {preset.description}</option>
-                  ))}
-                </select>
-              </Tooltip>
+              {presets.length > 0 && (
+                <Tooltip label="Fill this form from a saved allocation — you still review and create the portfolio yourself">
+                  <select
+                    defaultValue=""
+                    onChange={handlePresetSelection}
+                    className={`${FIELD} w-80 max-w-full`}
+                    aria-label="Select a preset portfolio"
+                  >
+                    <option value="" disabled>Select a preset</option>
+                    {presets.map((preset) => (
+                      <option key={preset.id} value={preset.id}>{preset.name} — {preset.description}</option>
+                    ))}
+                  </select>
+                </Tooltip>
+              )}
             </div>
-          ) : (
+          ) : presetEdit === undefined ? (
             <p className="text-xs text-[var(--color-muted)]">Reopen this dialog to import a CSV.</p>
-          )}
+          ) : null}
 
           {importError !== null && <p className="text-xs text-brand-negative">{importError}</p>}
 
@@ -242,6 +285,23 @@ export function NewPortfolioDialog({ universe, onCancel, onCreate }: NewPortfoli
               className={`${FIELD} w-full`}
             />
           </Tooltip>
+
+          {presetEdit !== undefined && (
+            <Tooltip label="One line shown beside the preset name">
+              <input
+                type="text"
+                value={description}
+                onChange={(event) => setDescription(event.target.value)}
+                placeholder="Description (optional)"
+                maxLength={200}
+                className={`${FIELD} w-full`}
+              />
+            </Tooltip>
+          )}
+
+          {blockedTickers.length > 0 && (
+            <p className="text-xs text-brand-negative">This preset holds tickers that are not in your Universe ({blockedTickers.join(', ')}). Add them to the Universe before editing, or delete the preset.</p>
+          )}
 
           <div className="inline-flex self-start rounded-[var(--radius-btn)] border border-brand-border overflow-hidden">
             <Tooltip label="Enter each asset's allocation percentage; no portfolio dollar value is required.">
@@ -395,18 +455,31 @@ export function NewPortfolioDialog({ universe, onCancel, onCreate }: NewPortfoli
           )}
 
           <div className="flex items-center justify-between gap-3 pt-3 border-t border-brand-border">
-            <p className="text-xs text-brand-negative">{summary.problem}</p>
+            <p className="text-xs text-brand-negative">{actionError ?? summary.problem}</p>
             <div className="flex gap-2 flex-shrink-0">
               <Tooltip label="Discard this portfolio without creating it">
                 <button type="button" onClick={onCancel} className="text-sm font-medium px-4 py-2 rounded-[var(--radius-btn)] bg-brand-surface border border-brand-border text-[var(--color-muted)] hover:bg-brand-border hover:text-foreground">
                   Cancel
                 </button>
               </Tooltip>
-              <Tooltip label="Create this portfolio with the assets above">
-                <button type="button" disabled={!summary.canCreate} onClick={handleCreate} className={`text-sm font-medium px-4 py-2 rounded-[var(--radius-btn)] bg-btn-action text-btn-action-text hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed ${!summary.canCreate ? 'pointer-events-none' : ''}`}>
-                  Create portfolio
-                </button>
-              </Tooltip>
+              {presetEdit === undefined ? (
+                <Tooltip label="Create this portfolio with the assets above">
+                  <button type="button" disabled={!summary.canCreate} onClick={handleCreate} className={`text-sm font-medium px-4 py-2 rounded-[var(--radius-btn)] bg-btn-action text-btn-action-text hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed ${!summary.canCreate ? 'pointer-events-none' : ''}`}>
+                    Create portfolio
+                  </button>
+                </Tooltip>
+              ) : (
+                <>
+                  <button type="button" disabled={!summary.canCreate || loadFailed || blockedTickers.length > 0 || busy} onClick={handleSave} className="text-sm font-medium px-4 py-2 rounded-[var(--radius-btn)] bg-btn-action text-btn-action-text hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed">
+                    Save
+                  </button>
+                  {presetEdit.onDelete !== null && (
+                    <button type="button" disabled={busy} onClick={handleDelete} className="text-sm font-medium px-4 py-2 rounded-[var(--radius-btn)] bg-brand-surface border border-brand-border text-brand-negative hover:bg-brand-border hover:text-foreground disabled:opacity-50 disabled:cursor-not-allowed">
+                      {confirmingDelete ? 'Confirm delete' : 'Delete'}
+                    </button>
+                  )}
+                </>
+              )}
             </div>
           </div>
         </div>

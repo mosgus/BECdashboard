@@ -153,3 +153,17 @@ class JobRun(Base):
     status: Mapped[str] = mapped_column(String, nullable=False)
     duration_ms: Mapped[int | None] = mapped_column(Integer)
     detail: Mapped[dict | None] = mapped_column(JSON)
+
+
+class Preset(Base):
+    """An admin-managed portfolio preset. `csv` is the canonical Blue Eagle portfolio CSV
+    (header `ticker,weight_pct,shares` or `ticker,shares`); the frontend parses it."""
+
+    __tablename__ = "presets"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    description: Mapped[str] = mapped_column(String, nullable=False, default="")
+    csv: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

@@ -176,7 +176,7 @@ export interface NewsResponse {
 }
 
 interface RequestOptions {
-  method?: 'GET' | 'POST' | 'DELETE'
+  method?: 'GET' | 'POST' | 'PUT' | 'DELETE'
   body?: unknown
 }
 
@@ -227,7 +227,7 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
 
   // Retry only a GET against a transient failure — a dropped/refused connection (fetch itself
   // rejects) or a 502/503/504, which is what a uvicorn restart or a short Render deploy blip
-  // looks like. Never POST or DELETE: POST /universe is not idempotent, and a retried add would
+  // looks like. Never POST, PUT, or DELETE: POST /universe is not idempotent, and a retried add would
   // double-fetch ten years of history. Never a 4xx or a 500 either — a 404 means the ticker
   // doesn't exist and retrying cannot change that, and a 500 means the app already raised.
   const retryDelaysMs = method === 'GET' ? [1000, 3000] : []
@@ -265,6 +265,42 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
 
 export async function getHealth(): Promise<HealthResponse> {
   return request<HealthResponse>('/health')
+}
+
+export interface Preset {
+  id: string
+  name: string
+  description: string
+  /** Canonical Blue Eagle portfolio CSV; parse with parsePortfolioCsv. */
+  csv: string
+  created_at: string
+  updated_at: string
+}
+
+export interface PresetInput {
+  name: string
+  description: string
+  csv: string
+}
+
+export interface PresetsResponse {
+  presets: Preset[]
+}
+
+export async function getPresets(): Promise<PresetsResponse> {
+  return request<PresetsResponse>('/presets')
+}
+
+export async function createPreset(input: PresetInput): Promise<Preset> {
+  return request<Preset>('/presets', { method: 'POST', body: input })
+}
+
+export async function updatePreset(id: string, input: PresetInput): Promise<Preset> {
+  return request<Preset>(`/presets/${encodeURIComponent(id)}`, { method: 'PUT', body: input })
+}
+
+export async function deletePreset(id: string): Promise<void> {
+  return request<void>(`/presets/${encodeURIComponent(id)}`, { method: 'DELETE' })
 }
 
 export async function getUniverse(): Promise<UniverseEntry[]> {

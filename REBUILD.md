@@ -1156,6 +1156,9 @@ multiplying it, and the upserts are idempotent. Fix is a module-level non-blocki
 start script in the repo — the build and start commands live only in the Render dashboard, so nothing
 in version control proves `alembic upgrade head` runs on deploy. Verify before shipping any contract
 that adds a table; a missing one surfaces as a 500 from the new endpoint, not as a deploy failure.
+To check a new migration's SQL without touching any database, run `(cd backend && env -u DATABASE_URL .venv/bin/alembic upgrade <prev>:<new> --sql)`.
+Setting `DATABASE_URL` to a dummy value trips the conflict guard against `backend/.env`. `--sql` never
+connects; it only reads `.env` to pick the dialect (found by contract 0156).
 
 **Grepping for a keyword is not verifying a construct — third recorded instance.** Contract 0031's
 criterion 5 grepped `\\.delete\\(\\)|DELETE FROM`, a pattern for the legacy `Query.delete()` API, in a

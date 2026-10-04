@@ -2,7 +2,7 @@ import sys
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.config import Settings
-from app.routers import news, ops, portfolio, universe
+from app.routers import news, ops, portfolio, presets, universe
 
 app = FastAPI(title="Blue Eagle API")
 settings = Settings()
@@ -19,6 +19,7 @@ app.include_router(universe.router)
 app.include_router(news.router)
 app.include_router(ops.router)
 app.include_router(portfolio.router)
+app.include_router(presets.router)
 
 
 @app.get("/health")

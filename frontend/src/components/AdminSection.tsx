@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { JSX } from 'react'
 import { readAdminUnlocked, storeAdminUnlocked } from '../lib/admin'
+import { PresetsAdmin } from './PresetsAdmin'
 import { Tooltip } from './Tooltip'
 import { AdminPasskeyDialog } from './AdminPasskeyDialog'
 
@@ -55,7 +56,7 @@ export function AdminSection(): JSX.Element {
           </Tooltip>
         )}
       </div>
-      {unlocked && <p className="text-sm text-[var(--color-muted)]">No admin tools yet.</p>}
+      {unlocked && <PresetsAdmin />}
       {dialogOpen && <AdminPasskeyDialog onCancel={() => setDialogOpen(false)} onUnlock={unlock} />}
     </div>
   )
