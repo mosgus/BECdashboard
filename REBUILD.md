@@ -2403,6 +2403,7 @@ The plan has four contracts:
 - 0165: Health, which replaces Breakdown;
 - 0166: Scenarios, which replaces Stress test;
 - 0167: Attribution backend (stored Fama-French factors); 0168: the Attribution pill.
+- Follow-ups: 0169 (older crisis presets, history back to 2000); 0170 (bar-chart labels).
 
 The tab is "Risk & Perf" again, with `main`'s pills: Performance | Health | Scenarios.
 
@@ -2471,6 +2472,57 @@ sweep, and the five presets run through the unchanged `run_stress`. Holdings tha
 count as flat under the 80% rule. For BEC, dot-com is refused at about 70% coverage (GLD, VEA, CEG
 and SETM are too young), and the other four presets run at about 85%. Don't revive the factor
 replay without a backtest that beats this.
+
+**Bar-chart labels (0170, 2026-10-05).** Recharts' category axis drops labels it thinks will
+collide. The 2008 replay showed 6 contribution bars with only 3 labels, and the biggest loser (MS)
+had none. `ScenarioImpactChart` and `RiskContributionChart` now set `interval={0}`. The planner's
+smoke tool gained `SMOKE_POSITIONS`, because 3 holdings never trigger the bug, and `SMOKE_EVAL`,
+because SVG text isn't in innerText.
+
+### Next: a Research tab inside Portfolios (agreed 2026-10-05, not started)
+
+This is the next body of work. Gunnar agreed this plan on 2026-10-05 and then switched to another
+project, so whoever picks it up starts here.
+
+**Shape.** Add one new portfolio tab, **Research**, after Risk & Perf. Inside it, `main`'s
+`/research/*` pages become sub-pills, the way Risk & Perf ported `main`'s pills (0164–0168).
+- It is not one top-level tab per page: nine tabs in a row is too many.
+- It is not a separate Research nav area: the header link was removed in 0162.
+- The portfolio is implicit from the route `/portfolios/:id/research`, so `main`'s
+  `ResearchContext` portfolio picker isn't ported.
+- Gunnar prefers `main`'s UI/UX, ported with corrected math, and accepts duplication with other tabs.
+- This supersedes the 2026-10-04 idea of scattering these pages across existing tabs, and the
+  "Research is last" gate further up: Research now lives inside Portfolios.
+
+| `main` page (`frontend/app/research/…`) | Rebuild | Notes |
+|---|---|---|
+| `portfolio/` Portfolio Research | Pill | Compares all 8 optimizer modes side by side, with transaction-cost drag (`OptimizerComparisonTable`), plus frontier, correlation and risk contributions. The last three duplicate Historical Optimize and Health, which is accepted. |
+| `asset/` Asset Research | Pill | One holding inside the portfolio: its role, correlations with the other holdings, rolling volatility and Fama-French exposure (`main:backend/core/asset_research.py`). Use the stored FF3 table (0167) and `load_factors()`. Do not download factors per request. |
+| `stress/` Stress & Robustness | Pill, renamed **Robustness** | Its scenarios already live in Risk & Perf → Scenarios. What's left is the walk-forward test (`WalkForwardPanel`) and the 7-test validation suite. This is the largest backend port. Audit the math as 0164–0167 did. |
+| `decision/` Decision Memo | Pill | A memo per portfolio: recommendation, rationale, red flags, monitoring plan. **Default storage is localStorage, keyed by portfolio id**, because portfolios themselves live in localStorage (`bec-portfolios`). A server table, as `main` had (`0009_research_decision_memos`), would hold ids the server can't resolve. Revisit only if Gunnar wants memos synced across devices. |
+| `overview/` Overview | Pill, **built last** | The composite "Research Score" plus a summary of the latest memo. It depends on the validation suite and the memo, so it comes last. |
+| `universe/` Securities Research | **Not in this tab** | Universe-wide screening and a data-quality audit, not about a portfolio. Screening belongs on the Universe page; the data audit belongs on `/ops`. Separate, later work. |
+
+**The composite score is kept (Gunnar, 2026-10-04), but it is not ported as-is.** `main` weights
+validation tests passed at 30%, concentration at 25%, past Sharpe at 25% and drawdown at 20%. Those
+weights have no basis. The concentration part gives an equal-weighted 2-stock portfolio a perfect
+score, and the score as a whole rewards past returns. Before the Overview contract, propose to
+Gunnar a rescaled or better-grounded version, plus a plain disclaimer of what the score does and
+doesn't mean. It's his call; he said "we'll address that specifically when we get to it".
+
+**Order.** Each step is a backend contract plus a frontend contract where needed, as 0167/0168 were.
+1. The Research tab shell, a pill switcher like `RiskPage.tsx`, and the Portfolio Research pill.
+2. Asset Research.
+3. Robustness: walk-forward and the validation suite.
+4. Decision Memo.
+5. Overview, with the reworked score.
+
+**Before writing each contract:**
+- Read the `main` page and its backend with `git show main:<path>`.
+- List its math flaws.
+- Prototype on the real BEC portfolio, as was done for 0167 and 0169.
+
+Baselines as of 0170: backend 840 tests; frontend 372 tests in 25 files; lint 2 known warnings.
 
 **Current portfolio tab labels (2026-10-02):** `Historical Optimize`, `Forward Models`, and, within
 Forward Models, `CAPM Allocation`. The route slugs remain `optimize` and `outlook`. Historical
