@@ -15,7 +15,7 @@ export default function ScenarioImpactChart({
       <BarChart data={data} layout="vertical" margin={{ top: 4, right: 24, bottom: 4, left: 8 }}>
         <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" horizontal={false} />
         <XAxis type="number" tick={TICK} tickFormatter={(v: number) => `${v.toFixed(1)}%`} />
-        <YAxis type="category" dataKey="ticker" tick={TICK} width={54} />
+        <YAxis type="category" dataKey="ticker" tick={TICK} width={54} interval={0} />
         <ReferenceLine x={0} stroke="var(--color-muted)" />
         <Tooltip formatter={(v) => (typeof v === 'number' ? `${v.toFixed(2)}%` : String(v))} />
         <Bar dataKey="pct" name={name} isAnimationActive={false}>

@@ -6,7 +6,7 @@ const ANALYSIS_TABS = [
   { path: 'holdings', label: 'Holdings' },
   { path: 'optimize', label: 'Historical Optimize' },
   { path: 'outlook', label: 'Forward Models' },
-  { path: 'risk', label: 'Risk & Perf' },
+  { path: 'risk', label: 'Risk & Performance' },
 ] as const
 
 export function AnalysisLayout(): JSX.Element {

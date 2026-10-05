@@ -5,6 +5,7 @@
 // Prints any uncaught exception and console error, the final URL (to check redirects), then the first 400 characters of #root.
 // An empty ROOT TEXT means the page rendered blank. SMOKE_WAIT_MS=10000 waits longer after the sub-tab click (slow API).
 // SMOKE_CLICKS="COVID crash|Run Scenario" then clicks those buttons in order (text contains the label).
+// SMOKE_EVAL='<js expression>' prints the expression's value at the end.
 import { spawn } from 'node:child_process'
 
 const tab = process.argv[2] ?? 'outlook'
@@ -62,11 +63,14 @@ try {
     name: 'Smoke test',
     cashWeight: 38,
     updatedAt: '2026-09-01T00:00:00.000Z',
-    positions: [
-      { ticker: 'XLK', weight: 20, shares: 10 },
-      { ticker: 'MS', weight: 22, shares: 20 },
-      { ticker: 'GLD', weight: 20, shares: 5 },
-    ],
+    // SMOKE_POSITIONS='[{"ticker":"XLK","weight":10,"shares":5},…]' swaps in other holdings.
+    positions: process.env.SMOKE_POSITIONS
+      ? JSON.parse(process.env.SMOKE_POSITIONS)
+      : [
+          { ticker: 'XLK', weight: 20, shares: 10 },
+          { ticker: 'MS', weight: 22, shares: 20 },
+          { ticker: 'GLD', weight: 20, shares: 5 },
+        ],
   }
   await send('Runtime.evaluate', {
     expression: `localStorage.setItem('bec-portfolios', ${JSON.stringify(JSON.stringify([portfolio]))})`,
@@ -97,6 +101,11 @@ try {
     expression: `(document.querySelector('main') ?? document.getElementById('root'))?.innerText.slice(0, 1500)`,
   })
   console.log('PAGE TEXT:', JSON.stringify(body.result.value))
+  // SMOKE_EVAL='<js expression>' prints that expression's value too (e.g. SVG tick labels innerText misses).
+  if (process.env.SMOKE_EVAL) {
+    const extra = await send('Runtime.evaluate', { expression: process.env.SMOKE_EVAL, returnByValue: true })
+    console.log('EVAL:', JSON.stringify(extra.result.value ?? extra.result.description))
+  }
   ws.close()
 } finally {
   chrome.kill()

@@ -37,7 +37,7 @@ export default function RiskContributionChart({ data }: { data: ChartData }): JS
       <BarChart data={data} layout="vertical" margin={{ top: 4, right: 24, bottom: 4, left: 64 }}>
         <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" horizontal={false} />
         <XAxis type="number" unit="%" tick={{ fontSize: 11, fill: 'var(--color-muted)' }} domain={[0, 'auto']} />
-        <YAxis type="category" dataKey="ticker" tick={{ fontSize: 11, fill: 'var(--color-text)' }} width={56} />
+        <YAxis type="category" dataKey="ticker" tick={{ fontSize: 11, fill: 'var(--color-text)' }} width={56} interval={0} />
         <Tooltip content={<CustomTooltip />} />
         <Legend wrapperStyle={{ fontSize: 11 }} />
         <Bar
