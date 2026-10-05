@@ -11,6 +11,8 @@ from sqlalchemy import select
 from app.db import is_enabled, session
 from app.capm_run import CapmInputError, HoldingConfig, run_capm
 from app.risk_run import RiskInputError, run_risk
+from app.attribution_run import AttributionInputError, run_attribution
+from app.ff3 import load_factors
 from app.stress_run import StressInputError, run_stress
 from app.performance_run import PerformanceInputError, run_performance
 from app.indicators import CLOSE_ONLY_INDICATORS, indicator_series
@@ -24,6 +26,7 @@ from app.rates import fetch_risk_free_rate_with_source
 from app.schemas import (
     CalibrationRequest, CalibrationResponse, CapmRequest, CapmResponse, ForecastRequest, ForecastResponse, MonteCarloRequest, MonteCarloResponse,
     OptimizeRequest, OptimizeResponse, PortfolioSeriesResponse, RiskRequest, RiskResponse, StressRequest, StressResponse, PerformanceRequest, PerformanceResponse,
+    AttributionRequest, AttributionResponse,
 )
 from app.signals import compute_all_signals
 
@@ -333,6 +336,43 @@ def performance_portfolio(body: PerformanceRequest) -> dict:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     safe = _safe_metrics({"metrics": result.metrics, "bench_metrics": result.bench_metrics})
     return {**asdict(result), **safe, "rf_source": rf_source}
+
+
+@router.post("/attribution", response_model=AttributionResponse)
+def attribution_portfolio(body: AttributionRequest) -> dict:
+    _require_database()
+    tickers, weights = _normalise_request(body.tickers, body.weights)
+    market_ticker = body.market_ticker.strip().upper()
+    closes = _load_stored_closes(tickers)
+    market = closes.get(market_ticker)
+    if market is None:
+        market = _load_stored_closes([market_ticker], required=False).get(market_ticker)
+    if market is None:
+        raise HTTPException(
+            status_code=422,
+            detail=f"No stored price history for market ticker {market_ticker}. Add it to the Universe first.",
+        )
+    factors = load_factors()
+    if factors.empty:
+        raise HTTPException(
+            status_code=503,
+            detail="Fama-French factor data hasn't been downloaded yet. It loads in the background with the next data refresh; try again in a minute.",
+        )
+    try:
+        result = run_attribution(
+            dict(zip(tickers, weights, strict=True)),
+            body.cash,
+            closes,
+            market,
+            factors,
+            market_ticker=market_ticker,
+            start=body.start,
+            end=body.end,
+            today=date.today(),
+        )
+    except AttributionInputError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {**asdict(result), "market_ticker": market_ticker}
 
 
 @router.post("/montecarlo", response_model=MonteCarloResponse)

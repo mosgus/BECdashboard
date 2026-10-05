@@ -527,6 +527,11 @@ export interface PerformanceRequest { tickers: string[]; weights: number[]; cash
 export interface PerformanceMetrics { cagr: number | null; vol: number | null; sharpe: number | null; max_dd: number | null; beta?: number | null; alpha?: number | null }
 export interface PerformanceResponse { market_ticker: string; start: string; end: string; n_days: number; cash_weight: number; coverage: number; rf: number; rf_source: string; metrics: PerformanceMetrics; bench_metrics: PerformanceMetrics | null; path: StressPointOut[]; warnings: string[] }
 export async function performancePortfolio(body: PerformanceRequest): Promise<PerformanceResponse> { return request<PerformanceResponse>('/portfolio/performance', { method: 'POST', body }) }
+export type AttributionRequest = PerformanceRequest
+export interface FactorLoading { key: 'market' | 'size' | 'value'; label: string; beta: number; t_stat: number | null }
+export interface AttributionContributions { alpha: number; market: number; size: number; value: number; risk_free: number; compounding: number }
+export interface AttributionResponse { market_ticker: string; start: string; end: string; factor_end: string; n_obs: number; cash_weight: number; coverage: number; period_return: number; alpha_daily: number; alpha_annual: number; r_squared: number | null; loadings: FactorLoading[]; contributions: AttributionContributions; source: string; warnings: string[] }
+export async function attributionPortfolio(body: AttributionRequest): Promise<AttributionResponse> { return request<AttributionResponse>('/portfolio/attribution', { method: 'POST', body }) }
 
 export interface MonteCarloRequest {
   tickers: string[]

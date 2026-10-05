@@ -1,18 +1,24 @@
 import { useState } from 'react'
 import type { JSX } from 'react'
 import { Tooltip } from '../../components/Tooltip'
-import { RiskSection } from './risk/RiskSection'
-import { StressSection } from './risk/StressSection'
+import { AttributionSection } from './risk/AttributionSection'
+import { HealthSection } from './risk/HealthSection'
+import { ScenariosSection } from './risk/ScenariosSection'
 import { PerformanceSection } from './risk/PerformanceSection'
 
 const TABS = [
   ['performance', 'Performance', 'Return, volatility, drawdown and alpha against SPY, plus exit signals'],
   ['health', 'Health', 'Volatility, beta and where the risk in this portfolio comes from'],
   ['scenarios', 'Scenarios', "Replay a past market sell-off on today's holdings"],
+  [
+    'attribution',
+    'Attribution',
+    'What drove the return: market, size and value exposure, alpha and T-bills (Fama-French 3)',
+  ],
 ] as const
 
 export function RiskPage(): JSX.Element {
-  const [tab, setTab] = useState<'performance' | 'health' | 'scenarios'>('performance')
+  const [tab, setTab] = useState<'performance' | 'health' | 'scenarios' | 'attribution'>('performance')
   return (
     <div>
       <div role="tablist" aria-label="Risk sections" className="flex gap-1 border-b border-brand-border mb-5">
@@ -30,7 +36,15 @@ export function RiskPage(): JSX.Element {
           </Tooltip>
         ))}
       </div>
-      {tab === 'performance' ? <PerformanceSection /> : tab === 'health' ? <RiskSection /> : <StressSection />}
+      {tab === 'performance' ? (
+        <PerformanceSection />
+      ) : tab === 'health' ? (
+        <HealthSection />
+      ) : tab === 'scenarios' ? (
+        <ScenariosSection />
+      ) : (
+        <AttributionSection />
+      )}
     </div>
   )
 }

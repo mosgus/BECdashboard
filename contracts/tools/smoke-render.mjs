@@ -3,7 +3,8 @@
 // Usage: node contracts/tools/smoke-render.mjs outlook   (or holdings, optimize, risk)
 //        node contracts/tools/smoke-render.mjs outlook "Monte Carlo"   (also clicks the in-page tab with that label)
 // Prints any uncaught exception and console error, the final URL (to check redirects), then the first 400 characters of #root.
-// An empty ROOT TEXT means the page rendered blank.
+// An empty ROOT TEXT means the page rendered blank. SMOKE_WAIT_MS=10000 waits longer after the sub-tab click (slow API).
+// SMOKE_CLICKS="COVID crash|Run Scenario" then clicks those buttons in order (text contains the label).
 import { spawn } from 'node:child_process'
 
 const tab = process.argv[2] ?? 'outlook'
@@ -77,7 +78,15 @@ try {
       expression: `(() => { const tab = [...document.querySelectorAll('[role="tab"]')].find((el) => el.innerText.trim() === ${JSON.stringify(subTab)}); tab?.click(); return tab !== undefined })()`,
     })
     console.log('SUB-TAB CLICKED:', clicked.result.value)
-    await sleep(3000)
+    await sleep(Number(process.env.SMOKE_WAIT_MS ?? 3000))
+  }
+  // SMOKE_CLICKS="COVID crash|Run Scenario" clicks, in order, the first button whose text contains each label.
+  for (const label of (process.env.SMOKE_CLICKS ?? '').split('|').filter(Boolean)) {
+    const hit = await send('Runtime.evaluate', {
+      expression: `(() => { const b = [...document.querySelectorAll('button')].find((el) => el.innerText.includes(${JSON.stringify(label)})); b?.click(); return b !== undefined })()`,
+    })
+    console.log(`CLICKED ${JSON.stringify(label)}:`, hit.result.value)
+    await sleep(Number(process.env.SMOKE_WAIT_MS ?? 3000))
   }
   const url = await send('Runtime.evaluate', { expression: 'location.href' })
   console.log('FINAL URL:', url.result.value)

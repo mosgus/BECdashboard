@@ -92,3 +92,12 @@ def block_network(request, monkeypatch):
     monkeypatch.setattr(socket.socket, "connect_ex", _blocked_method("connect_ex"))
     monkeypatch.setattr(socket, "create_connection", _blocked_create_connection)
     monkeypatch.setattr(curl_requests.Session, "request", _blocked_curl_request)
+
+
+@pytest.fixture(autouse=True)
+def no_ff3_refresh(monkeypatch):
+    """GET /universe/strip schedules app.ff3.run_ff3_refresh_if_due (contract 0167). Without this
+    patch every existing strip test would try the download, hit block_network and write a failure
+    job_runs row, and some tests count job_runs rows. test_ff3.py calls app.ff3.run_ff3_refresh_if_due
+    directly, so replacing the name imported into the router does not affect it."""
+    monkeypatch.setattr("app.routers.universe.run_ff3_refresh_if_due", lambda *args, **kwargs: None)

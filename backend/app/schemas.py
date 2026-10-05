@@ -681,3 +681,46 @@ class JobRunOut(BaseModel):
 
 class JobRunsResponse(BaseModel):
     job_runs: list[JobRunOut]
+
+
+class AttributionRequest(BaseModel):
+    tickers: list[str]
+    weights: list[float]
+    cash: float = 0.0
+    start: date | None = None
+    end: date | None = None
+    market_ticker: str = "SPY"
+
+
+class FactorLoadingOut(BaseModel):
+    key: str
+    label: str
+    beta: float
+    t_stat: float | None
+
+
+class AttributionContributionsOut(BaseModel):
+    alpha: float
+    market: float
+    size: float
+    value: float
+    risk_free: float
+    compounding: float
+
+
+class AttributionResponse(BaseModel):
+    market_ticker: str
+    start: date
+    end: date
+    factor_end: date
+    n_obs: int
+    cash_weight: float
+    coverage: float
+    period_return: float
+    alpha_daily: float
+    alpha_annual: float
+    r_squared: float | None
+    loadings: list[FactorLoadingOut]
+    contributions: AttributionContributionsOut
+    source: str
+    warnings: list[str]

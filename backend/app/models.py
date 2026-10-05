@@ -167,3 +167,16 @@ class Preset(Base):
     csv: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class FF3Factor(Base):
+    """One trading day of Ken French's daily Fama-French 3 factors (contract 0167), stored as decimals
+    (the source file is in percent). Replaced wholesale by app/ff3.py on each successful refresh."""
+
+    __tablename__ = "ff3_factors"
+
+    date: Mapped[date_] = mapped_column(Date, primary_key=True)
+    mkt_rf: Mapped[float] = mapped_column(Float, nullable=False)
+    smb: Mapped[float] = mapped_column(Float, nullable=False)
+    hml: Mapped[float] = mapped_column(Float, nullable=False)
+    rf: Mapped[float] = mapped_column(Float, nullable=False)

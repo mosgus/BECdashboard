@@ -78,7 +78,7 @@ docstrings carry the reasoning instead.
 App.tsx        Header + TickerStrip (chrome, outside <Routes>) + the routes
 pages/         LaunchPage, UniversePage, TickerPage, PortfoliosPage, OpsPage
 pages/analysis/  AnalysisLayout (the tab bar) + HoldingsPage, OptimizePage,
-               OutlookPage, and RiskPage ("Risk & Perf": Performance + Health + Scenarios pills, 0162–0164). MonitorPage was removed in 0161
+               OutlookPage, and RiskPage ("Risk & Perf": Performance + Health + Scenarios pills, 0162–0166). MonitorPage was removed in 0161
 components/    chrome:    Header, NavItem, SettingsIcon, BackendStatus, Tooltip, DownloadIcon,
                           TickerStrip, HelpSidebar
                launch:    NewsSection, EntryCard
@@ -2402,10 +2402,9 @@ The plan has four contracts:
 - 0164: pill switcher and Performance;
 - 0165: Health, which replaces Breakdown;
 - 0166: Scenarios, which replaces Stress test;
-- 0167: Attribution. It needs Fama-French factor data, which `main` downloaded live from Ken French's site.
+- 0167: Attribution backend (stored Fama-French factors); 0168: the Attribution pill.
 
-The tab is "Risk & Perf" again, with `main`'s pills: Performance | Health | Scenarios. Until 0165 and 0166
-land, Health renders `RiskSection` and Scenarios renders `StressSection`.
+The tab is "Risk & Perf" again, with `main`'s pills: Performance | Health | Scenarios.
 
 Performance (`POST /portfolio/performance`, `backend/app/performance_run.py`) wraps `run_stress`, so it
 uses the same buy-and-hold path, cash handling and 80% coverage rule, then applies `compute_metrics(..., rf)`
@@ -2414,6 +2413,35 @@ from Historical Optimize. It deliberately differs from `main`:
 - holdings are bought and held, not rebalanced daily;
 - Sharpe and alpha subtract the risk-free rate (`main` used 0);
 - a volatility above SPY's shows red, not green.
+
+Health (0165, 2026-10-04) is frontend-only on the existing `POST /portfolio/risk`. `lib/health.ts` derives
+MCTR on the client as `risk_share × portfolio_vol / weight`, using the cash-scaled weight. `HealthSection`
+shows `main`'s five cards, its contribution chart, the detail table (with Vol and Beta columns added) and
+the mitigation panel. That panel uses `main`'s thresholds, labelled "Rules of thumb", and links to Historical
+Optimize or Forward Models. The old Breakdown's market-move calculator is gone until Market Shock (0166).
+`RiskSection.tsx` remains only because `StressSection` imports `Tiles`; 0166 deletes it.
+
+Scenarios (0166, 2026-10-04) is frontend-only and replaces Stress test; `StressSection.tsx` and `RiskSection.tsx`
+are deleted. Preset cards run Historical Replay through `POST /portfolio/stress`. Market Shock is beta-based
+(`weight × beta × move` per holding, cash flat) on `POST /portfolio/risk`. `main`'s version applied a uniform
+shock. Vol Shock is `portfolio_vol × multiplier`, labelled as arithmetic. Factor Replay waits on 0167's
+Fama-French decision, and `main`'s pre-2020 presets can't run because prices start in 2020. Cleanup
+backlog: `riskTiles`, `riskRows`, `shockLabel`, `stressTiles` and `stressRows` are now unused but still tested.
+
+Attribution backend (0167, 2026-10-04). Gunnar chose stored real factors over ETF proxies.
+- **Storage.** Table `ff3_factors` (migration `0010`) holds Ken French's daily Mkt-RF/SMB/HML/RF as decimals from 2000-01-01, about 6,700 rows.
+- **Refresh.** `app/ff3.py` replaces the table in one transaction. It is triggered as its own background task from `GET /universe/strip`.
+  - It claims `app_state["ff3_refresh"]` first. It runs at most daily while the table is empty, and weekly after that.
+  - It validates before writing: at least 5,000 rows, newest date within 120 days, every |value| under 0.5.
+  - Each attempt is a `job_runs` row named `ff3_refresh`.
+  - `tests/conftest.py` stubs the strip's reference so other tests never try the download.
+- **Endpoint.** `POST /portfolio/attribution` (`app/attribution_run.py`) regresses `run_stress`'s buy-and-hold daily excess returns on the factors.
+  - Plain OLS t-stats, with at least 60 aligned days.
+  - The parts alpha·n, β·Σfactor, ΣRF and compounding (`∏(1+p) − 1 − Σp`) sum exactly to the period return. There is no "residual": OLS residuals sum to zero, and `main`'s residual was the compounding gap.
+  - The window always ends at the last factor date, which lags about a month (2026-08-31 on 2026-10-04); `factor_end` is returned.
+  - Cash at 0% shows up as negative alpha, about cash × T-bill; a warning gives the number.
+  - It returns 503 while the table is empty.
+- **Planner check on live data.** SPY regressed on the factors gave β_mkt 0.989, R² 0.99, α +0.4%/yr. The BEC preset (40% cash) gave β_mkt 0.735, R² 0.65.
 
 The default window is the 365 days to today. Windows under 20 trading days are refused, and windows
 under 126 trading days carry a warning.

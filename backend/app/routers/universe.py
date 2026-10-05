@@ -12,6 +12,7 @@ from app.autorefresh import active_universe_tickers, is_sweep_active, run_auto_r
 from app.bars import adjust_bars
 from app.cache import get_cached, store_quotes
 from app.db import is_enabled, session
+from app.ff3 import run_ff3_refresh_if_due
 from app.export import build_universe_zip, history_to_csv
 from app.news import run_news_refresh_if_due
 from app.quotes import fetch_quotes, refresh_quotes_if_stale
@@ -135,6 +136,7 @@ def get_strip(background_tasks: BackgroundTasks) -> dict:
     now_et = datetime.now(ZoneInfo("America/New_York"))
     background_tasks.add_task(run_auto_refresh_if_due, now_utc, now_et)
     background_tasks.add_task(run_news_refresh_if_due, now_utc, now_et)
+    background_tasks.add_task(run_ff3_refresh_if_due, now_utc)
     background_tasks.add_task(_refresh_strip_quotes)
     return build_strip_response(now_utc, now_et)
 
