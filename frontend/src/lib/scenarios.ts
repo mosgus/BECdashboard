@@ -13,6 +13,11 @@ export const SCENARIO_KINDS: { key: ScenarioKind; label: string }[] = [
 
 export type ScenarioTag = 'crisis' | 'recovery' | 'rate-shock' | 'vol-shock'
 export const PRESET_TAGS: Record<string, ScenarioTag[]> = {
+  'dot-com': ['crisis'],
+  'gfc-2008': ['crisis'],
+  'euro-debt-2011': ['crisis'],
+  'volmageddon-2018': ['vol-shock'],
+  'q4-2018': ['crisis'],
   'covid-crash': ['crisis'],
   'covid-rebound': ['recovery'],
   'rate-shock-2022': ['rate-shock', 'crisis'],
@@ -185,8 +190,8 @@ export const SCENARIO_GUIDE: GuideSection[] = [
         term: 'Historical Replay',
         text:
           "Buys today's holdings at the start of a past window and holds them to the end. Returns, drawdown, best and worst days, and each holding's contribution come from real prices. " +
-          "Caveat: stored prices start in 2020, so 2008 and the dot-com bust can't be replayed. A holding without prices for the whole window counts as flat, and a run with under 80% of the " +
-          'invested money priced is refused.',
+          "Caveat: stored prices go back to 2000, but a holding that didn't trade yet (a newer ETF or a later IPO) has no prices for an old window. " +
+          'It counts as flat, and a run with under 80% of the invested money priced is refused.',
       },
     ],
   },

@@ -1,6 +1,6 @@
 # Contract 0168 — Risk & Perf: Attribution sub-tab (port of `main`'s Attribution)
 
-**Status:** reported
+**Status:** done
 **Assigned to:** sonnet
 **Author:** planner (opus)
 

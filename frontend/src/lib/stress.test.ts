@@ -27,7 +27,7 @@ const S: StressResponse = {
 }
 describe('stress', () => {
   it('has presets', () =>
-    expect(STRESS_PRESETS.every((p) => parseWindow(p.start, p.end).ok && p.start >= '2020-01-01')).toBe(true))
+    expect(STRESS_PRESETS.every((p) => parseWindow(p.start, p.end).ok && p.start >= '2000-01-03')).toBe(true))
   it('parses', () =>
     expect(parseWindow(' 2025-02-19 ', '2025-04-08')).toEqual({ ok: true, start: '2025-02-19', end: '2025-04-08' }))
   it('rejects', () =>

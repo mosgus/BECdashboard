@@ -130,4 +130,13 @@ describe('scenarios', () => {
     )
     expect(replayInterpretation({ ...S, market_return: null })).not.toContain('while')
   })
+  it('has ten unique presets in chronological order', () => {
+    const ids = STRESS_PRESETS.map((p) => p.id)
+    expect(ids).toHaveLength(10)
+    expect(new Set(ids).size).toBe(10)
+    const starts = STRESS_PRESETS.map((p) => p.start)
+    expect(starts).toEqual([...starts].sort())
+    expect(STRESS_PRESETS[0].id).toBe('dot-com')
+    expect(PRESET_TAGS['volmageddon-2018']).toEqual(['vol-shock'])
+  })
 })

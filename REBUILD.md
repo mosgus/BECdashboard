@@ -78,7 +78,7 @@ docstrings carry the reasoning instead.
 App.tsx        Header + TickerStrip (chrome, outside <Routes>) + the routes
 pages/         LaunchPage, UniversePage, TickerPage, PortfoliosPage, OpsPage
 pages/analysis/  AnalysisLayout (the tab bar) + HoldingsPage, OptimizePage,
-               OutlookPage, and RiskPage ("Risk & Perf": Performance + Health + Scenarios pills, 0162–0166). MonitorPage was removed in 0161
+               OutlookPage, and RiskPage ("Risk & Perf": Performance + Health + Scenarios + Attribution pills, 0162–0168). MonitorPage was removed in 0161
 components/    chrome:    Header, NavItem, SettingsIcon, BackendStatus, Tooltip, DownloadIcon,
                           TickerStrip, HelpSidebar
                launch:    NewsSection, EntryCard
@@ -2393,8 +2393,8 @@ cash inflated every ratio.
 (`POST /portfolio/stress`, `backend/app/stress_run.py`).
 - Holdings without prices for the whole window count as flat (0%), and a warning names them.
 - The run is refused when less than 80% of the invested money has prices (`MIN_COVERAGE`).
-- The presets are crashes from 2020 onward only, because stored prices start at `HISTORY_START`
-  (2020-01-01). `main`'s 2008, dot-com, 2011 and 2018 presets would need a price backfill.
+- The presets were crashes from 2020 onward only, while `HISTORY_START` was 2020-01-01. 0169
+  moved it to 2000 and added `main`'s five older presets; see "Older crisis presets" below.
 
 **Risk & Perf port (0164, 2026-10-04).** Gunnar preferred `main`'s Risk & Perf UI/UX and asked for a
 full port of its sub-tabs with corrected math. He accepts some duplication with Historical Optimize.
@@ -2445,6 +2445,32 @@ Attribution backend (0167, 2026-10-04). Gunnar chose stored real factors over ET
 
 The default window is the 365 days to today. Windows under 20 trading days are refused, and windows
 under 126 trading days carry a warning.
+
+**Attribution pill (0168, 2026-10-04).** It has a plain-English summary, a loadings table with
+diverging β bars (★ marks |t| ≥ 2), and six contribution rows that sum to the period return. The
+footnote names the factor data's end date. It runs once on open and reuses the Performance request
+builder. The planner's smoke check on BEC gave +24.20%, of which the market contributed +13.91%
+(β 0.88, t 17.6).
+
+**Older crisis presets: real prices, not `main`'s factor model (0169, 2026-10-05).** `main` replayed
+2008, dot-com and similar crises by projecting one-year Fama-French betas onto the old factor
+returns. The planner backtested that model on BEC over windows where real replays also work:
+
+| Window | Factor model | Real replay |
+|---|---|---|
+| COVID | −27% | −18% |
+| 2022 | −17% | −9% |
+| Q4 2018 | −15% | −8% |
+
+The model is too pessimistic by 1.5–2× every time. It can't know that GLD and XLP held up in
+crises. `main` also added the factors up rather than compounding them, projected in-sample alpha,
+and credited T-bills on cash.
+
+So 0169 sets `HISTORY_START` back to 2000. The existing prepend logic (0016) backfills on the next
+sweep, and the five presets run through the unchanged `run_stress`. Holdings that didn't exist yet
+count as flat under the 80% rule. For BEC, dot-com is refused at about 70% coverage (GLD, VEA, CEG
+and SETM are too young), and the other four presets run at about 85%. Don't revive the factor
+replay without a backtest that beats this.
 
 **Current portfolio tab labels (2026-10-02):** `Historical Optimize`, `Forward Models`, and, within
 Forward Models, `CAPM Allocation`. The route slugs remain `optimize` and `outlook`. Historical

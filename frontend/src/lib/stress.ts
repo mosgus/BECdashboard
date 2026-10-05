@@ -12,6 +12,41 @@ export interface StressPreset {
 }
 export const STRESS_PRESETS: StressPreset[] = [
   {
+    id: 'dot-com',
+    name: 'Dot-com bust',
+    start: '2000-03-24',
+    end: '2002-10-09',
+    description: 'March 2000 high to the October 2002 low: a multi-year tech unwind.',
+  },
+  {
+    id: 'gfc-2008',
+    name: '2008 financial crisis',
+    start: '2008-09-02',
+    end: '2009-03-09',
+    description: 'Lehman collapse through the March 2009 low. S&P 500 down about 45%.',
+  },
+  {
+    id: 'euro-debt-2011',
+    name: '2011 euro debt crisis',
+    start: '2011-07-22',
+    end: '2011-10-03',
+    description: 'US credit downgrade and Greek default fears.',
+  },
+  {
+    id: 'volmageddon-2018',
+    name: 'Feb 2018 Volmageddon',
+    start: '2018-01-26',
+    end: '2018-02-08',
+    description: 'Short-volatility blow-up: January 2018 high to the February low.',
+  },
+  {
+    id: 'q4-2018',
+    name: 'Q4 2018 sell-off',
+    start: '2018-09-20',
+    end: '2018-12-24',
+    description: 'Fed hikes and the trade war: September high to the Christmas Eve low.',
+  },
+  {
     id: 'covid-crash',
     name: 'COVID crash',
     start: '2020-02-19',

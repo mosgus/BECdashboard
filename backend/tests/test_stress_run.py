@@ -21,7 +21,7 @@ def test_coverage_error():
 def test_late_market():
  r=run(market=Y,market_ticker='Y'); assert r.market_return is None and all(p.market is None for p in r.path) and 'Y has no prices' in r.warnings[0]
 def test_old_window():
- with pytest.raises(StressInputError,match='Stored prices start at 2020-01-01'): run(start=date(2019,1,2),end=date(2019,3,1))
+ with pytest.raises(StressInputError,match='Stored prices start at 2000-01-01'): run(start=date(1999,1,4),end=date(1999,3,1))
 @pytest.mark.parametrize(('kw','msg'),[({'weights':{'A':0}},'weights must be finite and greater than zero'),({'cash':-1},'cash must be finite and zero or more'),({'start':END,'end':START},'start must be before end'),({'weights':{'A':1,'Z':1}},"missing closes for weighted ticker 'Z'")])
 def test_invalid(kw,msg):
  with pytest.raises(StressInputError,match=re.escape(msg)): run(**kw)
