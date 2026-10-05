@@ -523,6 +523,10 @@ export interface StressResponse {
 export async function stressPortfolio(body: StressRequest): Promise<StressResponse> {
   return request<StressResponse>('/portfolio/stress', { method: 'POST', body })
 }
+export interface PerformanceRequest { tickers: string[]; weights: number[]; cash: number; start: string | null; end: string | null; market_ticker: string }
+export interface PerformanceMetrics { cagr: number | null; vol: number | null; sharpe: number | null; max_dd: number | null; beta?: number | null; alpha?: number | null }
+export interface PerformanceResponse { market_ticker: string; start: string; end: string; n_days: number; cash_weight: number; coverage: number; rf: number; rf_source: string; metrics: PerformanceMetrics; bench_metrics: PerformanceMetrics | null; path: StressPointOut[]; warnings: string[] }
+export async function performancePortfolio(body: PerformanceRequest): Promise<PerformanceResponse> { return request<PerformanceResponse>('/portfolio/performance', { method: 'POST', body }) }
 
 export interface MonteCarloRequest {
   tickers: string[]

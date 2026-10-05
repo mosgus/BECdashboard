@@ -397,6 +397,38 @@ class StressResponse(BaseModel):
     path: list[StressPointOut]
     warnings: list[str]
 
+class PerformanceRequest(BaseModel):
+    tickers: list[str]
+    weights: list[float]
+    cash: float = 0.0
+    start: date | None = None
+    end: date | None = None
+    market_ticker: str = "SPY"
+
+
+class PerformanceMetricsOut(BaseModel):
+    cagr: float | None = None
+    vol: float | None = None
+    sharpe: float | None = None
+    max_dd: float | None = None
+    beta: float | None = None
+    alpha: float | None = None
+
+
+class PerformanceResponse(BaseModel):
+    market_ticker: str
+    start: date
+    end: date
+    n_days: int
+    cash_weight: float
+    coverage: float
+    rf: float
+    rf_source: str
+    metrics: PerformanceMetricsOut
+    bench_metrics: PerformanceMetricsOut | None
+    path: list[StressPointOut]
+    warnings: list[str]
+
 
 class MonteCarloRequest(BaseModel):
     tickers: list[str]

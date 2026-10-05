@@ -78,7 +78,7 @@ docstrings carry the reasoning instead.
 App.tsx        Header + TickerStrip (chrome, outside <Routes>) + the routes
 pages/         LaunchPage, UniversePage, TickerPage, PortfoliosPage, OpsPage
 pages/analysis/  AnalysisLayout (the tab bar) + HoldingsPage, OptimizePage,
-               OutlookPage, and RiskPage (Breakdown + Stress test, 0162–0163). MonitorPage was removed in 0161
+               OutlookPage, and RiskPage ("Risk & Perf": Performance + Health + Scenarios pills, 0162–0164). MonitorPage was removed in 0161
 components/    chrome:    Header, NavItem, SettingsIcon, BackendStatus, Tooltip, DownloadIcon,
                           TickerStrip, HelpSidebar
                launch:    NewsSection, EntryCard
@@ -2395,6 +2395,28 @@ cash inflated every ratio.
 - The run is refused when less than 80% of the invested money has prices (`MIN_COVERAGE`).
 - The presets are crashes from 2020 onward only, because stored prices start at `HISTORY_START`
   (2020-01-01). `main`'s 2008, dot-com, 2011 and 2018 presets would need a price backfill.
+
+**Risk & Perf port (0164, 2026-10-04).** Gunnar preferred `main`'s Risk & Perf UI/UX and asked for a
+full port of its sub-tabs with corrected math. He accepts some duplication with Historical Optimize.
+The plan has four contracts:
+- 0164: pill switcher and Performance;
+- 0165: Health, which replaces Breakdown;
+- 0166: Scenarios, which replaces Stress test;
+- 0167: Attribution. It needs Fama-French factor data, which `main` downloaded live from Ken French's site.
+
+The tab is "Risk & Perf" again, with `main`'s pills: Performance | Health | Scenarios. Until 0165 and 0166
+land, Health renders `RiskSection` and Scenarios renders `StressSection`.
+
+Performance (`POST /portfolio/performance`, `backend/app/performance_run.py`) wraps `run_stress`, so it
+uses the same buy-and-hold path, cash handling and 80% coverage rule, then applies `compute_metrics(..., rf)`
+from Historical Optimize. It deliberately differs from `main`:
+- cash counts;
+- holdings are bought and held, not rebalanced daily;
+- Sharpe and alpha subtract the risk-free rate (`main` used 0);
+- a volatility above SPY's shows red, not green.
+
+The default window is the 365 days to today. Windows under 20 trading days are refused, and windows
+under 126 trading days carry a warning.
 
 **Current portfolio tab labels (2026-10-02):** `Historical Optimize`, `Forward Models`, and, within
 Forward Models, `CAPM Allocation`. The route slugs remain `optimize` and `outlook`. Historical

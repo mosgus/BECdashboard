@@ -1,6 +1,7 @@
 """Portfolio value-series endpoint over stored adjusted closing prices."""
 
 import math
+from datetime import date
 from dataclasses import asdict
 
 import pandas as pd
@@ -11,6 +12,7 @@ from app.db import is_enabled, session
 from app.capm_run import CapmInputError, HoldingConfig, run_capm
 from app.risk_run import RiskInputError, run_risk
 from app.stress_run import StressInputError, run_stress
+from app.performance_run import PerformanceInputError, run_performance
 from app.indicators import CLOSE_ONLY_INDICATORS, indicator_series
 from app.models import PriceBar
 from app.montecarlo_run import MonteCarloInputError, run_monte_carlo
@@ -21,7 +23,7 @@ from app.portfolio_series import build_portfolio_series
 from app.rates import fetch_risk_free_rate_with_source
 from app.schemas import (
     CalibrationRequest, CalibrationResponse, CapmRequest, CapmResponse, ForecastRequest, ForecastResponse, MonteCarloRequest, MonteCarloResponse,
-    OptimizeRequest, OptimizeResponse, PortfolioSeriesResponse, RiskRequest, RiskResponse, StressRequest, StressResponse,
+    OptimizeRequest, OptimizeResponse, PortfolioSeriesResponse, RiskRequest, RiskResponse, StressRequest, StressResponse, PerformanceRequest, PerformanceResponse,
 )
 from app.signals import compute_all_signals
 
@@ -299,6 +301,38 @@ def stress_portfolio(body: StressRequest) -> dict:
     except StressInputError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return asdict(result)
+
+@router.post("/performance", response_model=PerformanceResponse)
+def performance_portfolio(body: PerformanceRequest) -> dict:
+    _require_database()
+    tickers, weights = _normalise_request(body.tickers, body.weights)
+    market_ticker = body.market_ticker.strip().upper()
+    closes = _load_stored_closes(tickers)
+    market = closes.get(market_ticker)
+    if market is None:
+        market = _load_stored_closes([market_ticker], required=False).get(market_ticker)
+    if market is None:
+        raise HTTPException(
+            status_code=422,
+            detail=f"No stored price history for market ticker {market_ticker}. Add it to the Universe first.",
+        )
+    rf, rf_source = fetch_risk_free_rate_with_source()
+    try:
+        result = run_performance(
+            dict(zip(tickers, weights, strict=True)),
+            body.cash,
+            closes,
+            market,
+            market_ticker=market_ticker,
+            start=body.start,
+            end=body.end,
+            today=date.today(),
+            rf=rf,
+        )
+    except PerformanceInputError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    safe = _safe_metrics({"metrics": result.metrics, "bench_metrics": result.bench_metrics})
+    return {**asdict(result), **safe, "rf_source": rf_source}
 
 
 @router.post("/montecarlo", response_model=MonteCarloResponse)
