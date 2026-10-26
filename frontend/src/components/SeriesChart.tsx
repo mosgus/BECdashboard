@@ -21,6 +21,7 @@ interface SeriesChartProps {
   formatValue?: (value: number) => string
   valueAxisWidth?: number
   shaded?: ShadedRange
+  plain?: boolean
 }
 
 interface ChartTooltipProps {
@@ -93,7 +94,7 @@ function ChartYAxis({
   )
 }
 
-export default function SeriesChart({ title, valueName, points, indicators, formatValue = formatPrice, valueAxisWidth = 56, shaded }: SeriesChartProps): JSX.Element {
+export default function SeriesChart({ title, valueName, points, indicators, formatValue = formatPrice, valueAxisWidth = 56, shaded, plain = false }: SeriesChartProps): JSX.Element {
   const indicatorDates = indicators?.dates ?? []
   const seriesByKey = new Map<string, Map<string, number | null>>()
   const labelsByKey = new Map<string, string>()
@@ -269,17 +270,18 @@ export default function SeriesChart({ title, valueName, points, indicators, form
       <ExpandableChart
         title={title}
         expandButtonAboveHeader
-        header={<><h3 className="text-sm font-semibold">{title}</h3>{renderNetReturn()}</>}
+        header={<><h3 className="text-sm font-semibold">{title}</h3>{!plain && renderNetReturn()}</>}
       >
         {(expanded) =>
           expanded ? (
             <>
-              <div className="mb-2 flex justify-end">{renderNetReturn()}</div>
+              {!plain && <div className="mb-2 flex justify-end">{renderNetReturn()}</div>}
               {renderPricePane(expandedData, 'h-[70vh]')}
             </>
           ) : renderPricePane(inlineData, 'h-[22rem]')}
       </ExpandableChart>
 
+      {!plain && (<>
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <ExpandableChart title="RSI (14)" header={<h3 className="text-sm font-semibold">RSI (14)</h3>}>
           {(expanded) => renderRsiPane(expanded ? expandedData : inlineData, expanded ? 'h-[70vh]' : 'h-[12rem]')}
@@ -308,6 +310,7 @@ export default function SeriesChart({ title, valueName, points, indicators, form
           {(expanded) => renderObvPane(expanded ? expandedData : inlineData, expanded ? 'h-[70vh]' : 'h-[12rem]')}
         </ExpandableChart>
       )}
+      </>)}
     </div>
   )
 }

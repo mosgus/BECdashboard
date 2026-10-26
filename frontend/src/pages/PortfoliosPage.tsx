@@ -12,6 +12,7 @@ import { addPositionDiluting, isSharesBased, migrateLegacyPortfolio, removePosit
 import type { Portfolio, Position, StoredPortfolio } from '../lib/portfolio'
 import { downloadTextFile } from '../lib/download'
 import { portfolioCsvFilename, serializePortfolioCsv } from '../lib/portfolioCsv'
+import { deleteMemosForPortfolio } from '../lib/memoStore'
 import { deletePortfolio, isLegacyPortfolio, listPortfolios, replacePortfolios, savePortfolio } from '../lib/portfolioStore'
 
 const CARD = 'bg-brand-surface border border-brand-border rounded-[var(--radius-card)] p-5'
@@ -213,6 +214,7 @@ export function PortfoliosPage(): JSX.Element {
   function handleDeletePortfolio(): void {
     if (selected === null) return
     deletePortfolio(selected.id)
+    deleteMemosForPortfolio(selected.id)
     const remaining = portfolios.filter((portfolio) => portfolio.id !== selected.id)
     setPortfolios(remaining)
     setSelectedId(remaining[0]?.id ?? null)
@@ -420,7 +422,7 @@ export function PortfoliosPage(): JSX.Element {
               </h2>
               <p className="text-sm text-[var(--color-muted)] leading-relaxed mb-4">
                 Permanently delete <strong className="text-foreground">{selected.name}</strong>? It is stored
-                only in this browser and cannot be recovered.
+                only in this browser and cannot be recovered. Its decision memos are deleted too.
               </p>
               <div className="flex justify-end gap-2">
                 <button

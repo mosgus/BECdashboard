@@ -105,4 +105,9 @@ describe('attribution', () => {
     expect(negative.leftPct).toBeCloseTo(50 - (0.05 / 0.1165) * 50)
     expect(negative.text).toBe('-5.00%')
   })
+
+  it('names the subject in the summary', () => {
+    expect(attributionSummary(R, 'MS').startsWith('MS returned')).toBe(true)
+    expect(attributionSummary(R).startsWith('The portfolio returned')).toBe(true)
+  })
 })

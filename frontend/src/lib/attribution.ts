@@ -9,13 +9,13 @@ function beta(r: AttributionResponse, key: 'market' | 'size' | 'value'): number 
   return r.loadings.find((loading) => loading.key === key)?.beta ?? 0
 }
 
-export function attributionSummary(r: AttributionResponse): string {
+export function attributionSummary(r: AttributionResponse, subject = 'The portfolio'): string {
   const c = r.contributions
   const market = beta(r, 'market')
   const size = beta(r, 'size')
   const value = beta(r, 'value')
   const sentences = [
-    `The portfolio returned ${signedPct(r.period_return)} from ${r.start} to ${r.end} (${r.n_obs} trading days).`,
+    `${subject} returned ${signedPct(r.period_return)} from ${r.start} to ${r.end} (${r.n_obs} trading days).`,
   ]
   if (Math.abs(market) > 0.1)
     sentences.push(`Market exposure (beta ${market.toFixed(2)}) contributed ${signedPct(c.market)}.`)

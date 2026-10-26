@@ -1,14 +1,16 @@
 import { useState } from 'react'
 import type { JSX } from 'react'
 import { Tooltip } from '../../components/Tooltip'
+import { MemoSection } from './research/MemoSection'
 import { PortfolioSection } from './research/PortfolioSection'
 
-const TABS: ReadonlyArray<readonly ['portfolio', string, string]> = [
+const TABS: ReadonlyArray<readonly ['portfolio' | 'memo', string, string]> = [
   ['portfolio', 'Compare Optimizers', 'Compare all eight optimizers on this portfolio, tested on a year they never saw'],
+  ['memo', 'Decision Memo', 'Record a go / no-go decision for this portfolio, with the evidence behind it'],
 ]
 
 export function ResearchPage(): JSX.Element {
-  const [tab, setTab] = useState<'portfolio'>('portfolio')
+  const [tab, setTab] = useState<'portfolio' | 'memo'>('portfolio')
   return (
     <div>
       <div role="tablist" aria-label="Research sections" className="flex gap-1 border-b border-brand-border mb-5">
@@ -27,6 +29,7 @@ export function ResearchPage(): JSX.Element {
         ))}
       </div>
       {tab === 'portfolio' && <PortfolioSection />}
+      {tab === 'memo' && <MemoSection />}
     </div>
   )
 }

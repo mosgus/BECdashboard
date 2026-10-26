@@ -90,7 +90,7 @@ function row(
   }
 }
 
-export function performanceRows(response: PerformanceResponse): PerformanceRow[] {
+export function performanceRows(response: PerformanceResponse, subject = 'the portfolio'): PerformanceRow[] {
   const benchmark = response.bench_metrics
   const market = response.market_ticker
   const rows = [
@@ -121,7 +121,7 @@ export function performanceRows(response: PerformanceResponse): PerformanceRow[]
   if (benchmark !== null && !missing(response.metrics.beta)) {
     rows.push({
       label: 'Beta',
-      tooltip: `How much the portfolio moved per 1% move in ${market}, from daily returns over the window. ${market} is 1.00 by definition.`,
+      tooltip: `How much ${subject} moved per 1% move in ${market}, from daily returns over the window. ${market} is 1.00 by definition.`,
       portfolio: number(response.metrics.beta),
       benchmark: '1.00',
       diff: signed(response.metrics.beta - 1, number),

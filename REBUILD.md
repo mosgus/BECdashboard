@@ -2519,10 +2519,14 @@ weights are proposed in the Overview contract.
 contract plus a frontend contract where needed, as 0167/0168 were.
 1. ~~The Research tab shell and the Portfolio Research pill~~. Done: 0171–0174, all accepted
    2026-10-26. Gunnar renamed the pill to **Compare Optimizers**.
-2. Decision Memo (0175, frontend only). No score. Its evidence comes from `/portfolio/risk` and
+2. ~~Decision Memo~~. Done: 0175, accepted 2026-10-26 (frontend only). No score. Its evidence comes from `/portfolio/risk` and
    `/portfolio/compare`, red flags are derived from that evidence, and memos live in localStorage
    under `bec-research-memos`. Deleting a portfolio deletes its memos.
-3. Asset Research.
+3. ~~Asset Research~~. **Dropped as a pill (Gunnar, 2026-10-26).** Its ticker-only content (risk metrics vs SPY,
+   rolling volatility, FF3 loadings) moved to the ticker page in 0176 (accepted 2026-10-26; chart cleanup 0177 accepted), which is frontend only and reuses `/portfolio/performance`
+   and `/portfolio/attribution` with one ticker at weight 1. Dropped outright: the "Portfolio Role" classifier (hand-tuned
+   labels with arbitrary thresholds) and correlation-vs-holdings (Compare Optimizers' heatmap covers it), plus Sortino,
+   Calmar and capture ratios. Still unanswered anywhere: "what would adding this ticker do to my portfolio's risk".
 4. Robustness: walk-forward and the validation suite.
 5. Overview, with the reworked score and a summary of the latest memo.
 

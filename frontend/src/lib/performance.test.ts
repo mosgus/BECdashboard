@@ -126,4 +126,9 @@ describe('performance', () => {
     ])
     expect(rows[1].cells.map((cell) => cell.state)).toEqual(['BEARISH', 'NEUTRAL', 'BULLISH'])
   })
+
+  it('names the subject in the Beta tooltip', () => {
+    const beta = performanceRows(RESPONSE, 'MS').find((row) => row.label === 'Beta')
+    expect(beta?.tooltip).toContain('How much MS moved')
+  })
 })

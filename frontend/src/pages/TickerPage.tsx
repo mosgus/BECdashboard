@@ -8,6 +8,7 @@ import { SignalBadge } from '../components/SignalBadge'
 import { Tooltip } from '../components/Tooltip'
 import { formatPrice } from '../lib/format'
 import { INDICATOR_GROUPS, SIGNAL_DESCRIPTIONS } from '../lib/indicators'
+import { RiskProfileSection } from './ticker/RiskProfileSection'
 
 const SeriesChart = lazy(() => import('../components/SeriesChart'))
 
@@ -232,6 +233,13 @@ export function TickerPage(): JSX.Element {
               </div>
             </section>
           )}
+
+          <RiskProfileSection
+            symbol={symbol}
+            start={start}
+            end={end}
+            firstBarDate={history.status === 'loading' ? undefined : (bars[0]?.date ?? null)}
+          />
         </>
       )}
     </main>

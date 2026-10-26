@@ -1,6 +1,6 @@
 # Contract 0175 — Research → Decision Memo pill (localStorage, evidence from risk + compare)
 
-**Status:** open
+**Status:** accepted
 **Assigned to:** sonnet
 **Author:** planner (opus)
 
