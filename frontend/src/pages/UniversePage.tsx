@@ -126,7 +126,14 @@ export function UniversePage(): JSX.Element {
               Securities tracked for analysis. Data is shared and persists across sessions.
             </p>
             {sweeping && (
-              <p className="text-xs text-[var(--color-muted)] mt-1">
+              <p
+                role="status"
+                className="flex items-center gap-2 text-xs text-[var(--color-muted)] mt-1"
+              >
+                <span
+                  aria-hidden="true"
+                  className="inline-block h-3.5 w-3.5 shrink-0 rounded-full border-2 border-current border-t-transparent opacity-70 motion-safe:animate-spin"
+                />
                 Updating universe data — the table will refresh when it finishes.
               </p>
             )}

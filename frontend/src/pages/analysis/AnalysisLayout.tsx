@@ -7,6 +7,7 @@ const ANALYSIS_TABS = [
   { path: 'optimize', label: 'Historical Optimize' },
   { path: 'outlook', label: 'Forward Models' },
   { path: 'risk', label: 'Risk & Performance' },
+  { path: 'research', label: 'Research' },
 ] as const
 
 export function AnalysisLayout(): JSX.Element {

@@ -5,6 +5,7 @@ import { AnalysisLayout } from './pages/analysis/AnalysisLayout'
 import { HoldingsPage } from './pages/analysis/HoldingsPage'
 import { OptimizePage } from './pages/analysis/OptimizePage'
 import { OutlookPage } from './pages/analysis/OutlookPage'
+import { ResearchPage } from './pages/analysis/ResearchPage'
 import { RiskPage } from './pages/analysis/RiskPage'
 import { LaunchPage } from './pages/LaunchPage'
 import { OpsPage } from './pages/OpsPage'
@@ -30,6 +31,7 @@ export default function App() {
           <Route path="outlook" element={<OutlookPage />} />
           <Route path="monitor" element={<Navigate to="../holdings" replace />} />
           <Route path="risk" element={<RiskPage />} />
+          <Route path="research" element={<ResearchPage />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

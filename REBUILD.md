@@ -2479,7 +2479,7 @@ had none. `ScenarioImpactChart` and `RiskContributionChart` now set `interval={0
 smoke tool gained `SMOKE_POSITIONS`, because 3 holdings never trigger the bug, and `SMOKE_EVAL`,
 because SVG text isn't in innerText.
 
-### Next: a Research tab inside Portfolios (agreed 2026-10-05, not started)
+### Next: a Research tab inside Portfolios (agreed 2026-10-05; step 1 contracted 2026-10-26)
 
 This is the next body of work. Gunnar agreed this plan on 2026-10-05 and then switched to another
 project, so whoever picks it up starts here.
@@ -2510,17 +2510,60 @@ score, and the score as a whole rewards past returns. Before the Overview contra
 Gunnar a rescaled or better-grounded version, plus a plain disclaimer of what the score does and
 doesn't mean. It's his call; he said "we'll address that specifically when we get to it".
 
-**Order.** Each step is a backend contract plus a frontend contract where needed, as 0167/0168 were.
-1. The Research tab shell, a pill switcher like `RiskPage.tsx`, and the Portfolio Research pill.
-2. Asset Research.
-3. Robustness: walk-forward and the validation suite.
-4. Decision Memo.
-5. Overview, with the reworked score.
+**Score decided 2026-10-26 (Gunnar): a reworked 0–100 score, not a checklist.** It gets documented
+weights, a concentration part based on effective holdings rather than raw HHI (so 2 equal stocks no
+longer score perfectly), holdout Sharpe in place of in-sample Sharpe, and a plain disclaimer. The
+weights are proposed in the Overview contract.
+
+**Order (revised 2026-10-26: Memo moved up, since it doesn't need the score).** Each step is a backend
+contract plus a frontend contract where needed, as 0167/0168 were.
+1. ~~The Research tab shell and the Portfolio Research pill~~. Done: 0171–0174, all accepted
+   2026-10-26. Gunnar renamed the pill to **Compare Optimizers**.
+2. Decision Memo (0175, frontend only). No score. Its evidence comes from `/portfolio/risk` and
+   `/portfolio/compare`, red flags are derived from that evidence, and memos live in localStorage
+   under `bec-research-memos`. Deleting a portfolio deletes its memos.
+3. Asset Research.
+4. Robustness: walk-forward and the validation suite.
+5. Overview, with the reworked score and a summary of the latest memo.
 
 **Before writing each contract:**
 - Read the `main` page and its backend with `git show main:<path>`.
 - List its math flaws.
 - Prototype on the real BEC portfolio, as was done for 0167 and 0169.
+
+**Step 1 decided 2026-10-26 (contracts 0171–0173).** Prototyped on the real BEC portfolio before
+any contract was written.
+- **The 8-mode comparison shows in-sample *and* holdout results (Gunnar's choice).** `main` scored each
+  mode on the same prices it was fit on, so every mode wins at its own objective. Max Sharpe had the best
+  Sharpe by construction, and `main` highlighted it green. On BEC, fit on four years and scored on the
+  next twelve months, the ranking came out reversed: Max Sharpe was 1.91 in-sample and −0.10 on the
+  holdout; Equal Weight was 1.32 in-sample and 0.38 on the holdout. That is one split, so it proves
+  nothing general. It does show that an in-sample-only table is decoration.
+  - The holdout fits each mode on the same-length lookback ending 365 days before the last bar, then
+    scores it on the last 365 days.
+  - Only holdout cells are highlighted.
+  - Holdings with no price before the cut are left out of the holdout, and the page names them.
+  - Robustness's walk-forward (step 3) should generalise this to several folds rather than build a
+    second engine.
+- **Reuse `run_optimize`, don't port `main`'s dispatcher.** The rebuild's engine already pins young
+  holdings, applies rf and weight limits, and warns. Reusing it means the in-sample columns match
+  Historical Optimize row for row. All 16 fits take about 1 s on BEC, so there are no threads.
+- **Transaction cost is one-time, and it is not a "Net Sharpe".** `main` computed
+  `Sharpe − turnover × bps / vol`, which charged a one-time rebalance as if it recurred every year,
+  using one-way turnover (half the dollars traded). Now the cost is `Σ|Δw| × bps`, shown as a % and
+  in $, and subtracted from nothing. At 10 bps on BEC it is about 0.1%, which is noise next to the
+  differences between modes. That is the honest answer to "does cost change the ranking".
+- **Frontier: kept only because it plots all eight modes plus Current.** No other tab shows that; a
+  frontier with one point would duplicate Historical Optimize. **Risk contributions are dropped**:
+  they are a straight copy of Health (Gunnar, 2026-10-26).
+- **Correlation is new to the rebuild, and two of `main`'s flaws are fixed.**
+  - `main` ran pandas `.corr()` over mixed start dates, which uses a different window for each pair.
+    Now every pair uses one common window, and the page names the holding that limits it.
+  - `main` ran Ward linkage on `1 − ρ`, which is not Euclidean. Now it is average linkage on
+    `√(½(1 − ρ))`.
+  - Colours come from theme tokens instead of fixed reds and blues.
+- **The Research pill bar starts with one pill.** Pills are added as they are built, with no disabled
+  placeholders, per the 2026-09-13 rule that a placeholder is worse than an empty page.
 
 Baselines as of 0170: backend 840 tests; frontend 372 tests in 25 files; lint 2 known warnings.
 

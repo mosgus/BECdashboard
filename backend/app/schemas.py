@@ -258,6 +258,88 @@ class OptimizeResponse(BaseModel):
     frontier: FrontierOut | None
 
 
+class CompareRequest(BaseModel):
+    tickers: list[str]
+    weights: list[float]
+    lookback_days: int = 1825
+    max_weight: float = 1.0
+    min_weight: float = 0.0
+    vol_target: float = 0.10
+    rebalance: str = "none"
+
+
+class CompareMetricsOut(BaseModel):
+    cagr: float | None
+    vol: float | None
+    sharpe: float | None
+    max_dd: float | None
+
+
+class CompareModeOut(BaseModel):
+    mode: str
+    error: str | None
+    feasible: bool | None
+    target_weights: dict[str, float] | None
+    traded: float | None
+    in_sample: CompareMetricsOut | None
+    point: FrontierPointOut | None
+    holdout_weights: dict[str, float] | None
+    holdout: CompareMetricsOut | None
+    holdout_error: str | None
+
+
+class CompareCurrentOut(BaseModel):
+    in_sample: CompareMetricsOut
+    holdout: CompareMetricsOut | None
+    point: FrontierPointOut | None
+
+
+class HoldoutWindowOut(BaseModel):
+    fit_start: date
+    fit_end: date
+    score_start: date
+    score_end: date
+    tickers: list[str]
+    excluded: list[str]
+
+
+class CompareFrontierOut(BaseModel):
+    points: list[FrontierPointOut]
+    cloud: list[FrontierPointOut]
+    tickers: list[str]
+    excluded: list[str]
+
+
+class CorrelationOut(BaseModel):
+    tickers: list[str]
+    matrix: list[list[float]]
+    start: date
+    end: date
+    n_returns: int
+    limited_by: str | None
+    excluded: list[str]
+
+
+class CompareResponse(BaseModel):
+    tickers: list[str]
+    current_weights: dict[str, float]
+    pinned: list[str]
+    lookback_days: int
+    rebalance: str
+    rf: float
+    rf_source: str
+    fit_start: date
+    fit_end: date
+    score_start: date
+    current: CompareCurrentOut
+    modes: list[CompareModeOut]
+    holdout: HoldoutWindowOut | None
+    holdout_unavailable: str | None
+    frontier: CompareFrontierOut | None
+    correlation: CorrelationOut | None
+    warnings: list[str]
+
+
 class CapmHoldingConfigIn(BaseModel):
     freeze: bool = False
     view: float = 0.0

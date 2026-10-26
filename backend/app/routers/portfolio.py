@@ -20,13 +20,14 @@ from app.models import PriceBar
 from app.montecarlo_run import MonteCarloInputError, run_monte_carlo
 from app.forecast_run import ForecastInputError, run_forecast
 from app.calibration_run import CalibrationInputError, run_calibration
+from app.compare_run import run_compare
 from app.optimize_run import OptimizeInputError, run_optimize
 from app.portfolio_series import build_portfolio_series
 from app.rates import fetch_risk_free_rate_with_source
 from app.schemas import (
     CalibrationRequest, CalibrationResponse, CapmRequest, CapmResponse, ForecastRequest, ForecastResponse, MonteCarloRequest, MonteCarloResponse,
     OptimizeRequest, OptimizeResponse, PortfolioSeriesResponse, RiskRequest, RiskResponse, StressRequest, StressResponse, PerformanceRequest, PerformanceResponse,
-    AttributionRequest, AttributionResponse,
+    AttributionRequest, AttributionResponse, CompareRequest, CompareResponse,
 )
 from app.signals import compute_all_signals
 
@@ -200,6 +201,60 @@ def optimize_portfolio(body: OptimizeRequest) -> dict:
             "tickers": result.frontier.tickers,
             "excluded": result.frontier.excluded,
         },
+    }
+
+
+def _point(point: tuple[float, float] | None) -> dict | None:
+    return None if point is None else {"vol": point[0], "ret": point[1]}
+
+
+@router.post("/compare", response_model=CompareResponse)
+def compare_portfolio(body: CompareRequest) -> dict:
+    _require_database()
+    tickers, weights = _normalise_request(body.tickers, body.weights)
+    closes = _load_stored_closes(tickers)
+    benchmark = closes.get("SPY")
+    if benchmark is None:
+        benchmark = _load_stored_closes(["SPY"], required=False).get("SPY")
+    rf, rf_source = fetch_risk_free_rate_with_source()
+    try:
+        result = run_compare(
+            dict(zip(tickers, weights, strict=True)), closes, benchmark,
+            lookback_days=body.lookback_days, max_weight=body.max_weight,
+            min_weight=body.min_weight, vol_target=body.vol_target,
+            rebalance=body.rebalance, rf=rf,
+        )
+    except OptimizeInputError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {
+        "tickers": result.tickers,
+        "current_weights": result.current_weights,
+        "pinned": result.pinned,
+        "lookback_days": result.lookback_days,
+        "rebalance": result.rebalance,
+        "rf": result.rf,
+        "rf_source": rf_source,
+        "fit_start": result.fit_start,
+        "fit_end": result.fit_end,
+        "score_start": result.score_start,
+        "current": {
+            "in_sample": asdict(result.current.in_sample),
+            "holdout": None if result.current.holdout is None else asdict(result.current.holdout),
+            "point": _point(result.current.point),
+        },
+        "modes": [
+            {**asdict(row), "point": _point(row.point)} for row in result.modes
+        ],
+        "holdout": None if result.holdout is None else asdict(result.holdout),
+        "holdout_unavailable": result.holdout_unavailable,
+        "frontier": None if result.frontier is None else {
+            "points": [_point(p) for p in result.frontier.points],
+            "cloud": [_point(p) for p in result.frontier.cloud],
+            "tickers": result.frontier.tickers,
+            "excluded": result.frontier.excluded,
+        },
+        "correlation": None if result.correlation is None else asdict(result.correlation),
+        "warnings": result.warnings,
     }
 
 

@@ -423,6 +423,92 @@ export async function optimizePortfolio(body: OptimizeRequest): Promise<Optimize
   return request<OptimizeResponse>('/portfolio/optimize', { method: 'POST', body })
 }
 
+export interface CompareRequest {
+  tickers: string[]
+  weights: number[]
+  lookback_days: number
+  max_weight: number
+  min_weight: number
+  vol_target: number
+  rebalance: OptimizeRebalance
+}
+
+export interface CompareMetrics {
+  cagr: number | null
+  vol: number | null
+  sharpe: number | null
+  max_dd: number | null
+}
+
+export interface CompareMode {
+  mode: string
+  error: string | null
+  feasible: boolean | null
+  target_weights: Record<string, number> | null
+  traded: number | null
+  in_sample: CompareMetrics | null
+  point: FrontierPoint | null
+  holdout_weights: Record<string, number> | null
+  holdout: CompareMetrics | null
+  holdout_error: string | null
+}
+
+export interface CompareCurrent {
+  in_sample: CompareMetrics
+  holdout: CompareMetrics | null
+  point: FrontierPoint | null
+}
+
+export interface HoldoutWindow {
+  fit_start: string
+  fit_end: string
+  score_start: string
+  score_end: string
+  tickers: string[]
+  excluded: string[]
+}
+
+export interface CompareFrontier {
+  points: FrontierPoint[]
+  cloud: FrontierPoint[]
+  tickers: string[]
+  excluded: string[]
+}
+
+export interface Correlation {
+  tickers: string[]
+  matrix: number[][]
+  start: string
+  end: string
+  n_returns: number
+  limited_by: string | null
+  excluded: string[]
+}
+
+export interface CompareResponse {
+  tickers: string[]
+  current_weights: Record<string, number>
+  pinned: string[]
+  lookback_days: number
+  rebalance: OptimizeRebalance
+  rf: number
+  rf_source: 'live' | 'fallback'
+  fit_start: string
+  fit_end: string
+  score_start: string
+  current: CompareCurrent
+  modes: CompareMode[]
+  holdout: HoldoutWindow | null
+  holdout_unavailable: string | null
+  frontier: CompareFrontier | null
+  correlation: Correlation | null
+  warnings: string[]
+}
+
+export async function comparePortfolio(body: CompareRequest): Promise<CompareResponse> {
+  return request<CompareResponse>('/portfolio/compare', { method: 'POST', body })
+}
+
 export interface CapmHoldingConfig {
   freeze: boolean
   view: number
