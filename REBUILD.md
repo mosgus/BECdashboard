@@ -1100,6 +1100,15 @@ Three later calls in the same process returned `crumb_obtained: True`, so crumb 
 
 Latency from Render: **0.11–0.28s** for `.news` alone, *faster* than local (0.34s).
 
+**Superseded 2026-10-01 and 2026-11-05: `Ticker.news` is now broken, and `yf.Search(t).news` is
+what actually supplies news.** On 2026-10-01 the ncp endpoint began returning 404 and `.news` came
+back empty, so a Search fallback was added. By 2026-11-05, under yfinance 1.7.0, `.news` raised
+`YFDataException` instead. The fallback only handled the empty case, so every feed failed and
+`/ops` showed `partial · 0 stored`. The 2-day prune then emptied the table, which left the page
+showing a stale briefing with no cards. Contract 0181 makes the fallback trigger on a raise too.
+**Lesson:** a fallback for an upstream breakage must trigger on any failure of the primary, not
+just the one shape seen first.
+
 **`.info` fails silently, not loudly.** `info_works: False` with `info_error: None` — it did not
 raise, it returned a dict with no `quoteType`. Anything reading `.info` on Render gets a partial dict,
 never an exception. That is why fundamentals are best-effort (contract 0013) and must stay that way.

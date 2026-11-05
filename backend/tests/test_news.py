@@ -178,6 +178,32 @@ def test_fetch_news_for_uses_search_only_when_ticker_news_is_empty(monkeypatch):
     assert fetch_news_for("SPY") == [{"id": "native"}]
 
 
+def test_fetch_news_for_uses_search_when_ticker_news_raises(monkeypatch):
+    # Case 1: Ticker.news raises, Search works
+    search_item = {"uuid": "x", "title": "Search title"}
+
+    class RaisingTicker:
+        @property
+        def news(self):
+            raise RuntimeError("down")
+
+    class Search:
+        news = [search_item]
+
+        def __init__(self, *args, **kwargs):
+            pass
+
+    monkeypatch.setattr("app.news.yf.Ticker", lambda ticker: RaisingTicker())
+    monkeypatch.setattr("app.news.yf.Search", Search)
+    assert fetch_news_for("SPY") == [search_item_to_raw(search_item)]
+
+    # Case 2: Ticker.news raises, Search constructor also raises
+    monkeypatch.setattr("app.news.yf.Ticker", lambda ticker: RaisingTicker())
+    monkeypatch.setattr("app.news.yf.Search", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("search down")))
+    with pytest.raises(RuntimeError, match="search down"):
+        fetch_news_for("SPY")
+
+
 def test_parse_article_missing_id_returns_none():
     raw = {"content": {"title": "Headline"}}
     assert parse_article(raw, "AAPL", datetime.now(timezone.utc)) is None

@@ -243,11 +243,18 @@ def search_item_to_raw(item: dict) -> dict | None:
 
 
 def fetch_news_for(ticker: str) -> list[dict]:
-    """Fetch one ticker's news, falling back to Search after Yahoo's ncp endpoint began returning 404 on 2026-10-01.
+    """Fetch one ticker's news, falling back to Search when Ticker.news is empty or raises.
 
-    The fallback can be removed if Yahoo restores Ticker.news; Search items are adapted to the
-    established shape so parsing and editorial filtering stay exactly the same."""
-    items = yf.Ticker(ticker).news
+    Yahoo's ncp endpoint began returning 404 on 2026-10-01 (Ticker.news came back empty); by
+    2026-11-05 yfinance 1.7.0 raised YFDataException on it instead. Search items are adapted to the
+    established shape so parsing and editorial filtering stay exactly the same. A Search failure
+    still raises, so refresh_news_if_stale records the ticker in errors."""
+    try:
+        items = yf.Ticker(ticker).news
+    except Exception:
+        # Broad on purpose: whatever shape Yahoo's next breakage takes, Search is the remedy.
+        logger.warning("app.news: Ticker(%s).news raised; falling back to Search", ticker, exc_info=True)
+        items = None
     if isinstance(items, list) and items:
         return items
     return [raw for item in yf.Search(ticker, news_count=10).news if (raw := search_item_to_raw(item)) is not None]
