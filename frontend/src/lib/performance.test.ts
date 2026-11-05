@@ -7,6 +7,7 @@ import {
   performanceChartData,
   performanceCsv,
   performanceRows,
+  sharpeRange,
   signalGrid,
 } from './performance'
 
@@ -67,13 +68,14 @@ describe('performance', () => {
 
   it('formats comparison rows', () => {
     const rows = performanceRows(RESPONSE)
-    expect(rows).toHaveLength(6)
+    expect(rows).toHaveLength(7)
     expect(
       rows.map(({ label, portfolio, benchmark, diff, diffTone }) => [label, portfolio, benchmark, diff, diffTone]),
     ).toEqual([
       ['CAGR', '33.39%', '19.78%', '+13.61%', 'positive'],
       ['Volatility', '34.19%', '14.86%', '+19.33%', 'negative'],
       ['Sharpe', '0.98', '1.33', '-0.35', 'negative'],
+      ['Sharpe 95% range', '—', '—', '—', 'muted'],
       ['Max Drawdown', '-39.42%', '-18.76%', '-20.66%', 'negative'],
       ['Beta', '1.25', '1.00', '+0.25', 'muted'],
       ['Alpha', '8.70%', '0.00%', '—', 'muted'],
@@ -83,7 +85,7 @@ describe('performance', () => {
 
   it('hides benchmark metrics without market coverage', () => {
     const rows = performanceRows({ ...RESPONSE, bench_metrics: null })
-    expect(rows).toHaveLength(4)
+    expect(rows).toHaveLength(5)
     expect(rows.every((row) => row.benchmark === '—' && row.diff === '—')).toBe(true)
   })
 
@@ -91,6 +93,23 @@ describe('performance', () => {
     const sharpe = performanceRows({ ...RESPONSE, metrics: { ...RESPONSE.metrics, sharpe: null } })[2]
     expect(sharpe.portfolio).toBe('—')
     expect(sharpe.diff).toBe('—')
+  })
+
+  describe('sharpeRange', () => {
+    it('formats approximate 95% ranges and handles unavailable inputs', () => {
+      expect(sharpeRange(1.0, 756)).toBe('-0.13 to 2.13')
+      expect(sharpeRange(1.33, 252)).toBe('-0.63 to 3.29')
+      expect(sharpeRange(-0.5, 504)).toBe('-1.89 to 0.89')
+      expect(sharpeRange(null, 756)).toBe('—')
+      expect(sharpeRange(1.0, 19)).toBe('—')
+    })
+  })
+
+  it('adds the Sharpe range row without a difference', () => {
+    const range = performanceRows({ ...RESPONSE, n_days: 756 })[3]
+    expect(range.portfolio).toBe(sharpeRange(RESPONSE.metrics.sharpe, 756))
+    expect(range.benchmark).toBe(sharpeRange(RESPONSE.bench_metrics!.sharpe, 756))
+    expect(range.diff).toBe('—')
   })
 
   it('maps the chart data to percentages', () => {

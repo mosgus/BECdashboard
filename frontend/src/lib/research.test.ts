@@ -1,19 +1,22 @@
 import { describe, expect, it } from 'vitest'
-import type { CompareMetrics, CompareMode, CompareResponse, Correlation } from '../api/client'
+import type { CompareFold, CompareMetrics, CompareMode, CompareResponse, Correlation } from '../api/client'
 import { buildOptimizeRequest, DEFAULT_SETTINGS, modeLabel } from './optimize'
 import type { TradeBasis } from './optimize'
 import type { Portfolio } from './portfolio'
 import {
-  bestHoldout,
+  beatsMostYears,
   buildCompareRequest,
   compareFrontierData,
   compareRows,
   correlationCellBackground,
+  DEFAULT_COMPARE_SETTINGS,
   correlationNote,
   sortCompareRows,
   tradeCost,
+  usableFolds,
+  walkForward,
 } from './research'
-import type { CompareRow } from './research'
+import type { CompareRow, WalkForwardSummary } from './research'
 
 const WEIGHTS_BASIS: TradeBasis = { kind: 'weights', reason: 'no-shares' }
 
@@ -21,7 +24,11 @@ function metrics(sharpe: number | null, vol: number | null = 0.1): CompareMetric
   return { cagr: 0.05, vol, sharpe, max_dd: -0.1 }
 }
 
-function row(key: string, holdout: CompareMetrics | null, error: string | null = null, isCurrent = false): CompareRow {
+function summary(mean: number | null): WalkForwardSummary {
+  return { byFold: [mean], mean, worst: mean, beatEqual: null, beatCurrent: null }
+}
+
+function row(key: string, mean: number | null, error: string | null = null, isCurrent = false): CompareRow {
   return {
     key,
     label: key,
@@ -30,8 +37,7 @@ function row(key: string, holdout: CompareMetrics | null, error: string | null =
     feasible: null,
     traded: isCurrent ? 0 : 0.2,
     inSample: null,
-    holdout,
-    holdoutError: null,
+    walkForward: summary(mean),
   }
 }
 
@@ -64,6 +70,8 @@ function response(modes: CompareMode[]): CompareResponse {
     score_start: '2024-01-01',
     current: { in_sample: metrics(1), holdout: metrics(2), point: null },
     modes,
+    folds: [],
+    vol_target: 0.1,
     holdout: null,
     holdout_unavailable: null,
     frontier: null,
@@ -90,48 +98,100 @@ describe('tradeCost', () => {
 })
 
 describe('sortCompareRows', () => {
-  const rows = [
-    row('current', metrics(2), null, true),
-    row('m1', metrics(0.5)),
-    row('m2', metrics(null)),
-    row('m3', metrics(1.2)),
-    row('m4', null, 'boom'),
-  ]
+  const rows = [row('current', 2, null, true), row('m1', 0.5), row('m2', null), row('m3', 1.2), row('m4', null, 'boom')]
 
   it('sorts descending with nulls after values, current first and errors last', () => {
-    expect(sortCompareRows(rows, 'holdout.sharpe', false).map((r) => r.key)).toEqual([
-      'current',
-      'm3',
-      'm1',
-      'm2',
-      'm4',
-    ])
+    expect(sortCompareRows(rows, 'wf.mean', false).map((r) => r.key)).toEqual(['current', 'm3', 'm1', 'm2', 'm4'])
   })
 
   it('sorts ascending with the same placement rules', () => {
-    expect(sortCompareRows(rows, 'holdout.sharpe', true).map((r) => r.key)).toEqual(['current', 'm1', 'm3', 'm2', 'm4'])
+    expect(sortCompareRows(rows, 'wf.mean', true).map((r) => r.key)).toEqual(['current', 'm1', 'm3', 'm2', 'm4'])
   })
 })
 
-describe('bestHoldout', () => {
-  it('ignores the current row and error rows', () => {
-    const best = bestHoldout([
-      row('current', metrics(9), null, true),
-      row('m1', metrics(0.5)),
-      row('m2', metrics(1.2)),
-      row('m3', metrics(50), 'boom'),
-    ])
-    expect(best.sharpe).toBe(1.2)
+function fold(
+  k: number,
+  unavailable: string | null,
+  sharpes: Record<string, number | null>,
+  errors: Record<string, string> = {},
+): CompareFold {
+  const modes = Object.keys(sharpes)
+    .filter((key) => key !== 'current')
+    .map((key) => ({
+      mode: key,
+      holdout: sharpes[key] === null || key in errors ? null : metrics(sharpes[key]),
+      error: errors[key] ?? null,
+    }))
+  return {
+    fold: k,
+    cut: '2023-01-01',
+    score_end: '2024-01-01',
+    fit_start: unavailable === null ? '2022-01-01' : null,
+    fit_end: unavailable === null ? '2023-01-01' : null,
+    score_start: unavailable === null ? '2023-01-01' : null,
+    tickers: ['A', 'B'],
+    excluded: [],
+    vol_target: unavailable === null ? 0.1 : null,
+    unavailable,
+    current: unavailable === null && sharpes.current !== null ? metrics(sharpes.current) : null,
+    modes: unavailable === null ? modes : [],
+  }
+}
+
+function walkFixture(): CompareResponse {
+  const base = response([mode('equal_weight', null), mode('m1', null), mode('m2', null), mode('dead', null)])
+  return {
+    ...base,
+    folds: [
+      fold(1, null, { current: 0.4, equal_weight: 0.6, m1: 0.5, m2: 0.7, dead: null }),
+      fold(2, null, { current: 1.2, equal_weight: 0.9, m1: 1.0, m2: 1.0, dead: null }, { m2: 'boom' }),
+      fold(3, 'no history', {}),
+    ],
+  }
+}
+
+describe('walkForward', () => {
+  const summaries = walkForward(walkFixture())
+
+  it('summarises a mode across folds, with unavailable folds null', () => {
+    expect(summaries.m1.byFold).toEqual([0.5, 1.0, null])
+    expect(summaries.m1.mean).toBeCloseTo(0.75, 10)
+    expect(summaries.m1.worst).toBe(0.5)
   })
 
-  it('returns the tied minimum for volatility', () => {
-    const best = bestHoldout([row('m1', metrics(1, 0.08)), row('m2', metrics(1, 0.08)), row('m3', metrics(1, 0.12))])
-    expect(best.vol).toBe(0.08)
+  it('has no beatEqual on equal_weight and counts wins elsewhere', () => {
+    expect(summaries.equal_weight.beatEqual).toBeNull()
+    expect(summaries.m1.beatEqual).toEqual({ wins: 1, of: 2 })
   })
 
-  it('is all null when no mode has a holdout', () => {
-    const best = bestHoldout(compareRows(response([mode('m1', null), mode('m2', null)])))
-    expect(best).toEqual({ cagr: null, vol: null, sharpe: null, max_dd: null })
+  it('has no beatCurrent on current and counts wins elsewhere', () => {
+    expect(summaries.current.beatCurrent).toBeNull()
+    expect(summaries.m1.beatCurrent).toEqual({ wins: 1, of: 2 })
+  })
+
+  it('treats an errored fold-mode as null', () => {
+    expect(summaries.m2.byFold).toEqual([0.7, null, null])
+    expect(summaries.m2.beatEqual).toEqual({ wins: 1, of: 1 })
+  })
+
+  it('is null throughout for a mode that never ran', () => {
+    expect(summaries.dead.mean).toBeNull()
+    expect(summaries.dead.worst).toBeNull()
+  })
+})
+
+describe('beatsMostYears', () => {
+  it('needs at least two years and a strict majority', () => {
+    expect(beatsMostYears({ wins: 2, of: 4 })).toBe(false)
+    expect(beatsMostYears({ wins: 3, of: 4 })).toBe(true)
+    expect(beatsMostYears({ wins: 1, of: 1 })).toBe(false)
+    expect(beatsMostYears(null)).toBe(false)
+  })
+})
+
+describe('usableFolds', () => {
+  it('counts folds that are not unavailable', () => {
+    expect(usableFolds(walkFixture())).toBe(2)
   })
 })
 
@@ -167,6 +227,11 @@ describe('buildCompareRequest', () => {
     expect(compare.max_weight).toBe(0.4)
     expect(compare.vol_target).toBe(0.12)
     expect(compare.lookback_days).toBe(730)
+    expect(buildCompareRequest(portfolio, { ...settings, volTargetPct: null }, basis).vol_target).toBeNull()
+  })
+
+  it('matches current by default', () => {
+    expect(DEFAULT_COMPARE_SETTINGS.volTargetPct).toBeNull()
   })
 })
 

@@ -2527,7 +2527,16 @@ contract plus a frontend contract where needed, as 0167/0168 were.
    and `/portfolio/attribution` with one ticker at weight 1. Dropped outright: the "Portfolio Role" classifier (hand-tuned
    labels with arbitrary thresholds) and correlation-vs-holdings (Compare Optimizers' heatmap covers it), plus Sortino,
    Calmar and capture ratios. Still unanswered anywhere: "what would adding this ticker do to my portfolio's risk".
-4. Robustness: walk-forward and the validation suite.
+4. ~~Robustness~~ dropped as a pill (2026-10-26). Scenarios covers stress; what was left gets folded in:
+   - Sharpe 95% range (Lo 2002, iid) as a row in the performance table — 0178, accepted 2026-10-26.
+   - Walk-forward → multi-fold holdout inside Compare Optimizers. The probe (`contracts/tools/walk_forward_probe.py`) ran on
+     the Mag 7 on 2026-10-26: rank stability across 4 yearly folds was −0.29, in-sample → holdout rank was −0.12, and equal
+     weight had the best mean holdout Sharpe. So the single-year highlight crowned noise. Built as 0179 (backend folds, plus
+     vol_target=null meaning match current; the 10% default could never be reached by all-equity sleeves) and 0180 (UI:
+     mean, worst, beat-equal-weight X/N, beat-current X/N; green only for beating equal weight in most years; a by-year table).
+     Default 4 folds, Gunnar's choice; no BEC run. 0179 and 0180 accepted 2026-10-26. Possible follow-ups: the memo still quotes fold 1 only; skipped folds print redundant "not included" notes; with a pinned young holding, match current can still miss the floor.
+   - Dropped: ADF, Ljung-Box and Jarque-Bera (they give the same answer on every equity series), plus the permutation
+     null and the bootstrap CI (redundant with the range). The drawdown bootstrap is deferred.
 5. Overview, with the reworked score and a summary of the latest memo.
 
 **Before writing each contract:**

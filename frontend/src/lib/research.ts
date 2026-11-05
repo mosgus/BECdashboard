@@ -6,10 +6,10 @@ import type { Portfolio } from './portfolio'
 export interface CompareSettings {
   lookbackDays: number
   maxWeightPct: number
-  volTargetPct: number
+  volTargetPct: number | null // null = match current
 }
 
-export const DEFAULT_COMPARE_SETTINGS: CompareSettings = { lookbackDays: 365, maxWeightPct: 100, volTargetPct: 10 }
+export const DEFAULT_COMPARE_SETTINGS: CompareSettings = { lookbackDays: 365, maxWeightPct: 100, volTargetPct: null }
 export const DEFAULT_COST_BPS = 10
 
 export function buildCompareRequest(
@@ -24,7 +24,7 @@ export function buildCompareRequest(
     lookback_days: settings.lookbackDays,
     max_weight: settings.maxWeightPct / 100,
     min_weight: 0,
-    vol_target: settings.volTargetPct / 100,
+    vol_target: settings.volTargetPct === null ? null : settings.volTargetPct / 100,
     rebalance: 'none',
   }
 }
@@ -43,15 +43,75 @@ export function sameCompareRequest(a: CompareRequest, b: CompareRequest): boolea
 
 export type CompareSortKey =
   | 'mode'
-  | 'holdout.cagr'
-  | 'holdout.vol'
-  | 'holdout.sharpe'
-  | 'holdout.max_dd'
+  | 'wf.mean'
+  | 'wf.worst'
+  | 'wf.beat_equal'
+  | 'wf.beat_current'
   | 'in_sample.cagr'
   | 'in_sample.vol'
   | 'in_sample.sharpe'
   | 'in_sample.max_dd'
   | 'traded'
+
+export interface WalkForwardStat {
+  wins: number
+  of: number
+}
+
+export interface WalkForwardSummary {
+  byFold: (number | null)[] // holdout Sharpe per response.folds entry, same order
+  mean: number | null
+  worst: number | null
+  beatEqual: WalkForwardStat | null // null on the equal_weight row
+  beatCurrent: WalkForwardStat | null // null on the current row
+}
+
+function foldSharpe(response: CompareResponse, key: string): (number | null)[] {
+  return response.folds.map((fold) =>
+    key === 'current'
+      ? (fold.current?.sharpe ?? null)
+      : (fold.modes.find((m) => m.mode === key)?.holdout?.sharpe ?? null),
+  )
+}
+
+function winCount(row: (number | null)[], comparator: (number | null)[]): WalkForwardStat {
+  let wins = 0
+  let of = 0
+  row.forEach((value, index) => {
+    const other = comparator[index]
+    if (value === null || other === null) return
+    of += 1
+    if (value > other) wins += 1
+  })
+  return { wins, of }
+}
+
+export function walkForward(response: CompareResponse): Record<string, WalkForwardSummary> {
+  const keys = ['current', ...response.modes.map((mode) => mode.mode)]
+  const sharpes: Record<string, (number | null)[]> = {}
+  for (const key of keys) sharpes[key] = foldSharpe(response, key)
+  const out: Record<string, WalkForwardSummary> = {}
+  for (const key of keys) {
+    const byFold = sharpes[key]
+    const values = byFold.filter((value): value is number => value !== null)
+    out[key] = {
+      byFold,
+      mean: values.length === 0 ? null : values.reduce((a, b) => a + b, 0) / values.length,
+      worst: values.length === 0 ? null : Math.min(...values),
+      beatEqual: key === 'equal_weight' ? null : winCount(byFold, sharpes['equal_weight'] ?? byFold.map(() => null)),
+      beatCurrent: key === 'current' ? null : winCount(byFold, sharpes['current']),
+    }
+  }
+  return out
+}
+
+export function beatsMostYears(stat: WalkForwardStat | null): boolean {
+  return stat !== null && stat.of >= 2 && stat.wins * 2 > stat.of
+}
+
+export function usableFolds(response: CompareResponse): number {
+  return response.folds.filter((fold) => fold.unavailable === null).length
+}
 
 export interface CompareRow {
   key: string
@@ -61,11 +121,11 @@ export interface CompareRow {
   feasible: boolean | null
   traded: number | null
   inSample: CompareMetrics | null
-  holdout: CompareMetrics | null
-  holdoutError: string | null
+  walkForward: WalkForwardSummary
 }
 
 export function compareRows(response: CompareResponse): CompareRow[] {
+  const summaries = walkForward(response)
   const current: CompareRow = {
     key: 'current',
     label: 'Current portfolio',
@@ -74,8 +134,7 @@ export function compareRows(response: CompareResponse): CompareRow[] {
     feasible: null,
     traded: 0,
     inSample: response.current.in_sample,
-    holdout: response.current.holdout,
-    holdoutError: null,
+    walkForward: summaries['current'],
   }
   return [
     current,
@@ -87,16 +146,23 @@ export function compareRows(response: CompareResponse): CompareRow[] {
       feasible: mode.feasible,
       traded: mode.traded,
       inSample: mode.in_sample,
-      holdout: mode.holdout,
-      holdoutError: mode.holdout_error,
+      walkForward: summaries[mode.mode],
     })),
   ]
 }
 
+function ratio(stat: WalkForwardStat | null): number | null {
+  return stat === null || stat.of === 0 ? null : stat.wins / stat.of
+}
+
 function sortValue(row: CompareRow, key: Exclude<CompareSortKey, 'mode'>): number | null {
   if (key === 'traded') return row.traded
-  const [group, metric] = key.split('.') as ['holdout' | 'in_sample', keyof CompareMetrics]
-  return (group === 'holdout' ? row.holdout : row.inSample)?.[metric] ?? null
+  if (key === 'wf.mean') return row.walkForward.mean
+  if (key === 'wf.worst') return row.walkForward.worst
+  if (key === 'wf.beat_equal') return ratio(row.walkForward.beatEqual)
+  if (key === 'wf.beat_current') return ratio(row.walkForward.beatCurrent)
+  const metric = key.split('.')[1] as keyof CompareMetrics
+  return row.inSample?.[metric] ?? null
 }
 
 export function sortCompareRows(rows: CompareRow[], key: CompareSortKey, ascending: boolean): CompareRow[] {
@@ -114,27 +180,6 @@ export function sortCompareRows(rows: CompareRow[], key: CompareSortKey, ascendi
     return direction * (left - right)
   })
   return [...current, ...sorted, ...errors]
-}
-
-export function bestHoldout(rows: CompareRow[]): {
-  cagr: number | null
-  vol: number | null
-  sharpe: number | null
-  max_dd: number | null
-} {
-  const metrics = rows
-    .filter((row) => !row.isCurrent && row.error === null && row.holdout !== null)
-    .map((row) => row.holdout!)
-  function pick(metric: keyof CompareMetrics, better: (a: number, b: number) => number): number | null {
-    const values = metrics.map((item) => item[metric]).filter((value): value is number => value !== null)
-    return values.length === 0 ? null : values.reduce((a, b) => better(a, b))
-  }
-  return {
-    cagr: pick('cagr', Math.max),
-    vol: pick('vol', Math.min),
-    sharpe: pick('sharpe', Math.max),
-    max_dd: pick('max_dd', Math.max),
-  }
 }
 
 // `traded` is a fraction of the invested sleeve: 0171 sends weights without cash. That is why `pct`
@@ -193,8 +238,7 @@ export function compareFrontierData(response: CompareResponse): CompareFrontierD
   return {
     curve: frontier.points.map(scaled),
     cloud: frontier.cloud.map(scaled),
-    current:
-      currentPoint === null ? null : { ...scaled(currentPoint), label: 'Current', name: 'Current portfolio' },
+    current: currentPoint === null ? null : { ...scaled(currentPoint), label: 'Current', name: 'Current portfolio' },
     modes,
   }
 }

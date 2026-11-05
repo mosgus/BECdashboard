@@ -103,6 +103,8 @@ const RISK: RiskResponse = {
 function compare(pinned: string[], excluded: string[]): CompareResponse {
   return {
     pinned,
+    folds: [],
+    vol_target: 0.1,
     holdout: {
       fit_start: '2024-10-01',
       fit_end: '2025-10-01',

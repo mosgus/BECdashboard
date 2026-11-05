@@ -5,7 +5,7 @@ here would make an ETF unreturnable."""
 
 from datetime import date, datetime
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 
 class PresetIn(BaseModel):
@@ -264,8 +264,9 @@ class CompareRequest(BaseModel):
     lookback_days: int = 1825
     max_weight: float = 1.0
     min_weight: float = 0.0
-    vol_target: float = 0.10
+    vol_target: float | None = None
     rebalance: str = "none"
+    folds: int = Field(4, ge=1, le=6)
 
 
 class CompareMetricsOut(BaseModel):
@@ -303,6 +304,27 @@ class HoldoutWindowOut(BaseModel):
     excluded: list[str]
 
 
+class FoldModeOut(BaseModel):
+    mode: str
+    holdout: CompareMetricsOut | None
+    error: str | None
+
+
+class FoldOut(BaseModel):
+    fold: int
+    cut: date
+    score_end: date
+    fit_start: date | None
+    fit_end: date | None
+    score_start: date | None
+    tickers: list[str]
+    excluded: list[str]
+    vol_target: float | None
+    unavailable: str | None
+    current: CompareMetricsOut | None
+    modes: list[FoldModeOut]
+
+
 class CompareFrontierOut(BaseModel):
     points: list[FrontierPointOut]
     cloud: list[FrontierPointOut]
@@ -333,6 +355,8 @@ class CompareResponse(BaseModel):
     score_start: date
     current: CompareCurrentOut
     modes: list[CompareModeOut]
+    folds: list[FoldOut]
+    vol_target: float
     holdout: HoldoutWindowOut | None
     holdout_unavailable: str | None
     frontier: CompareFrontierOut | None

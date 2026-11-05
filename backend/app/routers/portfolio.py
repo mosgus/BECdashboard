@@ -222,7 +222,7 @@ def compare_portfolio(body: CompareRequest) -> dict:
             dict(zip(tickers, weights, strict=True)), closes, benchmark,
             lookback_days=body.lookback_days, max_weight=body.max_weight,
             min_weight=body.min_weight, vol_target=body.vol_target,
-            rebalance=body.rebalance, rf=rf,
+            rebalance=body.rebalance, rf=rf, folds=body.folds,
         )
     except OptimizeInputError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -245,6 +245,8 @@ def compare_portfolio(body: CompareRequest) -> dict:
         "modes": [
             {**asdict(row), "point": _point(row.point)} for row in result.modes
         ],
+        "folds": [asdict(fold) for fold in result.folds],
+        "vol_target": result.vol_target,
         "holdout": None if result.holdout is None else asdict(result.holdout),
         "holdout_unavailable": result.holdout_unavailable,
         "frontier": None if result.frontier is None else {

@@ -63,6 +63,13 @@ const signed = (value: number, format: (number: number) => string) => `${value >
 const number = (value: number) => value.toFixed(2)
 const missing = (value: number | null | undefined) => value === null || value === undefined
 
+export function sharpeRange(sharpe: number | null | undefined, nDays: number): string {
+  if (sharpe === null || sharpe === undefined || nDays < 20) return '—'
+  const daily = sharpe / Math.sqrt(252)
+  const se = Math.sqrt((1 + (daily * daily) / 2) / nDays) * Math.sqrt(252)
+  return `${(sharpe - 1.96 * se).toFixed(2)} to ${(sharpe + 1.96 * se).toFixed(2)}`
+}
+
 function row(
   label: string,
   tooltip: string,
@@ -110,6 +117,15 @@ export function performanceRows(response: PerformanceResponse, subject = 'the po
       benchmark?.sharpe,
       number,
     ),
+    {
+      label: 'Sharpe 95% range',
+      tooltip: 'Approximate 95% range for the true Sharpe given this many trading days (Lo 2002, assumes independent daily returns). A range that crosses 0 means this window cannot tell the result apart from no excess return. Do not rank the two columns by their ranges: the two return series move together, so overlap does not settle which is better.',
+      portfolio: sharpeRange(response.metrics.sharpe, response.n_days),
+      benchmark: benchmark === null ? '—' : sharpeRange(benchmark.sharpe, response.n_days),
+      diff: '—',
+      portfolioTone: 'default',
+      diffTone: 'muted',
+    } satisfies PerformanceRow,
     row(
       'Max Drawdown',
       'Largest fall from a high point during the window.',

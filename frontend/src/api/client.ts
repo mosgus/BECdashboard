@@ -429,8 +429,9 @@ export interface CompareRequest {
   lookback_days: number
   max_weight: number
   min_weight: number
-  vol_target: number
+  vol_target: number | null
   rebalance: OptimizeRebalance
+  folds?: number
 }
 
 export interface CompareMetrics {
@@ -468,6 +469,27 @@ export interface HoldoutWindow {
   excluded: string[]
 }
 
+export interface CompareFoldMode {
+  mode: string
+  holdout: CompareMetrics | null
+  error: string | null
+}
+
+export interface CompareFold {
+  fold: number
+  cut: string
+  score_end: string
+  fit_start: string | null
+  fit_end: string | null
+  score_start: string | null
+  tickers: string[]
+  excluded: string[]
+  vol_target: number | null
+  unavailable: string | null
+  current: CompareMetrics | null
+  modes: CompareFoldMode[]
+}
+
 export interface CompareFrontier {
   points: FrontierPoint[]
   cloud: FrontierPoint[]
@@ -498,6 +520,8 @@ export interface CompareResponse {
   score_start: string
   current: CompareCurrent
   modes: CompareMode[]
+  folds: CompareFold[]
+  vol_target: number
   holdout: HoldoutWindow | null
   holdout_unavailable: string | null
   frontier: CompareFrontier | null

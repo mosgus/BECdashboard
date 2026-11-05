@@ -1,11 +1,14 @@
 from datetime import date
+from datetime import timedelta
 
 import numpy as np
 import pandas as pd
 import pytest
 
 from app.compare_run import MODES, correlation_matrix, run_compare
+from app.compare_run import _score
 from app.optimize_run import OptimizeInputError, run_optimize
+from app.portfolio_series import backtest_series
 
 DATES = [d.date() for d in pd.bdate_range("2023-01-02", "2024-12-31")]   # 522 bars
 
@@ -131,3 +134,102 @@ def test_correlation_excludes_zero_variance():
 
 def test_correlation_none_with_fewer_than_two_usable():
     assert correlation_matrix({"A": A, "Y": Y}, ["A", "Y"], date(2024, 1, 1), date(2024, 12, 31)) is None
+
+
+LONG_DATES = [d.date() for d in pd.bdate_range("2019-01-02", "2024-12-31")]
+LA = prices([0.01, -0.01, 0.01, -0.01], LONG_DATES)
+LB = prices([0.02, 0.02, -0.02, -0.02], LONG_DATES)
+LC = prices([0.005, 0.003, -0.004, 0.001, -0.002], LONG_DATES)
+YOUNG_DATES = [d for d in LONG_DATES if d >= date(2022, 1, 3)]
+LY = prices([0.004, -0.003, 0.002], YOUNG_DATES)
+LONG = {"A": LA, "B": LB, "C": LC, "Y": LY}
+WLONG = {t: 1 for t in LONG}
+
+
+@pytest.fixture(scope="module")
+def long_result():
+    return run_compare(WLONG, LONG, LA, lookback_days=365, folds=4)
+
+
+def test_folds_step_back_one_year(long_result):
+    folds = long_result.folds
+    assert [f.fold for f in folds] == [1, 2, 3, 4]
+    end = min(s.index[-1] for s in LONG.values())
+    assert folds[0].score_end == end
+    for f in folds:
+        assert f.score_end - f.cut == timedelta(days=365)
+    for prev, nxt in zip(folds, folds[1:]):
+        assert prev.score_end - nxt.score_end == timedelta(days=365)
+
+
+def test_folds_have_no_lookahead(long_result):
+    for f in long_result.folds:
+        assert f.unavailable is None
+        assert f.fit_end <= f.cut
+        assert f.score_start >= f.fit_end
+        fit_closes = {t: LONG[t].loc[LONG[t].index <= f.cut] for t in f.tickers}
+        fit_weights = {t: 1 for t in f.tickers}
+        scored = {
+            t: LONG[t].loc[(LONG[t].index >= f.fit_end) & (LONG[t].index <= f.score_end)]
+            for t in f.tickers
+        }
+        for fm in f.modes:
+            if fm.holdout is None:
+                continue
+            run = run_optimize(fit_weights, fit_closes, None, mode=fm.mode, lookback_days=365)
+            by_hand = _score(backtest_series(run.target_weights, scored, "none").total, 0.0427)
+            assert fm.holdout.sharpe == pytest.approx(by_hand.sharpe)
+
+
+def test_young_holding_excluded_by_fold(long_result):
+    first_bar = LY.index[0]
+    for f in long_result.folds:
+        if f.cut < first_bar:
+            assert "Y" in f.excluded and "Y" not in f.tickers
+        else:
+            assert "Y" in f.tickers and "Y" not in f.excluded
+    assert any("Y" in f.excluded for f in long_result.folds)
+    assert any("Y" in f.tickers for f in long_result.folds)
+
+
+def test_short_history_folds_are_unavailable(base):
+    result = run_compare(W3, ABC, SPY, lookback_days=365, folds=4)
+    assert len(result.folds) == 4
+    for f in result.folds[1:]:
+        assert f.unavailable
+        assert f.current is None and f.modes == [] and f.vol_target is None
+    assert result.folds[0].unavailable is None
+    assert result.folds[0].current == result.current.holdout
+
+
+def test_fold_one_equals_legacy_fields(long_result):
+    fold1 = long_result.folds[0]
+    assert fold1.current == long_result.current.holdout
+    assert [fm.mode for fm in fold1.modes] == list(MODES)
+    for fm, row in zip(fold1.modes, long_result.modes):
+        assert fm.holdout == row.holdout
+        assert fm.error == row.holdout_error
+    assert long_result.holdout.score_start == fold1.score_start
+    assert long_result.holdout.fit_end == fold1.fit_end
+
+
+def test_vol_target_none_matches_current_vol():
+    result = run_compare(W3, ABC, SPY, lookback_days=365, vol_target=None, folds=1)
+    equal_run = run_optimize(W3, ABC, SPY, mode="equal_weight", lookback_days=365)
+    assert result.vol_target == pytest.approx(equal_run.metrics["current"]["vol"])
+    row = next(r for r in result.modes if r.mode == "target_volatility")
+    assert row.error is None
+    assert isinstance(result.folds[0].vol_target, float)
+
+
+def test_vol_target_none_resolves_per_fold():
+    result = run_compare(WLONG, LONG, LA, lookback_days=365, vol_target=None, folds=4)
+    for f in result.folds:
+        assert f.unavailable is None
+        assert isinstance(f.vol_target, float)
+
+
+def test_numeric_vol_target_is_reported():
+    result = run_compare(W3, ABC, SPY, lookback_days=365, vol_target=0.10)
+    assert result.vol_target == 0.10
+    assert result.folds[0].vol_target == 0.10

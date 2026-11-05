@@ -59,6 +59,12 @@ def test_compare_response_shape(client, db_mode):
     assert body["holdout"] is not None
     assert body["correlation"] is not None
     assert body["frontier"] is not None
+    assert len(body["folds"]) == 4
+    keys = {"fold", "cut", "score_end", "fit_start", "fit_end", "score_start", "tickers", "excluded",
+            "vol_target", "unavailable", "current", "modes"}
+    for fold in body["folds"]:
+        assert keys == fold.keys()
+    assert "vol_target" in body
     assert {"vol", "ret"} == body["current"]["point"].keys()
     assert {"vol", "ret"} == body["frontier"]["points"][0].keys()
     for mode in body["modes"]:
@@ -84,3 +90,22 @@ def test_compare_unknown_ticker_is_404(client, db_mode):
     _seed()
     response = client.post("/portfolio/compare", json={"tickers": ["A", "MISS"], "weights": [1, 1]})
     assert response.status_code == 404
+
+
+def test_compare_without_vol_target_is_200(client, db_mode):
+    _seed()
+    response = client.post(
+        "/portfolio/compare", json={"tickers": ["A", "B", "C"], "weights": [1, 1, 1], "lookback_days": 365}
+    )
+    assert response.status_code == 200
+    assert isinstance(response.json()["vol_target"], float)
+
+
+@pytest.mark.parametrize("folds", [0, 7])
+def test_compare_folds_out_of_range_is_422(client, db_mode, folds):
+    _seed()
+    response = client.post(
+        "/portfolio/compare",
+        json={"tickers": ["A", "B", "C"], "weights": [1, 1, 1], "lookback_days": 365, "folds": folds},
+    )
+    assert response.status_code == 422

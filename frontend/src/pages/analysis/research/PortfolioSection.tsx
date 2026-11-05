@@ -2,7 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import type { JSX } from 'react'
 import { useParams } from 'react-router-dom'
 import { comparePortfolio, getUniverse } from '../../../api/client'
-import type { CompareMetrics, CompareRequest, CompareResponse } from '../../../api/client'
+import type { CompareRequest, CompareResponse } from '../../../api/client'
 import { CorrelationHeatmap } from '../../../components/CorrelationHeatmap'
 import { ExpandableChart } from '../../../components/ExpandableChart'
 import { LookbackPicker } from '../../../components/LookbackPicker'
@@ -11,7 +11,7 @@ import { formatMoney, tradeBasis } from '../../../lib/optimize'
 import type { TradeBasis } from '../../../lib/optimize'
 import { isLegacyPortfolio, listPortfolios } from '../../../lib/portfolioStore'
 import {
-  bestHoldout,
+  beatsMostYears,
   buildCompareRequest,
   compareFrontierData,
   compareFrontierNote,
@@ -22,8 +22,9 @@ import {
   sameCompareRequest,
   sortCompareRows,
   tradeCost,
+  usableFolds,
 } from '../../../lib/research'
-import type { CompareRow, CompareSortKey } from '../../../lib/research'
+import type { CompareRow, CompareSortKey, WalkForwardStat } from '../../../lib/research'
 
 type RunState =
   | { status: 'idle' }
@@ -58,7 +59,7 @@ export function PortfolioSection(): JSX.Element | null {
   const [settings, setSettings] = useState(DEFAULT_COMPARE_SETTINGS)
   const [bps, setBps] = useState(DEFAULT_COST_BPS)
   const [sort, setSort] = useState<{ key: CompareSortKey; ascending: boolean }>({
-    key: 'holdout.sharpe',
+    key: 'wf.mean',
     ascending: false,
   })
   const [run, setRun] = useState<RunState>({ status: 'idle' })
@@ -120,6 +121,7 @@ export function PortfolioSection(): JSX.Element | null {
   if (portfolio === null) return null
   const liveBasis: TradeBasis =
     universe.status === 'ready' ? tradeBasis(portfolio, universe.lastClose) : { kind: 'weights', reason: 'no-shares' }
+  const matching = settings.volTargetPct === null
   const stale =
     run.status === 'ready' && !sameCompareRequest(buildCompareRequest(portfolio, settings, liveBasis), run.request)
 
@@ -153,8 +155,24 @@ export function PortfolioSection(): JSX.Element | null {
           </Tooltip>
         </div>
         <div className="w-56">
+          <Tooltip
+            block
+            label="Aim Target Volatility at the current portfolio's own volatility over the same fit window"
+          >
+            <label className="mb-1 flex items-center gap-2 text-xs font-medium text-[var(--color-muted)]">
+              <input
+                type="checkbox"
+                checked={matching}
+                onChange={(event) => setSettings({ ...settings, volTargetPct: event.target.checked ? null : 20 })}
+                className="accent-[var(--color-primary)]"
+              />
+              Match current
+            </label>
+          </Tooltip>
           <label className="mb-1 block text-xs font-medium text-[var(--color-muted)]">
-            Vol target: {settings.volTargetPct}% (Target Volatility only)
+            {matching
+              ? `Vol target: matches current${run.status === 'ready' ? ` (${(run.response.vol_target * 100).toFixed(1)}%)` : ''} (Target Volatility only)`
+              : `Vol target: ${settings.volTargetPct}% (Target Volatility only)`}
           </label>
           <Tooltip
             dismissOnPointerDown
@@ -166,7 +184,8 @@ export function PortfolioSection(): JSX.Element | null {
               min={5}
               max={50}
               step={1}
-              value={settings.volTargetPct}
+              disabled={matching}
+              value={settings.volTargetPct ?? 20}
               onChange={(event) => setSettings({ ...settings, volTargetPct: Number(event.target.value) })}
               className="w-full accent-[var(--color-primary)]"
             />
@@ -191,9 +210,10 @@ export function PortfolioSection(): JSX.Element | null {
           <RunNotes response={run.response} stale={stale} />
           <p className="text-xs text-[var(--color-muted)]">
             In-sample numbers show how each optimizer did on the same prices it was fit to, so each one tends to win at
-            its own goal. The holdout columns are the real test: weights fit on the prior period, then scored on the
-            last 12 months, which the fit never saw. Green marks the best holdout value. One year is one test, not
-            proof.
+            its own goal. The walk-forward columns are the real test: for each of the last {run.response.folds.length}{' '}
+            years, weights are fit on the prior period only and scored on that year. Green marks an optimizer that beat
+            equal weight in more than half the scored years. If the by-year ranking changes from year to year, no single
+            winner should be trusted.
           </p>
           <div className="max-w-xs">
             <label className="mb-1 block text-xs font-medium text-[var(--color-muted)]">
@@ -227,6 +247,7 @@ export function PortfolioSection(): JSX.Element | null {
               )
             }
           />
+          <ByYearTable response={run.response} />
           <FrontierCard response={run.response} />
           <CorrelationCard response={run.response} />
         </>
@@ -261,8 +282,8 @@ function FrontierCard({ response }: { response: CompareResponse }): JSX.Element 
             </Suspense>
           </div>
           <p className="mt-2 text-xs text-[var(--color-muted)]">
-            In-sample: the curve and every point use the same prices the optimizers were fit on. The comparison
-            table's holdout columns are the out-of-sample check.
+            In-sample: the curve and every point use the same prices the optimizers were fit on. The comparison table's
+            walk-forward columns are the out-of-sample check.
           </p>
           {note !== null && <p className="mt-1 text-xs text-[var(--color-muted)]">{note}</p>}
         </>
@@ -295,22 +316,30 @@ function CorrelationCard({ response }: { response: CompareResponse }): JSX.Eleme
 }
 
 function RunNotes({ response, stale }: { response: CompareResponse; stale: boolean }): JSX.Element {
-  const holdout = response.holdout
   return (
     <div className="space-y-1 text-xs text-[var(--color-muted)]">
       <p>
         In-sample: fit and scored on {response.fit_start} → {response.fit_end}.
       </p>
-      {holdout !== null ? (
-        <p>
-          Holdout: fit on {holdout.fit_start} → {holdout.fit_end}, scored on {holdout.score_start} → {holdout.score_end}
-          .
-          {holdout.excluded.length > 0 &&
-            ` Not in the holdout (no prices before ${holdout.fit_end}): ${holdout.excluded.join(', ')}.`}
-        </p>
-      ) : (
-        response.holdout_unavailable !== null && <p>{response.holdout_unavailable}</p>
-      )}
+      <p>
+        Walk-forward: {usableFolds(response)} of {response.folds.length} yearly folds scored. Each fold fits on the
+        lookback before its cut and scores the following 12 months.
+      </p>
+      {response.folds
+        .filter((fold) => fold.excluded.length > 0)
+        .map((fold) => (
+          <p key={`x-${fold.fold}`}>
+            Fold {fold.fold} (cut {fold.cut}): not included (no prices on or before {fold.cut}):{' '}
+            {fold.excluded.join(', ')}.
+          </p>
+        ))}
+      {response.folds
+        .filter((fold) => fold.unavailable !== null)
+        .map((fold) => (
+          <p key={`u-${fold.fold}`}>
+            Fold {fold.fold} skipped: {fold.unavailable}
+          </p>
+        ))}
       {response.pinned.length > 0 && (
         <p>Held at current weight (too little history to fit): {response.pinned.join(', ')}.</p>
       )}
@@ -338,7 +367,6 @@ function ComparisonTable({
   onSort: (key: CompareSortKey) => void
 }): JSX.Element {
   const rows = compareRows(response)
-  const best = bestHoldout(rows)
   const sorted = sortCompareRows(rows, sort.key, sort.ascending)
   return (
     <section className="bg-brand-surface border border-brand-border rounded-[var(--radius-card)] p-4 overflow-x-auto">
@@ -347,7 +375,7 @@ function ComparisonTable({
           <tr>
             <SortHeader sortKey="mode" label="Mode" tipName="Mode" sort={sort} onSort={onSort} rowSpan={2} />
             <th colSpan={4} className={`${TH} text-center`}>
-              Holdout, last 12 months
+              Walk-forward, {usableFolds(response)} of {response.folds.length} years
             </th>
             <th colSpan={4} className={`${TH} text-center`}>
               In-sample
@@ -357,16 +385,34 @@ function ComparisonTable({
             </th>
           </tr>
           <tr>
-            {METRICS.map((metric) => (
-              <SortHeader
-                key={`h-${metric}`}
-                sortKey={`holdout.${metric}`}
-                label={METRIC_LABELS[metric]}
-                tipName={`Holdout ${METRIC_LABELS[metric]}`}
-                sort={sort}
-                onSort={onSort}
-              />
-            ))}
+            <SortHeader
+              sortKey="wf.mean"
+              label="Mean Sharpe"
+              tipName="Walk-forward mean Sharpe"
+              sort={sort}
+              onSort={onSort}
+            />
+            <SortHeader
+              sortKey="wf.worst"
+              label="Worst year"
+              tipName="Walk-forward worst year Sharpe"
+              sort={sort}
+              onSort={onSort}
+            />
+            <SortHeader
+              sortKey="wf.beat_equal"
+              label="Beat equal wt"
+              tipName="Years beating equal weight"
+              sort={sort}
+              onSort={onSort}
+            />
+            <SortHeader
+              sortKey="wf.beat_current"
+              label="Beat current"
+              tipName="Years beating the current portfolio"
+              sort={sort}
+              onSort={onSort}
+            />
             {METRICS.map((metric) => (
               <SortHeader
                 key={`i-${metric}`}
@@ -383,7 +429,7 @@ function ComparisonTable({
         </thead>
         <tbody>
           {sorted.map((row) => (
-            <ModeRow key={row.key} row={row} best={best} basis={basis} cashWeight={cashWeight} bps={bps} />
+            <ModeRow key={row.key} row={row} basis={basis} cashWeight={cashWeight} bps={bps} />
           ))}
         </tbody>
       </table>
@@ -393,13 +439,11 @@ function ComparisonTable({
 
 function ModeRow({
   row,
-  best,
   basis,
   cashWeight,
   bps,
 }: {
   row: CompareRow
-  best: ReturnType<typeof bestHoldout>
   basis: TradeBasis
   cashWeight: number
   bps: number
@@ -425,17 +469,12 @@ function ModeRow({
   return (
     <tr className={rowClass}>
       {label}
-      {row.holdout === null ? (
-        <td colSpan={4} className={`${TD} text-[var(--color-muted)]`}>
-          {row.holdoutError ?? '—'}
-        </td>
-      ) : (
-        METRICS.map((metric) => (
-          <td key={metric} className={`${NUMERIC} ${isBestHoldout(row.holdout, best, metric) ? POSITIVE : ''}`}>
-            {metricText(metric, row.holdout![metric])}
-          </td>
-        ))
-      )}
+      <td className={NUMERIC}>{sharpeText(row.walkForward.mean)}</td>
+      <td className={NUMERIC}>{sharpeText(row.walkForward.worst)}</td>
+      <td className={`${NUMERIC} ${beatsMostYears(row.walkForward.beatEqual) ? POSITIVE : ''}`}>
+        {statText(row.walkForward.beatEqual)}
+      </td>
+      <td className={NUMERIC}>{statText(row.walkForward.beatCurrent)}</td>
       {METRICS.map((metric) => (
         <td key={`i-${metric}`} className={NUMERIC}>
           {row.inSample === null ? '—' : metricText(metric, row.inSample[metric])}
@@ -451,14 +490,61 @@ function ModeRow({
   )
 }
 
-// Highlighting reads only a row's holdout metrics and bestHoldout(): no in-sample value can reach it.
-function isBestHoldout(
-  holdout: CompareMetrics | null,
-  best: ReturnType<typeof bestHoldout>,
-  metric: (typeof METRICS)[number],
-): boolean {
-  const value = holdout?.[metric] ?? null
-  return value !== null && value === best[metric]
+function sharpeText(value: number | null): string {
+  return value === null ? '—' : value.toFixed(2)
+}
+
+function statText(stat: WalkForwardStat | null): string {
+  return stat === null || stat.of === 0 ? '—' : `${stat.wins}/${stat.of}`
+}
+
+function ByYearTable({ response }: { response: CompareResponse }): JSX.Element {
+  const rows = compareRows(response).filter((row) => row.error === null)
+  return (
+    <section className="bg-brand-surface border border-brand-border rounded-[var(--radius-card)] p-4 overflow-x-auto">
+      <h3 className="mb-2 text-sm font-semibold">Holdout Sharpe by year</h3>
+      <table className="w-full text-xs">
+        <thead>
+          <tr>
+            <th className={`${TH} text-left`}>Mode</th>
+            {response.folds.map((fold) => (
+              <th key={fold.fold} className={`${TH} text-right`}>
+                {fold.unavailable === null ? (
+                  `${fold.score_start} → ${fold.score_end}`
+                ) : (
+                  <Tooltip label={fold.unavailable}>
+                    <span>{`${fold.cut} → ${fold.score_end} (skipped)`}</span>
+                  </Tooltip>
+                )}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={row.key} className={row.isCurrent ? 'bg-brand-primary/10 font-semibold' : ''}>
+              <td className={TD}>{row.label}</td>
+              {response.folds.map((fold, index) => {
+                const value = row.walkForward.byFold[index]
+                const error = row.isCurrent ? null : (fold.modes.find((m) => m.mode === row.key)?.error ?? null)
+                return (
+                  <td key={fold.fold} className={NUMERIC}>
+                    {value === null && error !== null ? (
+                      <Tooltip label={error}>
+                        <span>—</span>
+                      </Tooltip>
+                    ) : (
+                      sharpeText(value)
+                    )}
+                  </td>
+                )
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </section>
+  )
 }
 
 function SortHeader({
