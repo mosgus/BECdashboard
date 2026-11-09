@@ -195,7 +195,7 @@ export function MacroQuadrant({ groupKey, groupLabel, points }: Props): JSX.Elem
                   <circle className="qhit" cx={x} cy={y} r={FLAG_R + 8} />
                   <circle className="qring" cx={x} cy={y} r={FLAG_R + 2} />
                   <image
-                    href={`/flags/${p.flag}.svg`}
+                    href={`/assets/flags/${p.flag}.svg`}
                     x={x - FLAG_R}
                     y={y - FLAG_R}
                     width={2 * FLAG_R}

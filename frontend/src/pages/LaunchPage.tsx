@@ -20,7 +20,7 @@ export function LaunchPage(): JSX.Element {
             Blue Eagle Capital
           </h1>
           <p className="text-lg font-light text-(--color-muted) max-w-xl mt-3.5">
-            Portfolio construction, optimization, and risk analytics.
+            Portfolio construction, optimization, risk analytics, & macro analysis.
           </p>
         </section>
         {universeLoading ? (

@@ -48,8 +48,11 @@ It must match the contract's `Assigned to:` field. Mentioning the agent earlier 
 substitute.
 
 **3. You do not write production code unless Gunnar explicitly tells you to in that message.**
-"Explicitly" means he asked for code. It does not mean you concluded the change was small enough
-to just do. Writing files under `contracts/` and `agent_prompts/`, and editing `REBUILD.md` /
+"Explicitly" means he told *you* to write the implementation yourself. It does not mean you
+concluded the change was small enough to just do. A request phrased as "can you just do a quick
+implementation of X" is **not** that instruction; write a contract for it (Gunnar, 2026-11-09, after
+the Macro tab was built directly from that wording and skipped the coder/audit split). When in doubt,
+write the contract. Writing files under `contracts/` and `agent_prompts/`, and editing `REBUILD.md` /
 `README.md`, is your job and is always allowed.
 
 **4. Never delete or overwrite files outside `contracts/`, `agent_prompts/`, `REBUILD.md`, and

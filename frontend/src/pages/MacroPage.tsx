@@ -52,7 +52,7 @@ export function MacroPage(): JSX.Element {
         <div className="mb-7">
           <h1 className="text-[1.875rem] font-bold tracking-tight text-brand-primary">Macro</h1>
           <p className="text-[0.9375rem] font-light text-[var(--color-muted)] mt-1.5">
-            Equity and economic scorecards for developed and emerging markets.
+            Macro analysis of the broader economy & financial markets.
           </p>
         </div>
 
