@@ -5,6 +5,7 @@ import type { MacroScorecardResponse } from '../api/client'
 import { MacroFundamentals } from '../components/MacroFundamentals'
 import { MacroQuadrant } from '../components/MacroQuadrant'
 import { MacroScorecard } from '../components/MacroScorecard'
+import { cachedLoader } from '../lib/macroStore'
 import '../styles/macro.css'
 
 type State =
@@ -13,6 +14,10 @@ type State =
   | { status: 'ready'; data: MacroScorecardResponse }
 
 type Tab = 'equity' | 'econ'
+
+// One fetch per page load. Coming back to the tab reuses it, and a reload asks the server, which
+// answers 304 when the snapshot is unchanged.
+const loadMacroScorecard = cachedLoader(getMacroScorecard)
 
 /** The scorecard project's Market Scorecards page (scorecard.html), rendered natively: a
  * Developed / Emerging switch, then the equity scorecard with its macro-vs-market quadrant and
@@ -23,7 +28,7 @@ export function MacroPage(): JSX.Element {
   const [tab, setTab] = useState<Tab>('equity')
 
   useEffect(() => {
-    getMacroScorecard()
+    loadMacroScorecard()
       .then((data) => setState({ status: 'ready', data }))
       .catch((err: unknown) => {
         setState({

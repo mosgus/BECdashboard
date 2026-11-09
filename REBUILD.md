@@ -2114,8 +2114,22 @@ risk-free rate to the 3-month T-bill and limits portfolios to holdable tickers.
     - The page uses the app's fonts, with no Google Fonts import.
     - There is no logo or affiliation block inside the scorecard cards.
     - Flags are files in `public/flags/`, not base64.
+  - **Data refresh goes through uploads (Gunnar, 2026-11-09).** This replaces the hand-built snapshot. The plan, in order:
+    - **0190:** ETag and in-memory caching.
+    - **Upload slots:** one per input file, with a parser that rejects a malformed file at upload time.
+    - **Port the calculations:** `econ_scorecard.py` and `scorecard.py` move into `backend/app`, tested against the 2026-11-09 outputs. **Keep the scorecard project until this step is done.**
+    - **Rebuild and publish:** a background job writes the snapshot into a database table. The table arrives with the contract that first writes to it.
+    - **Price download.**
+    
+    Gunnar's decisions:
+    - **Who can upload:** anyone, with no server-side auth. He accepts the risk. Every upload is signed off with a typed name, and the note reads "X uploaded this data on dd/mm/yy". A typed name is attribution, not identity.
+    - **Cooldown:** 1–3 days between uploads. Per slot or global, and the exact length, are still open (see below).
+    - **Constituent prices:** a slow background yfinance download, option (b). It starts **only** from a button, which then can't be pressed again for 1–3 days.
+    - **Where:** an "Upload data" button at the top of the Macro page opens a dialog. It has one row per required file, each with its own upload button, plus one row with the price-download button. Each row shows who signed off and when.
   - **Still open, deliberately:**
-    - How the data should be aggregated: a scheduled backend build, vendor feeds, or an upload.
+    - ~~**Cooldown vs. fixing a bad upload.**~~ **Decided (Gunnar, 2026-11-09): version history plus a signed revert.** Every slot keeps its previous versions. "Revert to previous" is signed with a name like an upload and logged as "Y reverted …". **Revert is never blocked by a cooldown.** A cooldown that locks bad data in place was rejected. Exempting "your own" re-upload was not chosen, because a typed name can't prove who you are. Still open: the cooldown length for new uploads (planner suggests 24 h per slot) and how many versions to keep (planner suggests 5).
+    - **Data date vs. upload date.** The planner recommends each row also show the latest date inside the file ("data through"), with freshness judged against each slot's expected cadence: weekly for CY1/CY2, monthly for Bloomberg and PMIs, about quarterly for the holdings files.
+    - **The price download must survive a restart.** A Render deploy kills a long-running job, so the download needs per-ticker progress in the database and has to resume where it stopped. The cooldown should start when the download completes, not when it starts, so a failed run can be retried.
     - **Licensing:** the snapshot is FactSet / Bloomberg / S&P Global-derived data. The scorecard README says to keep it out of public repos and behind a login. The site has no login; the page only sets `noindex`.
 
 ## Open questions (not decided)
