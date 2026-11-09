@@ -8,6 +8,7 @@ import { OutlookPage } from './pages/analysis/OutlookPage'
 import { ResearchPage } from './pages/analysis/ResearchPage'
 import { RiskPage } from './pages/analysis/RiskPage'
 import { LaunchPage } from './pages/LaunchPage'
+import { MacroPage } from './pages/MacroPage'
 import { OpsPage } from './pages/OpsPage'
 import { PortfoliosPage } from './pages/PortfoliosPage'
 import { TickerPage } from './pages/TickerPage'
@@ -22,6 +23,7 @@ export default function App() {
         <Route path="/" element={<LaunchPage />} />
         <Route path="/universe" element={<UniversePage />} />
         <Route path="/ticker/:symbol" element={<TickerPage />} />
+        <Route path="/macro" element={<MacroPage />} />
         <Route path="/ops" element={<OpsPage />} />
         <Route path="/portfolios" element={<PortfoliosPage />} />
         <Route path="/portfolios/:portfolioId" element={<AnalysisLayout />}>

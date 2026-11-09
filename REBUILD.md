@@ -2103,6 +2103,19 @@ risk-free rate to the 3-month T-bill and limits portfolios to holdable tickers.
   - **Historical means, not `main`'s CAPM returns,** so the Max Sharpe dot lands on the curve.
   - **Fitted holdings only.** Pinned holdings are listed as excluded.
   - **Dropped from `main`:** the Risk Parity dot. The random-portfolio cloud was dropped at first, then restored in 0148 Rework 1, because Gunnar found the chart unreadable without it. It is now sampled inside the run's limits, so it is no longer misleading under bounds.
+- **The Macro tab (`/macro`) is the scorecard project's `scorecard.html`, ported to React over a static JSON snapshot** (Gunnar, 2026-11-09: "just want this deployed quickly"; written by the planner on his explicit request, no contract).
+  - **Source:** `reference files/new integration/Scorecard_Project_2026-11-09`, a separate Python project. It reads FactSet / Bloomberg / S&P Global exports and Yahoo constituent prices, and builds a self-contained `scorecard.html`.
+  - **Data:** `backend/hard_data/macro_scorecard.json`, about 1.1 MB. `backend/hard_data/build_macro_scorecard.py` lifts it out of the built `scorecard.html` (grids with their tooltips, quadrant points, `CHART_DATA`). **It recomputes nothing.** Refreshing means rebuilding in the scorecard project, then rerunning that script. Gunnar accepts this as not production-quality storage.
+  - **Route:** `GET /macro/scorecard` (`app/routers/macro.py`) returns the file's bytes verbatim, cached in process. If the file is missing it returns 503.
+  - **Frontend:** `pages/MacroPage.tsx`, `components/MacroScorecard.tsx` / `MacroQuadrant.tsx` / `MacroFundamentals.tsx`, and `lib/macroScorecard.ts`. The lib holds the pure ports of `CHARTS_JS` and of `_separate` / `_place_labels`. It is tested against the flag and label positions the Python build rendered. Styles are `styles/macro.css`, scoped under `.viz-root`.
+  - **Departures from the reference page:**
+    - Dark mode follows the app's `data-theme` only.
+    - The page uses the app's fonts, with no Google Fonts import.
+    - There is no logo or affiliation block inside the scorecard cards.
+    - Flags are files in `public/flags/`, not base64.
+  - **Still open, deliberately:**
+    - How the data should be aggregated: a scheduled backend build, vendor feeds, or an upload.
+    - **Licensing:** the snapshot is FactSet / Bloomberg / S&P Global-derived data. The scorecard README says to keep it out of public repos and behind a login. The site has no login; the page only sets `noindex`.
 
 ## Open questions (not decided)
 

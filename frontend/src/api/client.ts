@@ -813,3 +813,88 @@ export async function getSweepStatus(): Promise<SweepStatus> {
 export async function getJobRuns(limit: number): Promise<JobRunsResponse> {
   return request<JobRunsResponse>(`/ops/job_runs?limit=${limit}`)
 }
+
+// ── Macro tab (static scorecard snapshot from backend/hard_data) ─────────────────────────────
+
+/** g / y / r = favorable / neutral / unfavorable; na = no data. */
+export type ScorecardColor = 'g' | 'y' | 'r' | 'na'
+
+export interface ScorecardCell {
+  color: ScorecardColor
+  /** Cell text as the scorecard prints it: '' for the color-only equity cells, '0.48*' on the econ grid. */
+  text: string
+  tip: string
+}
+
+export interface ScorecardRow {
+  label: string
+  /** The LEI Average row of the economic scorecard, set off with a rule above it. */
+  composite: boolean
+  cells: ScorecardCell[]
+}
+
+export interface Scorecard {
+  title: string
+  subtitle: string
+  headers: string[]
+  rows: ScorecardRow[]
+  note: string
+}
+
+export interface QuadrantPrev {
+  macro: number | null
+  market: number | null
+}
+
+export interface QuadrantPoint {
+  name: string
+  flag: string
+  macro: number
+  market: number
+  /** Keyed by comparison horizon: '1M', '3M'. */
+  prev: Record<string, QuadrantPrev>
+  pcts: Record<string, number | null>
+}
+
+export interface ChartRegion {
+  name: string
+  /** Series color slot, s1–s7, fixed by the market's position in its group. */
+  cls: string
+}
+
+export interface ChartSeries {
+  /** Days since 1970-01-01. */
+  t: number[]
+  v: number[]
+}
+
+export interface ChartMetric {
+  id: string
+  title: string
+  sub: string
+  decimals: number
+  suffix: string
+  rebase: boolean
+  baseline: number | null
+  monthly: boolean
+  signed: boolean
+  series: Record<string, ChartSeries>
+}
+
+export interface MacroGroup {
+  key: string
+  label: string
+  equity: Scorecard
+  econ: Scorecard
+  quadrant: QuadrantPoint[]
+  charts: { regions: ChartRegion[]; metrics: ChartMetric[] }
+}
+
+export interface MacroScorecardResponse {
+  generated_at: string
+  groups: MacroGroup[]
+}
+
+export async function getMacroScorecard(): Promise<MacroScorecardResponse> {
+  return request<MacroScorecardResponse>('/macro/scorecard')
+}

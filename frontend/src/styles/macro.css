@@ -1,0 +1,213 @@
+/*
+ * Macro tab — the scorecard project's page styles (charts.py CHARTS_CSS + QUAD_CSS, scorecard.py
+ * HTML_CSS), scoped under .viz-root so their generic class names (.card, .tip, .c, .g …) cannot
+ * reach the rest of the app. A plain stylesheet rather than Tailwind utilities to ship the port
+ * quickly and keep it diffable against the reference.
+ *
+ * Deliberate departures from the reference:
+ *   - dark mode follows the app's data-theme attribute only; the reference's
+ *     prefers-color-scheme blocks would turn this page dark while the app stays light.
+ *   - the app's fonts (Outfit / DM Sans) replace the reference's Google Fonts import.
+ *   - the scorecard cards (.sc) use the theme variables instead of hardcoded white, so they
+ *     follow dark mode; the green / yellow / red cell colors are unchanged.
+ */
+
+.viz-root {
+  --surface: #ffffff;
+  --ink: #012169;
+  --ink2: #52514e;
+  --muted: #6b7280;
+  --grid: #e4e7ec;
+  --axis: #c3c2b7;
+  --border: rgba(11, 11, 11, 0.1);
+  --gold: #f2a900;
+  --wash: rgba(1, 33, 105, 0.06);
+  --s1: #2a78d6;
+  --s2: #eb6834;
+  --s3: #1baf7a;
+  --s4: #eda100;
+  --s5: #e87ba4;
+  --s6: #008300;
+  --s7: #6250d6;
+  color: var(--ink);
+  font-family: var(--font-body);
+}
+
+:root[data-theme="dark"] .viz-root {
+  color-scheme: dark;
+  --surface: var(--color-surface);
+  --ink: #ffffff;
+  --ink2: #c3c2b7;
+  --muted: #8e9cbf;
+  --grid: rgba(255, 255, 255, 0.1);
+  --axis: rgba(255, 255, 255, 0.28);
+  --border: var(--color-border);
+  --wash: rgba(255, 255, 255, 0.08);
+  --s1: #3987e5;
+  --s2: #d95926;
+  --s3: #199e70;
+  --s4: #c98500;
+  --s5: #d55181;
+  --s6: #008300;
+  --s7: #9085e9;
+}
+
+.viz-root * { box-sizing: border-box; }
+.viz-root .card { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; }
+
+/* ── group / tab switches ─────────────────────────────────────────────────── */
+.viz-root .tabbar { display: flex; gap: 8px; margin: 0 0 12px; flex-wrap: wrap; }
+.viz-root .tabbar button {
+  font: 600 13px var(--font-body); color: var(--muted); background: var(--surface);
+  border: 1px solid var(--border); border-radius: 6px; padding: 8px 16px; cursor: pointer;
+}
+.viz-root .tabbar button:hover { color: var(--ink); }
+.viz-root .tabbar button[aria-pressed="true"] { background: #012169; color: #ffffff; border-color: #012169; }
+.viz-root .tabbar.groupbar { margin-bottom: 8px; }
+.viz-root .tabbar.groupbar button { font-size: 14px; padding: 10px 20px; }
+.viz-root .tabbar.groupbar button[aria-pressed="true"] { background: var(--gold); color: #012169; border-color: var(--gold); }
+
+/* ── scorecard grids ──────────────────────────────────────────────────────── */
+.viz-root .sc {
+  background: var(--surface); color: var(--ink); padding: 26px 30px 22px;
+  border: 1px solid var(--border); border-radius: 6px;
+}
+.viz-root .sc .top { padding-bottom: 18px; border-bottom: 3px solid var(--gold); }
+.viz-root .sc h2 { margin: 0 0 6px; font-family: var(--font-heading); font-size: 21px; font-weight: 700; color: var(--ink); }
+.viz-root .sc .sub {
+  font-family: var(--font-heading); font-size: 11px; font-weight: 600; letter-spacing: 0.14em;
+  text-transform: uppercase; color: var(--muted);
+}
+.viz-root .sc .scroll { overflow-x: auto; margin-top: 24px; }
+.viz-root .sc .grid { display: grid; gap: 6px; }
+.viz-root .sc .hd {
+  background: #012169; color: #ffffff; font-family: var(--font-heading); font-weight: 600; font-size: 13.5px;
+  text-align: center; display: flex; align-items: center; justify-content: center; padding: 14px 6px;
+  min-height: 84px; line-height: 1.25; border-radius: 3px; white-space: pre-line;
+}
+.viz-root .sc .lb {
+  color: var(--ink); font-weight: 700; font-size: 16.5px; display: flex; align-items: center;
+  border-bottom: 1px solid var(--grid); padding-left: 2px;
+}
+.viz-root .sc .c {
+  display: flex; align-items: center; justify-content: center; min-height: 62px; font-size: 16px;
+  font-weight: 600; font-variant-numeric: tabular-nums; cursor: default; border-radius: 3px;
+}
+.viz-root .sc .c.cp { font-weight: 700; }
+.viz-root .sc .g { background: #0f7b4d; color: #ffffff; }
+.viz-root .sc .y { background: #f2a900; color: #012169; }
+.viz-root .sc .r { background: #c0152f; color: #ffffff; }
+.viz-root .sc .na { background: #d5dae1; color: #6b7280; font-size: 12.5px; font-weight: 600; }
+.viz-root .sc .c:hover { outline: 2px solid var(--ink); outline-offset: 1px; }
+.viz-root .sc .lg { display: flex; align-items: center; gap: 12px; margin: 30px 0 4px; flex-wrap: wrap; }
+.viz-root .sc .lg b { font-size: 13px; color: var(--ink); margin-right: 4px; }
+.viz-root .sc .lg span { width: 140px; text-align: center; font-weight: 600; font-size: 12.5px; padding: 6px 0; border-radius: 3px; }
+.viz-root .sc .grid.econ .lb.cp,
+.viz-root .sc .grid.econ .c.cp { border-top: 2px solid var(--ink); margin-top: 6px; padding-top: 10px; }
+.viz-root .sc .foot { margin-top: 16px; font-size: 11px; line-height: 1.5; color: var(--muted); }
+
+/* ── section headers, filters, legends ────────────────────────────────────── */
+.viz-root .sect { margin: 38px 4px 16px; padding-left: 12px; border-left: 3px solid var(--gold); }
+.viz-root .sect h2 { margin: 0 0 4px; font-family: var(--font-heading); font-size: 19px; font-weight: 700; color: var(--ink); }
+.viz-root .sect p { margin: 2px 0 0; font-size: 12px; line-height: 1.45; color: var(--muted); max-width: 760px; }
+.viz-root .filters { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; margin: 0 0 14px; }
+.viz-root .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; background: var(--surface); }
+.viz-root .seg button {
+  font: inherit; font-size: 13px; font-weight: 600; color: var(--ink2); background: transparent;
+  border: 0; padding: 7px 14px; cursor: pointer;
+}
+.viz-root .seg button + button { border-left: 1px solid var(--border); }
+.viz-root .seg button:hover { background: var(--wash); }
+.viz-root .seg button[aria-pressed="true"] { background: var(--ink); color: var(--surface); }
+.viz-root .seg button:focus-visible { outline: 2px solid var(--s1); outline-offset: -2px; }
+.viz-root .legend { display: flex; gap: 6px 14px; align-items: center; flex-wrap: wrap; margin-left: auto; font-size: 13px; color: var(--ink); }
+.viz-root .legend button {
+  font: inherit; color: var(--ink); background: transparent; border: 0; border-radius: 4px; padding: 3px 4px;
+  display: inline-flex; align-items: center; gap: 7px; cursor: pointer;
+}
+.viz-root .legend button:hover { background: var(--wash); }
+.viz-root .legend button[aria-pressed="false"] { opacity: 0.38; }
+.viz-root .legend button[aria-pressed="false"] i { background: var(--muted) !important; }
+.viz-root .legend button:focus-visible { outline: 2px solid var(--s1); outline-offset: 1px; }
+.viz-root .legend i { display: inline-block; width: 18px; height: 2px; border-radius: 2px; }
+.viz-root .legend .hint { font-size: 11.5px; color: var(--muted); }
+
+/* ── time-series panels ───────────────────────────────────────────────────── */
+.viz-root .cgrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+@media (max-width: 820px) {
+  .viz-root .cgrid { grid-template-columns: 1fr; }
+  .viz-root .legend { margin-left: 0; }
+}
+.viz-root .panel { padding: 18px 18px 10px; }
+.viz-root .panel h3 { margin: 0 0 3px; font-family: var(--font-heading); font-size: 15px; font-weight: 700; color: var(--ink); }
+.viz-root .panel .psub { margin: 0 0 6px; font-size: 12px; color: var(--muted); line-height: 1.35; min-height: 32px; }
+.viz-root .plot { position: relative; }
+.viz-root .plot svg { display: block; width: 100%; height: auto; overflow: visible; touch-action: pan-y; }
+.viz-root .plot svg:focus-visible { outline: 2px solid var(--s1); outline-offset: 2px; border-radius: 4px; }
+.viz-root .gl { stroke: var(--grid); stroke-width: 1; }
+.viz-root .base { stroke: var(--axis); stroke-width: 1; }
+.viz-root .tk { fill: var(--muted); font-size: 11px; }
+.viz-root .ln { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.viz-root .s1 { --c: var(--s1); }
+.viz-root .s2 { --c: var(--s2); }
+.viz-root .s3 { --c: var(--s3); }
+.viz-root .s4 { --c: var(--s4); }
+.viz-root .s5 { --c: var(--s5); }
+.viz-root .s6 { --c: var(--s6); }
+.viz-root .s7 { --c: var(--s7); }
+.viz-root .ln,
+.viz-root .lead { stroke: var(--c); }
+.viz-root .dot { fill: var(--c); stroke: var(--surface); stroke-width: 2; }
+.viz-root .lead { fill: none; stroke-width: 1; }
+.viz-root .lab { fill: var(--ink); font-size: 11.5px; font-weight: 600; }
+.viz-root .xh { stroke: var(--axis); stroke-width: 1; }
+
+/* ── hover tooltips (time series and quadrant) ────────────────────────────── */
+.viz-root .tip {
+  position: absolute; pointer-events: none; background: var(--surface); border: 1px solid var(--border);
+  border-radius: 6px; padding: 9px 11px; box-shadow: 0 4px 14px rgba(1, 33, 105, 0.14); font-size: 12px;
+  min-width: 150px; z-index: 3;
+}
+.viz-root .tip .d { color: var(--ink2); margin-bottom: 6px; font-weight: 500; }
+.viz-root .tip .r { display: flex; align-items: center; gap: 8px; margin-top: 3px; white-space: nowrap; }
+.viz-root .tip .k { width: 12px; height: 2px; border-radius: 2px; background: var(--c); flex: none; }
+.viz-root .tip .v { font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums; }
+.viz-root .tip .n { color: var(--ink2); }
+.viz-root .tip .x { color: var(--muted); margin-left: auto; padding-left: 8px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.viz-root .tip .sm { color: var(--muted); font-size: 11px; margin-top: 6px; line-height: 1.4; white-space: normal; max-width: 220px; }
+
+/* ── table view ───────────────────────────────────────────────────────────── */
+.viz-root .tablecard { padding: 8px 0 0; }
+.viz-root .tscroll { max-height: 620px; overflow: auto; }
+.viz-root table.dt { border-collapse: separate; border-spacing: 0; width: 100%; font-size: 12.5px; }
+.viz-root table.dt th,
+.viz-root table.dt td { padding: 6px 12px; text-align: right; border-bottom: 1px solid var(--grid); white-space: nowrap; }
+.viz-root table.dt th { position: sticky; background: var(--surface); color: var(--ink); font-weight: 600; z-index: 1; }
+.viz-root table.dt tr.h1 th { top: 0; }
+.viz-root table.dt tr.h2 th { top: 33px; color: var(--ink2); font-weight: 500; }
+.viz-root table.dt th:first-child,
+.viz-root table.dt td:first-child { text-align: left; }
+.viz-root table.dt td { color: var(--ink); font-variant-numeric: tabular-nums; }
+.viz-root table.dt th.g,
+.viz-root table.dt td.g { border-left: 1px solid var(--grid); }
+
+/* ── macro vs. market quadrant ────────────────────────────────────────────── */
+.viz-root .qpanel { padding: 14px 16px 8px; }
+.viz-root .qaxis { fill: var(--ink2); font-size: 12px; font-weight: 600; }
+.viz-root .qlab { fill: var(--muted); font-size: 10.5px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; }
+.viz-root .qtrail { stroke: var(--axis); stroke-width: 1.5; fill: none; }
+.viz-root .qarrowhead { fill: none; stroke: var(--axis); stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.viz-root .qprev { fill: var(--surface); stroke: var(--muted); stroke-width: 1.5; }
+.viz-root .qctl { font-size: 12.5px; color: var(--muted); margin-right: -10px; }
+.viz-root .qhit { fill: transparent; }
+.viz-root .qring { fill: var(--surface); }
+.viz-root .qedge { fill: none; stroke: var(--border); stroke-width: 1; }
+.viz-root .qname { fill: var(--ink); font-size: 12px; font-weight: 600; }
+.viz-root .qpt { cursor: default; outline: none; }
+.viz-root .qpt:hover .qring,
+.viz-root .qpt:focus-visible .qring { stroke: var(--ink); stroke-width: 1.5; }
+.viz-root .legend.qkey { flex-shrink: 0; }
+.viz-root .qkey span { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; white-space: nowrap; }
+.viz-root .qkey b { display: inline-block; border-radius: 50%; }
+.viz-root .qkey .know { width: 14px; height: 14px; background: var(--ink); }
+.viz-root .qkey .kprev { width: 8px; height: 8px; border: 1.5px solid var(--muted); background: var(--surface); }
