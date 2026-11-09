@@ -2546,7 +2546,82 @@ contract plus a frontend contract where needed, as 0167/0168 were.
      Default 4 folds, Gunnar's choice; no BEC run. 0179 and 0180 accepted 2026-10-26. Possible follow-ups: the memo still quotes fold 1 only; skipped folds print redundant "not included" notes; with a pinned young holding, match current can still miss the floor.
    - Dropped: ADF, Ljung-Box and Jarque-Bera (they give the same answer on every equity series), plus the permutation
      null and the bootstrap CI (redundant with the range). The drawdown bootstrap is deferred.
-5. Overview, with the reworked score and a summary of the latest memo.
+5. Overview, with the reworked score and a summary of the latest memo. Contracted 2026-11-08 as
+   0182 (`lib/score.ts`, Haiku), 0183 (Overview pill, now first and the default) and 0184 (PDF report).
+   All three were accepted 2026-11-08. Follow-up 0185 fixed paragraph wrap width (`paragraph()`
+   measured with the previous font) and memo sub-headings, and ran prettier. It was accepted
+   2026-11-08 after a render check. Prettier cannot run in
+   the coder sandbox (`ENOTCACHED`).
+   - **PDF audits render the pages:** `swift contracts/tools/pdf-render.swift <pdf> <dir>` draws them
+     to PNG via PDFKit. The wrap bug passed every text-based criterion.
+   - Baselines after 0186: frontend 454 tests in 32 files; lint 2 known warnings.
+7. **Overview gets `main`'s look (Gunnar, 2026-11-08), as contract 0186, accepted 2026-11-08:**
+   - a coloured score ring;
+   - breakdown bars filled to each sub-score;
+   - six metric tiles;
+   - a Key risks card (reusing `deriveRedFlags`).
+   - **Colour reverses 0183's "no colour bands" at Gunnar's request.** The thresholds are `main`'s:
+     0.7 and 0.45 of the total or of a component. They are as arbitrary as the weights.
+   - **He asked for `main`'s scored metrics (Validation, Concentration, Performance, Drawdown). They
+     are shown as unscored tiles instead, and the score is unchanged.** `main`'s own screenshot
+     scored `Sharpe=0.00` and `Max DD=-100.0%` while its tiles showed −0.52 and −21.52%: the score ran
+     on a broken series. Validation was dropped on 2026-10-26 and has no backend. HHI is already
+     scored, as effective holdings.
+   - Revisit only if Gunnar explicitly wants the score's formula changed.
+   - **Tone colours are for graphics only (ring border and tint, bar fills), never for text.** The
+     first 0186 run correctly blocked on this. Gold `#F2A900` text on its own 10% tint is 1.87:1, and
+     light-mode green is 2.96:1. Text stays `text-foreground` or muted (5.7:1 or better). This applies
+     to any future tone-coloured UI.
+8. **Score guide (Gunnar, 2026-11-08), as contract 0187:**
+   - a Help button opens a `GuidePanel` explaining each component;
+   - the score card is compacted (`self-start`);
+   - the risk-concentration text now says "drives X% of portfolio volatility". It used to say "of the
+     risk", and Gunnar couldn't tell which risk.
+   - **Known overlap, not changed:** diversification and risk concentration both measure
+     concentration (60 of 100 points). One dominant holding, like BEC's MS, costs points on both.
+     Accepted in the 2026-11-08 table. Revisit if Gunnar finds the double penalty unfair.
+9. **PDF gets the ring, the bars and the guide (Gunnar, 2026-11-08), as contract 0188, after 0187:**
+   - The score table is replaced by a tone-coloured ring and bars, via a pure `pdfScoreVisual`.
+   - The guide is appended as the last section, **printed from `SCORE_GUIDE`, never retyped**.
+     That's why 0187's guide text avoids `→`, which the PDF sanitizer turns into "to".
+   - The thresholds come from `scoreTone`, shared with the page.
+   - 0187 and 0188 were accepted 2026-11-08. The planner's render found stranded headings and table
+     headers, crowded score rows, and an overlapping "Not scored" line, so follow-up 0189 (Haiku) fixes
+     the PDF layout. It was accepted 2026-11-08 after a render of the full and all-null fixtures. Baselines: frontend 462 tests in 33 files.
+6. **PDF report (Gunnar, 2026-11-08):** a one-click download from Overview, with more content than
+   `main`'s tear sheet, and more sections will follow. Decided in 0184:
+   - **Not `main`'s html2canvas method.** It produced a bitmap, which can't be searched and sliced
+     lines at page breaks. html2canvas 1.4 also can't parse Tailwind v4's `oklch()` colours.
+   - **Instead, `jspdf` plus `jspdf-autotable`** (frontend `package.json` only, never
+     `requirements.txt`), with text drawn directly and lazy-loaded on click.
+   - **The builder is a `REPORT_SECTIONS` array**, so a new section is one function plus one entry.
+   - **The report renders only data the Overview already holds.** `main` re-fetched with its own
+     lookback and could disagree with its page.
+   - **Every string passes `toPdfText`.** The planner verified that one non-WinAnsi character
+     (`→`, `★`, `−`) re-encodes the whole line as two-byte garbage, and that this leaves NUL bytes in
+     the output. The tests assert that there are none.
+
+**Score components decided 2026-11-08 (Gunnar approved the table).** This replaces the 2026-10-26
+plan's "holdout Sharpe". The walk-forward probe (0179) showed that holdout Sharpe ranks don't persist
+from year to year, and an absolute Sharpe grades the market's year, not the portfolio. The rule is to
+**score only what persists, plus one test relative to equal weight**:
+| Component | Input | 0–1 mapping | Points |
+|---|---|---|---|
+| Diversification | `effective_holdings` (`/risk`) | `min(N_eff / 20, 1)` | 35 |
+| Risk concentration | largest `risk_share` (`/risk`) | 1 at ≤10%, 0 at ≥50%, linear | 25 |
+| Volatility vs market | portfolio vol ÷ SPY vol (`/performance`, same days) | 1 at ≤1.0×, 0 at ≥2.0×, linear | 20 |
+| Holdout robustness | years current beat equal weight, X/N (`/compare` folds, via `walkForward`) | X/N | 20 |
+
+- There is no partial score. If any input is missing, the result is "Not scored" plus the list of
+  missing components.
+- No colour bands and no GO/NO-GO: the memo owns the recommendation.
+- Every component shows its measured value and its window.
+- Weaknesses accepted knowingly:
+  - the weights have no empirical basis, and can't have one, because there is no outcome to fit;
+  - the volatility row encodes "less volatile than the market is better";
+  - with 4 folds, robustness moves in steps of 5 points;
+  - a concentrated conviction portfolio like BEC (N_eff ≈ 5) lands in the 30s–40s by design.
+    `DIVERSIFICATION_FULL = 20` is the anchor to revisit if that reads wrong.
 
 **Before writing each contract:**
 - Read the `main` page and its backend with `git show main:<path>`.
