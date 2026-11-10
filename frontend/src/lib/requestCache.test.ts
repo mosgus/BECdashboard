@@ -161,4 +161,20 @@ describe('memoizeRequest', () => {
     expect(await p3).toBe('fresh')
     expect(fetcher).toHaveBeenCalledTimes(2)
   })
+
+  it('i. call, clear, then call again calls fetcher twice', async () => {
+    let t = 0
+    const fetcher = vi.fn().mockResolvedValue('result')
+    const call = memoizeRequest(fetcher, {
+      ttlMs: 10000,
+      maxEntries: 10,
+      now: () => t,
+    })
+
+    await call({ a: 1 })
+    call.clear()
+    await call({ a: 1 })
+
+    expect(fetcher).toHaveBeenCalledTimes(2)
+  })
 })

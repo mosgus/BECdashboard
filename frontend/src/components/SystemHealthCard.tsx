@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { JSX, ReactNode } from 'react'
 import { ApiError, forceUniverseRefresh, getOpsStatus } from '../api/client'
 import type { OpsStatus } from '../api/client'
+import { clearSharedRequests } from '../lib/sharedRequests'
 import { relativeTime } from '../lib/relativeTime'
 import { watchSweep } from '../lib/sweepWatch'
 import { Tooltip } from './Tooltip'
@@ -75,6 +76,7 @@ export function SystemHealthCard({ onSweepFinished }: { onSweepFinished?: () => 
       isActive: (status) => status.universe.sweep_active,
       onUpdate: (data) => setState({ status: 'ready', data }),
       onFinished: () => {
+        clearSharedRequests()
         setWatching(false)
         onSweepFinished?.()
       },

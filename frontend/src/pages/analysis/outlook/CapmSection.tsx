@@ -1,8 +1,9 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import type { JSX, ReactNode } from 'react'
 import { useParams } from 'react-router-dom'
-import { capmPortfolio, getUniverse } from '../../../api/client'
+import { capmPortfolio } from '../../../api/client'
 import type { CapmResponse } from '../../../api/client'
+import { cachedUniverse } from '../../../lib/sharedRequests'
 import { CapmGuide } from './CapmGuide'
 import { HelpButton } from '../../../components/GuidePanel'
 import { ExpandableChart } from '../../../components/ExpandableChart'
@@ -119,7 +120,7 @@ export function CapmSection(): JSX.Element | null {
   }, [])
   useEffect(() => {
     let cancelled = false
-    void getUniverse()
+    void cachedUniverse()
       .then((entries) => {
         if (!cancelled)
           setUniverse({

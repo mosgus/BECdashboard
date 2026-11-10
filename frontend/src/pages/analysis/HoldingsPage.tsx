@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 import type { JSX } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { getReturns, getSignals, getUniverse } from '../../api/client'
 import type { TickerReturns, TickerSignals, UniverseEntry } from '../../api/client'
+import { cachedGetReturns, cachedGetSignals, cachedUniverse } from '../../lib/sharedRequests'
 import { SignalBadge } from '../../components/SignalBadge'
 import { PortfolioCharts } from '../../components/PortfolioCharts'
 import { Tooltip } from '../../components/Tooltip'
@@ -50,7 +50,7 @@ export function HoldingsPage(): JSX.Element {
     let cancelled = false
     const tickers = tickerKey === '' ? [] : tickerKey.split(',')
 
-    void getUniverse()
+    void cachedUniverse()
       .then((entries) => {
         if (!cancelled) setUniverse({ status: 'ready', data: entries })
       })
@@ -58,7 +58,7 @@ export function HoldingsPage(): JSX.Element {
         if (!cancelled) setUniverse({ status: 'error' })
       })
 
-    void getReturns(tickers)
+    void cachedGetReturns(tickers)
       .then((response) => {
         if (!cancelled) setReturns({ status: 'ready', data: response.returns })
       })
@@ -66,7 +66,7 @@ export function HoldingsPage(): JSX.Element {
         if (!cancelled) setReturns({ status: 'error' })
       })
 
-    void getSignals(tickers)
+    void cachedGetSignals(tickers)
       .then((response) => {
         if (!cancelled) setSignals({ status: 'ready', data: response.signals })
       })

@@ -8,7 +8,7 @@ import {
   cachedPerformancePortfolio,
   cachedRiskPortfolio,
   cachedUniverse,
-} from '../../../lib/researchRequests'
+} from '../../../lib/sharedRequests'
 import { HelpButton } from '../../../components/GuidePanel'
 import { Tooltip } from '../../../components/Tooltip'
 import { downloadBlob } from '../../../lib/download'

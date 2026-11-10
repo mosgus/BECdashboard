@@ -21,6 +21,17 @@ from curl_cffi import requests as curl_requests
 
 
 @pytest.fixture(autouse=True)
+def clear_price_caches():
+    """Many API tests seed price_bars directly (not through store()) and reuse tickers like AAA
+    with different prices. A module-level cache would carry one test's prices into the next."""
+    from app import cache
+
+    cache.clear()
+    yield
+    cache.clear()
+
+
+@pytest.fixture(autouse=True)
 def isolate_from_ambient_database(monkeypatch):
     """Remove DATABASE_URL for every test, before the test body runs.
 

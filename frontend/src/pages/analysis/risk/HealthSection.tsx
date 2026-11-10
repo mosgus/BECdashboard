@@ -1,8 +1,8 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import type { JSX } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { getUniverse, riskPortfolio } from '../../../api/client'
 import type { RiskRequest, RiskResponse } from '../../../api/client'
+import { cachedRiskPortfolio, cachedUniverse } from '../../../lib/sharedRequests'
 import { LookbackPicker } from '../../../components/LookbackPicker'
 import { Tooltip } from '../../../components/Tooltip'
 import { healthCards, healthChartData, healthRows, mitigations } from '../../../lib/health'
@@ -44,7 +44,7 @@ export function HealthSection(): JSX.Element | null {
 
   useEffect(() => {
     let cancelled = false
-    void getUniverse()
+    void cachedUniverse()
       .then((entries) => {
         if (!cancelled)
           setUniverse({ status: 'ready', lastClose: new Map(entries.map((entry) => [entry.ticker, entry.last_close])) })
@@ -66,7 +66,7 @@ export function HealthSection(): JSX.Element | null {
       return
     }
     setRun({ status: 'running' })
-    void riskPortfolio(built.request)
+    void cachedRiskPortfolio(built.request)
       .then((response) => {
         if (mountedRef.current) setRun({ status: 'ready', response, request: built.request, basis })
       })

@@ -1,8 +1,9 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import type { JSX } from 'react'
 import { useParams } from 'react-router-dom'
-import { getUniverse, riskPortfolio, stressPortfolio } from '../../../api/client'
+import { stressPortfolio } from '../../../api/client'
 import type { RiskRequest, RiskResponse } from '../../../api/client'
+import { cachedRiskPortfolio, cachedUniverse } from '../../../lib/sharedRequests'
 import { HelpButton } from '../../../components/GuidePanel'
 import { Tooltip } from '../../../components/Tooltip'
 import { tradeBasis } from '../../../lib/optimize'
@@ -58,7 +59,7 @@ export function ScenariosSection(): JSX.Element | null {
 
   useEffect(() => {
     let cancelled = false
-    void getUniverse()
+    void cachedUniverse()
       .then((entries) => {
         if (!cancelled)
           setUniverse({ status: 'ready', lastClose: new Map(entries.map((entry) => [entry.ticker, entry.last_close])) })
@@ -109,7 +110,7 @@ export function ScenariosSection(): JSX.Element | null {
     const cached = riskCache.current
     if (cached !== null && sameRiskRequest(cached.request, built.request)) return append(make(cached.response))
     setRun({ status: 'running' })
-    void riskPortfolio(built.request)
+    void cachedRiskPortfolio(built.request)
       .then((response) => {
         riskCache.current = { request: built.request, response }
         append(make(response))

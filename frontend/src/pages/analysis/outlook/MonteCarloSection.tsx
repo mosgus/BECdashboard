@@ -1,8 +1,9 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import type { JSX, ReactNode } from 'react'
 import { useParams } from 'react-router-dom'
-import { getUniverse, monteCarloPortfolio } from '../../../api/client'
+import { monteCarloPortfolio } from '../../../api/client'
 import type { MonteCarloRequest, MonteCarloResponse } from '../../../api/client'
+import { cachedUniverse } from '../../../lib/sharedRequests'
 import { DownloadIcon } from '../../../components/DownloadIcon'
 import { ExpandableChart } from '../../../components/ExpandableChart'
 import { HelpButton } from '../../../components/GuidePanel'
@@ -61,7 +62,7 @@ export function MonteCarloSection(): JSX.Element | null {
   }, [])
   useEffect(() => {
     let cancelled = false
-    void getUniverse()
+    void cachedUniverse()
       .then((entries) => {
         if (!cancelled)
           setUniverse({ status: 'ready', lastClose: new Map(entries.map((entry) => [entry.ticker, entry.last_close])) })

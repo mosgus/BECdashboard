@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { JSX } from 'react'
 import { useParams } from 'react-router-dom'
-import { attributionPortfolio, getUniverse } from '../../../api/client'
 import type { AttributionRequest, AttributionResponse } from '../../../api/client'
+import { cachedAttributionPortfolio, cachedUniverse } from '../../../lib/sharedRequests'
 import { Tooltip } from '../../../components/Tooltip'
 import {
   attributionFootnote,
@@ -47,7 +47,7 @@ export function AttributionSection(): JSX.Element | null {
 
   useEffect(() => {
     let cancelled = false
-    void getUniverse()
+    void cachedUniverse()
       .then((entries) => {
         if (!cancelled)
           setUniverse({ status: 'ready', lastClose: new Map(entries.map((entry) => [entry.ticker, entry.last_close])) })
@@ -69,7 +69,7 @@ export function AttributionSection(): JSX.Element | null {
       return
     }
     setRun({ status: 'running' })
-    void attributionPortfolio(built.request)
+    void cachedAttributionPortfolio(built.request)
       .then((response) => {
         if (mountedRef.current) setRun({ status: 'ready', response, request: built.request, basis: nextBasis })
       })

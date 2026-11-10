@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+import threading
 
 import pandas as pd
 from cachetools import TTLCache
@@ -10,8 +11,45 @@ from app.db import is_enabled, session
 from app.models import PriceBar, TickerFundamentals, TickerQuote
 
 _cache = TTLCache(maxsize=512, ttl=86400)
+_closes_cache: TTLCache = TTLCache(maxsize=512, ttl=3600)
+# FastAPI runs sync endpoints in a thread pool; cachetools caches are not thread-safe.
+_closes_lock = threading.Lock()
 
 _OHLCV_COLUMNS = ("open", "high", "low", "close", "adj_close", "volume")
+
+
+def get_adj_closes(tickers: list[str]) -> dict[str, pd.Series]:
+    """Return adjusted closes per ticker, ascending by date, with null adj_close rows dropped,
+    as plain-date-indexed Series. Tickers with no stored bars are absent and absence is never
+    cached. Results are served from an in-process cache and returned as independent copies."""
+    requested = list(dict.fromkeys(tickers))
+    if not requested:
+        return {}
+
+    with _closes_lock:
+        found = {ticker: _closes_cache[ticker] for ticker in requested if ticker in _closes_cache}
+    misses = [ticker for ticker in requested if ticker not in found]
+
+    if misses:
+        with session() as db:
+            rows = db.execute(
+                select(PriceBar.ticker, PriceBar.date, PriceBar.adj_close)
+                .where(PriceBar.ticker.in_(misses), PriceBar.adj_close.is_not(None))
+                .order_by(PriceBar.ticker, PriceBar.date)
+            ).all()
+        bars: dict[str, list[tuple]] = {}
+        for ticker, bar_date, adj_close in rows:
+            bars.setdefault(ticker, []).append((bar_date, adj_close))
+        loaded = {
+            ticker: pd.Series([price for _, price in ticker_bars], index=[bar_date for bar_date, _ in ticker_bars])
+            for ticker, ticker_bars in bars.items()
+        }
+        with _closes_lock:
+            for ticker, series in loaded.items():
+                _closes_cache[ticker] = series
+                found[ticker] = series
+
+    return {ticker: found[ticker].copy() for ticker in requested if ticker in found}
 
 
 def get_cached(ticker: str) -> pd.DataFrame | None:
@@ -61,11 +99,16 @@ def store(ticker: str, df: pd.DataFrame) -> None:
     if is_enabled():
         _write_to_db(key, normalized)
 
+    with _closes_lock:
+        _closes_cache.pop(key, None)
+
 
 def clear() -> None:
-    """Drop all cached entries. Exists for tests; do not call from app code.
-    Clears only the in-process cache — never touches the database or fundamentals."""
+    """Drop both in-process caches. Exists for tests; do not call from app code.
+    Never touches the database or fundamentals."""
     _cache.clear()
+    with _closes_lock:
+        _closes_cache.clear()
 
 
 def evict(ticker: str) -> None:
@@ -75,6 +118,8 @@ def evict(ticker: str) -> None:
     silently resurrect the pre-deletion history: get_cached would still serve the old
     DataFrame from memory, is_stale would say False, and no fetch would ever happen."""
     _cache.pop(ticker.upper(), None)
+    with _closes_lock:
+        _closes_cache.pop(ticker.upper(), None)
 
 
 def store_fundamentals(ticker: str, data: dict, *, partial: bool = False) -> None:

@@ -6,7 +6,7 @@ import {
   cachedComparePortfolio,
   cachedRiskPortfolio,
   cachedUniverse,
-} from '../../../lib/researchRequests'
+} from '../../../lib/sharedRequests'
 import { Tooltip } from '../../../components/Tooltip'
 import { buildEvidence, deriveRedFlags, holdingsChanged, memoHoldings, RECOMMENDATIONS } from '../../../lib/memo'
 import type { DecisionMemo, FlagSeverity, Recommendation, RedFlag } from '../../../lib/memo'

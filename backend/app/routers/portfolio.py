@@ -6,9 +6,9 @@ from dataclasses import asdict
 
 import pandas as pd
 from fastapi import APIRouter, HTTPException
-from sqlalchemy import select
 
-from app.db import is_enabled, session
+from app.db import is_enabled
+from app.cache import get_adj_closes
 from app.capm_run import CapmInputError, HoldingConfig, run_capm
 from app.risk_run import RiskInputError, run_risk
 from app.attribution_run import AttributionInputError, run_attribution
@@ -16,7 +16,6 @@ from app.ff3 import load_factors
 from app.stress_run import StressInputError, run_stress
 from app.performance_run import PerformanceInputError, run_performance
 from app.indicators import CLOSE_ONLY_INDICATORS, indicator_series
-from app.models import PriceBar
 from app.montecarlo_run import MonteCarloInputError, run_monte_carlo
 from app.forecast_run import ForecastInputError, run_forecast
 from app.calibration_run import CalibrationInputError, run_calibration
@@ -42,24 +41,14 @@ def _require_database() -> None:
 
 
 def _load_stored_closes(tickers: list[str], *, required: bool = True) -> dict[str, pd.Series]:
-    """Load adjusted closes using the same query and missing-history behavior as /series."""
-    with session() as db:
-        rows = db.execute(
-            select(PriceBar.ticker, PriceBar.date, PriceBar.adj_close)
-            .where(PriceBar.ticker.in_(tickers), PriceBar.adj_close.is_not(None))
-            .order_by(PriceBar.ticker, PriceBar.date)
-        ).all()
-    bars: dict[str, list[tuple]] = {}
-    for ticker, bar_date, adj_close in rows:
-        bars.setdefault(ticker, []).append((bar_date, adj_close))
+    """Adjusted closes via app.cache.get_adj_closes (in-process, dropped on every bar write), with
+    the same missing-history behavior as /series."""
+    closes = get_adj_closes(tickers)
     if required:
         for ticker in tickers:
-            if ticker not in bars:
+            if ticker not in closes:
                 raise HTTPException(status_code=404, detail=f"No stored price history for {ticker}")
-    return {
-        ticker: pd.Series([price for _, price in ticker_bars], index=[bar_date for bar_date, _ in ticker_bars])
-        for ticker, ticker_bars in bars.items()
-    }
+    return closes
 
 
 def _normalise_request(tickers: list[str], weights: list[float]) -> tuple[list[str], list[float]]:

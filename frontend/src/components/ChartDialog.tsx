@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom'
 import { Area, AreaChart, ResponsiveContainer, Tooltip as RechartsTooltip, XAxis, YAxis } from 'recharts'
 import { ApiError, deleteTicker, getHistory } from '../api/client'
 import type { PriceBar, UniverseEntry } from '../api/client'
+import { clearSharedRequests } from '../lib/sharedRequests'
 import { formatPrice } from '../lib/format'
 import { typeLabel } from '../lib/tickerType'
 import { DEFAULT_RANGE, RANGE_KEYS, hasEnoughData, sliceRange, withLiveQuote } from '../lib/ranges'
@@ -133,6 +134,7 @@ export function ChartDialog({ ticker, entry, onClose, onDeleted }: ChartDialogPr
     setDeleteState({ status: 'deleting' })
     try {
       await deleteTicker(currentTicker)
+      clearSharedRequests()
       setConfirmOpen(false)
       setDeleteState({ status: 'idle' })
       onDeleted()

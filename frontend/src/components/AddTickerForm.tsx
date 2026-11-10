@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { FormEvent, JSX } from 'react'
 import { addTicker } from '../api/client'
+import { clearSharedRequests } from '../lib/sharedRequests'
 import { Tooltip } from './Tooltip'
 
 interface AddTickerFormProps {
@@ -23,6 +24,7 @@ export function AddTickerForm({ onAdded }: AddTickerFormProps): JSX.Element {
     setError(null)
     try {
       await addTicker(trimmed)
+      clearSharedRequests()
       setValue('')
       onAdded()
     } catch (err) {

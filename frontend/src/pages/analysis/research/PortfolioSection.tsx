@@ -5,7 +5,7 @@ import type { CompareRequest, CompareResponse } from '../../../api/client'
 import {
   cachedComparePortfolio,
   cachedUniverse,
-} from '../../../lib/researchRequests'
+} from '../../../lib/sharedRequests'
 import { CorrelationHeatmap } from '../../../components/CorrelationHeatmap'
 import { ExpandableChart } from '../../../components/ExpandableChart'
 import { LookbackPicker } from '../../../components/LookbackPicker'

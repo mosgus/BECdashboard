@@ -1,6 +1,6 @@
 # Contract 0190 — Macro scorecard: ETag revalidation and an in-memory cache
 
-**Status:** reported <!-- open | in-progress | reported | accepted | rejected | abandoned -->
+**Status:** accepted <!-- open | in-progress | reported | accepted | rejected | abandoned -->
 **Assigned to:** haiku <!-- haiku | sonnet -->
 **Author:** planner (opus)
 

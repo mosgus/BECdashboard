@@ -2138,6 +2138,16 @@ risk-free rate to the 3-month T-bill and limits portfolios to holdable tickers.
     - **1.4 s in `efficient_frontier`**, computed in every run but returned from only one. **0193** adds `include_frontier` / `optimized_point` to `run_optimize`.
   - **Proof the output doesn't change:** `contracts/tools/compare_reference.py`, with the reference recorded before 0192/0193. It checks three full `run_compare` results at relative 1e-6 / absolute 1e-9. It started at 1e-9, which was too tight: the target-volatility optimizer's input comes from `backtest_series`, so its weights can only be reproduced to about SLSQP's own 1e-9 (see `contracts/done/0192-backtest-series-numpy.report.md`).
   - **Shipped, accepted 2026-11-09.** Locally, per comparison: 2.66–3.13 s before, 0.35–0.40 s after (about 7×). Most of the gain is 0193.
+  - **Round 2, all portfolio tabs: contracts 0194 and 0195** (planner, 2026-11-09). Live measurements on a warm server:
+    - `/universe` took 1.3–1.8 s.
+    - `/portfolio/risk` took 0.3–1.1 s for 1 ticker, 1–2 s for 8, and 2.9–4.4 s for 16. That's about 0.2 s per ticker, spent reloading full price history from Postgres on every request.
+    - Overview's four concurrent requests took 21 s.
+    - A cold start took 52 s.
+    
+    The fixes:
+    - **0194** widens 0191's cache to every portfolio tab. It is cleared by a ticker add or delete, and when a forced refresh finishes.
+    - **0195** adds `app.cache.get_adj_closes`, an in-process closes cache. It stays exact because every bar write goes through `cache.store()`, deletes call `evict()`, and the service is one uvicorn process. A 1 h TTL covers writes from outside the server. Before issuing it, the planner prototyped it against the full suite (893 passed).
+  - **Hosting deferred (Gunnar, 2026-11-09)** until after the code work. The options are Render's paid plan (no sleep, ~5× the CPU) or an external `/health` ping (no sleep only). The free tier's sleep and 0.1 CPU are now the largest remaining costs.
   - **Rejected:** parallel folds (Render has a fraction of a CPU) and a server-side result cache (needs careful invalidation as prices update daily). Revisit only if these three aren't enough.
 
 ## Open questions (not decided)

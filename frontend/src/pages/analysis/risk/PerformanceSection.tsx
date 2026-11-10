@@ -1,8 +1,8 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import type { JSX } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { getSignals, getUniverse, performancePortfolio } from '../../../api/client'
 import type { PerformanceRequest, PerformanceResponse, TickerSignals } from '../../../api/client'
+import { cachedGetSignals, cachedPerformancePortfolio, cachedUniverse } from '../../../lib/sharedRequests'
 import { SignalBadge } from '../../../components/SignalBadge'
 import { Tooltip } from '../../../components/Tooltip'
 import { downloadTextFile } from '../../../lib/download'
@@ -59,7 +59,7 @@ export function PerformanceSection(): JSX.Element | null {
 
   useEffect(() => {
     let cancelled = false
-    void getUniverse()
+    void cachedUniverse()
       .then((entries) => {
         if (!cancelled)
           setUniverse({ status: 'ready', lastClose: new Map(entries.map((entry) => [entry.ticker, entry.last_close])) })
@@ -74,7 +74,7 @@ export function PerformanceSection(): JSX.Element | null {
 
   useEffect(() => {
     let cancelled = false
-    void getSignals(initialTickersRef.current)
+    void cachedGetSignals(initialTickersRef.current)
       .then((response) => {
         if (!cancelled) setSignals({ status: 'ready', signals: response.signals })
       })
@@ -96,7 +96,7 @@ export function PerformanceSection(): JSX.Element | null {
       return
     }
     setRun({ status: 'running' })
-    void performancePortfolio(request.request)
+    void cachedPerformancePortfolio(request.request)
       .then((response) => {
         if (mountedRef.current) setRun({ status: 'ready', response, request: request.request, basis: nextBasis })
       })

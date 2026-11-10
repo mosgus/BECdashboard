@@ -1,8 +1,9 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import type { JSX, ReactNode } from 'react'
 import { useParams } from 'react-router-dom'
-import { forecastPortfolio, getUniverse } from '../../../api/client'
+import { forecastPortfolio } from '../../../api/client'
 import type { ForecastRequest, ForecastResponse } from '../../../api/client'
+import { cachedUniverse } from '../../../lib/sharedRequests'
 import { DownloadIcon } from '../../../components/DownloadIcon'
 import { ExpandableChart } from '../../../components/ExpandableChart'
 import { HelpButton } from '../../../components/GuidePanel'
@@ -69,7 +70,7 @@ export function ForecastSection(): JSX.Element | null {
   }, [])
   useEffect(() => {
     let cancelled = false
-    void getUniverse()
+    void cachedUniverse()
       .then((entries) => {
         if (!cancelled)
           setUniverse({ status: 'ready', lastClose: new Map(entries.map((entry) => [entry.ticker, entry.last_close])) })

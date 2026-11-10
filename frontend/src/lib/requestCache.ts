@@ -7,15 +7,20 @@ export interface RequestCacheOptions {
   now?: () => number
 }
 
+export type CachedRequest<Req, Res> = ((request: Req) => Promise<Res>) & {
+  /** Drops every stored result, settled or pending. Pending callers still receive their result. */
+  clear: () => void
+}
+
 /** Wraps a request function so identical requests share one result. */
 export function memoizeRequest<Req, Res>(
   fetcher: (request: Req) => Promise<Res>,
   options: RequestCacheOptions,
-): (request: Req) => Promise<Res> {
+): CachedRequest<Req, Res> {
   const cache = new Map<string, { promise: Promise<Res>; createdAt: number }>()
   const now = options.now ?? (() => Date.now())
 
-  return (request: Req): Promise<Res> => {
+  const cachedFn = (request: Req): Promise<Res> => {
     const key = JSON.stringify(request) ?? ''
 
     // Check for cache hit
@@ -51,4 +56,10 @@ export function memoizeRequest<Req, Res>(
 
     return promise
   }
+
+  cachedFn.clear = () => {
+    cache.clear()
+  }
+
+  return cachedFn
 }
