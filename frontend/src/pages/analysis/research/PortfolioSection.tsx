@@ -1,8 +1,11 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import type { JSX } from 'react'
 import { useParams } from 'react-router-dom'
-import { comparePortfolio, getUniverse } from '../../../api/client'
 import type { CompareRequest, CompareResponse } from '../../../api/client'
+import {
+  cachedComparePortfolio,
+  cachedUniverse,
+} from '../../../lib/researchRequests'
 import { CorrelationHeatmap } from '../../../components/CorrelationHeatmap'
 import { ExpandableChart } from '../../../components/ExpandableChart'
 import { LookbackPicker } from '../../../components/LookbackPicker'
@@ -76,7 +79,7 @@ export function PortfolioSection(): JSX.Element | null {
 
   useEffect(() => {
     let cancelled = false
-    void getUniverse()
+    void cachedUniverse()
       .then((entries) => {
         if (!cancelled)
           setUniverse({ status: 'ready', lastClose: new Map(entries.map((entry) => [entry.ticker, entry.last_close])) })
@@ -98,7 +101,7 @@ export function PortfolioSection(): JSX.Element | null {
     const basis = tradeBasis(portfolio, universe.lastClose)
     const request = buildCompareRequest(portfolio, settings, basis)
     setRun({ status: 'running' })
-    void comparePortfolio(request)
+    void cachedComparePortfolio(request)
       .then((response) => {
         if (mountedRef.current) setRun({ status: 'ready', response, request, basis })
       })

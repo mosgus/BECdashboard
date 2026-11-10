@@ -2131,6 +2131,14 @@ risk-free rate to the 3-month T-bill and limits portfolios to holdable tickers.
     - **Data date vs. upload date.** The planner recommends each row also show the latest date inside the file ("data through"), with freshness judged against each slot's expected cadence: weekly for CY1/CY2, monthly for Bloomberg and PMIs, about quarterly for the holdings files.
     - **The price download must survive a restart.** A Render deploy kills a long-running job, so the download needs per-ticker progress in the database and has to resume where it stopped. The cooldown should start when the download completes, not when it starts, so a failed run can be retried.
     - **Licensing:** the snapshot is FactSet / Bloomberg / S&P Global-derived data. The scorecard README says to keep it out of public repos and behind a login. The site has no login; the page only sets `noindex`.
+- **Research tab speed: three fixes, contracts 0191–0193** (planner diagnosis, 2026-11-09). The slow "Computing the score…", "Comparing 8 optimizers…" and "Checking the portfolio…" messages all wait on the same `POST /portfolio/compare`.
+  - **Cause 1, the request is repeated.** Overview, Portfolio and Memo each sent it with the same `DEFAULT_COMPARE_SETTINGS`, on every mount, and Overview and Memo each sent their own risk request. **0191** shares results between those three sections: an in-memory cache keyed by the exact request, with a 10-minute TTL (`lib/requestCache.ts`, `lib/researchRequests.ts`). It deliberately doesn't cover the other tabs or the server.
+  - **Cause 2, each comparison is expensive.** It runs 40 `run_optimize` calls (8 modes × in-sample + 4 folds). On a 10-holding, 12-year synthetic portfolio it took 3.8 s locally:
+    - **1.7 s in `backtest_series`**, a per-day pandas row loop. **0192** rewrites it on numpy arrays, with the old loop kept in the tests as the equivalence oracle.
+    - **1.4 s in `efficient_frontier`**, computed in every run but returned from only one. **0193** adds `include_frontier` / `optimized_point` to `run_optimize`.
+  - **Proof the output doesn't change:** `contracts/tools/compare_reference.py`, with the reference recorded before 0192/0193. It checks three full `run_compare` results at relative 1e-6 / absolute 1e-9. It started at 1e-9, which was too tight: the target-volatility optimizer's input comes from `backtest_series`, so its weights can only be reproduced to about SLSQP's own 1e-9 (see `contracts/done/0192-backtest-series-numpy.report.md`).
+  - **Shipped, accepted 2026-11-09.** Locally, per comparison: 2.66–3.13 s before, 0.35–0.40 s after (about 7×). Most of the gain is 0193.
+  - **Rejected:** parallel folds (Render has a fraction of a CPU) and a server-side result cache (needs careful invalidation as prices update daily). Revisit only if these three aren't enough.
 
 ## Open questions (not decided)
 

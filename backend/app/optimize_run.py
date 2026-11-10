@@ -96,6 +96,7 @@ class OptimizeResult:
     rf: float
     warnings: list[str]
     frontier: FrontierResult | None
+    optimized_point: tuple[float, float] | None = None
 
 
 def run_optimize(
@@ -112,8 +113,13 @@ def run_optimize(
     max_short: float = 0.30,
     rebalance: Rebalance = "none",
     rf: float = 0.0427,
+    include_frontier: bool = True,
 ) -> OptimizeResult:
-    """Optimize full-history holdings, pin young ones, then score both allocations."""
+    """Optimize full-history holdings, pin young ones, then score both allocations.
+
+    When include_frontier is False, the frontier sweep, random cloud, and extra max-Sharpe solve
+    are skipped, and frontier is None. optimized_point is computed either way.
+    """
     if not weights:
         raise OptimizeInputError("weights is empty")
     if any(not math.isfinite(weight) or weight <= 0 for weight in weights.values()):
@@ -231,55 +237,58 @@ def run_optimize(
     }
     implied_trades = {ticker: float(target_weights[ticker] - current_weights[ticker]) for ticker in tickers}
 
+    mu = returns.mean().values * 252
+    cov = returns.cov().values * 252
+
+    def point(weights_array: np.ndarray) -> tuple[float, float]:
+        return (
+            float(np.sqrt(weights_array @ cov @ weights_array)),
+            float(weights_array @ mu),
+        )
+
+    current_fit = np.array([current_weights[ticker] for ticker in returns.columns])
+    current_fit /= current_fit.sum()
+    optimized_fit = np.array([fitted_weights[ticker] for ticker in returns.columns])
+    optimized_point = point(optimized_fit)
+
     frontier: FrontierResult | None = None
-    try:
-        points = efficient_frontier(
-            returns,
-            min_weight=min_w,
-            max_weight=max_fit,
-            max_short=sleeve_short,
-        )
-        if not points:
-            raise ValueError("efficient frontier has no feasible points")
-        cloud = [] if allow_short else random_portfolios(returns, min_weight=min_w, max_weight=max_fit)
-        mu = returns.mean().values * 252
-        cov = returns.cov().values * 252
-
-        def point(weights_array: np.ndarray) -> tuple[float, float]:
-            return (
-                float(np.sqrt(weights_array @ cov @ weights_array)),
-                float(weights_array @ mu),
+    if include_frontier:
+        try:
+            points = efficient_frontier(
+                returns,
+                min_weight=min_w,
+                max_weight=max_fit,
+                max_short=sleeve_short,
             )
-
-        current_fit = np.array([current_weights[ticker] for ticker in returns.columns])
-        current_fit /= current_fit.sum()
-        optimized_fit = np.array([fitted_weights[ticker] for ticker in returns.columns])
-        if mode == "max_sharpe":
-            max_sharpe = point(optimized_fit)
-        else:
-            try:
-                sharpe_weights = optimize_max_sharpe(
-                    returns,
-                    rf=rf,
-                    max_weight=max_fit,
-                    min_weight=min_w,
-                    max_short=sleeve_short,
-                )
-                max_sharpe = point(np.array([sharpe_weights[ticker] for ticker in returns.columns]))
-            except RuntimeError:
-                max_sharpe = None
-        frontier = FrontierResult(
-            points=points,
-            cloud=cloud,
-            current=point(current_fit),
-            optimized=point(optimized_fit),
-            min_variance=points[0],
-            max_sharpe=max_sharpe,
-            tickers=list(returns.columns),
-            excluded=pinned_tickers,
-        )
-    except (RuntimeError, ValueError):
-        warnings.append("The efficient frontier could not be computed for this run.")
+            if not points:
+                raise ValueError("efficient frontier has no feasible points")
+            cloud = [] if allow_short else random_portfolios(returns, min_weight=min_w, max_weight=max_fit)
+            if mode == "max_sharpe":
+                max_sharpe = point(optimized_fit)
+            else:
+                try:
+                    sharpe_weights = optimize_max_sharpe(
+                        returns,
+                        rf=rf,
+                        max_weight=max_fit,
+                        min_weight=min_w,
+                        max_short=sleeve_short,
+                    )
+                    max_sharpe = point(np.array([sharpe_weights[ticker] for ticker in returns.columns]))
+                except RuntimeError:
+                    max_sharpe = None
+            frontier = FrontierResult(
+                points=points,
+                cloud=cloud,
+                current=point(current_fit),
+                optimized=optimized_point,
+                min_variance=points[0],
+                max_sharpe=max_sharpe,
+                tickers=list(returns.columns),
+                excluded=pinned_tickers,
+            )
+        except (RuntimeError, ValueError):
+            warnings.append("The efficient frontier could not be computed for this run.")
 
     scored_closes = {
         ticker: closes[ticker].loc[(closes[ticker].index >= lookback_start) & (closes[ticker].index <= end)]
@@ -336,4 +345,5 @@ def run_optimize(
         rf=rf,
         warnings=warnings,
         frontier=frontier,
+        optimized_point=optimized_point,
     )

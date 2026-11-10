@@ -1,8 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { JSX } from 'react'
 import { useParams } from 'react-router-dom'
-import { comparePortfolio, getUniverse, riskPortfolio } from '../../../api/client'
 import type { CompareResponse, RiskResponse } from '../../../api/client'
+import {
+  cachedComparePortfolio,
+  cachedRiskPortfolio,
+  cachedUniverse,
+} from '../../../lib/researchRequests'
 import { Tooltip } from '../../../components/Tooltip'
 import { buildEvidence, deriveRedFlags, holdingsChanged, memoHoldings, RECOMMENDATIONS } from '../../../lib/memo'
 import type { DecisionMemo, FlagSeverity, Recommendation, RedFlag } from '../../../lib/memo'
@@ -74,7 +78,7 @@ export function MemoSection(): JSX.Element | null {
 
   useEffect(() => {
     let cancelled = false
-    void getUniverse()
+    void cachedUniverse()
       .then((entries) => {
         if (!cancelled)
           setUniverse({ status: 'ready', lastClose: new Map(entries.map((entry) => [entry.ticker, entry.last_close])) })
@@ -95,7 +99,7 @@ export function MemoSection(): JSX.Element | null {
     void (async () => {
       const built = buildRiskRequest(portfolio, DEFAULT_RISK_SETTINGS, basis)
       if (!built.ok) throw new Error(built.message)
-      return riskPortfolio(built.request)
+      return cachedRiskPortfolio(built.request)
     })()
       .then((response) => {
         if (mountedRef.current) setRisk({ status: 'ready', response })
@@ -105,7 +109,7 @@ export function MemoSection(): JSX.Element | null {
       })
 
     if (portfolio.positions.length < 2) return
-    void comparePortfolio(buildCompareRequest(portfolio, DEFAULT_COMPARE_SETTINGS, basis))
+    void cachedComparePortfolio(buildCompareRequest(portfolio, DEFAULT_COMPARE_SETTINGS, basis))
       .then((response) => {
         if (mountedRef.current) setCompare({ status: 'ready', response })
       })

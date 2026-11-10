@@ -233,3 +233,29 @@ def test_numeric_vol_target_is_reported():
     result = run_compare(W3, ABC, SPY, lookback_days=365, vol_target=0.10)
     assert result.vol_target == 0.10
     assert result.folds[0].vol_target == 0.10
+
+
+def test_frontier_computed_once(monkeypatch):
+    frontier_call_count = 0
+    random_call_count = 0
+
+    original_frontier = __import__("app.optimize_run", fromlist=["efficient_frontier"]).efficient_frontier
+    original_random = __import__("app.optimize_run", fromlist=["random_portfolios"]).random_portfolios
+
+    def counting_frontier(*args, **kwargs):
+        nonlocal frontier_call_count
+        frontier_call_count += 1
+        return original_frontier(*args, **kwargs)
+
+    def counting_random(*args, **kwargs):
+        nonlocal random_call_count
+        random_call_count += 1
+        return original_random(*args, **kwargs)
+
+    monkeypatch.setattr("app.optimize_run.efficient_frontier", counting_frontier)
+    monkeypatch.setattr("app.optimize_run.random_portfolios", counting_random)
+
+    run_compare(W3, ABC, SPY, lookback_days=365, folds=2)
+
+    assert frontier_call_count == 1
+    assert random_call_count == 1

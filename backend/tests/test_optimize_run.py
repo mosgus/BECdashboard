@@ -240,3 +240,31 @@ def test_pinned_feasibility_messages_describe_final_weight_thresholds():
     with pytest.raises(OptimizeInputError, match="1/N") as maximum:
         run_optimize({"A": 1, "B": 1}, {"A": A, "B": B}, SPY, lookback_days=365, max_weight=0.4)
     assert "pinned" not in str(maximum.value)
+
+
+def test_optimized_point_is_computed_with_default_frontier():
+    result = run_optimize({"A": 1, "B": 1}, {"A": A, "B": B}, SPY, mode="min_variance", lookback_days=365)
+
+    assert result.optimized_point is not None
+    assert result.frontier is not None
+    assert result.optimized_point == result.frontier.optimized
+
+
+def test_optimized_point_is_computed_without_frontier():
+    with_frontier = run_optimize({"A": 1, "B": 1}, {"A": A, "B": B}, SPY, mode="min_variance", lookback_days=365, include_frontier=True)
+    without_frontier = run_optimize({"A": 1, "B": 1}, {"A": A, "B": B}, SPY, mode="min_variance", lookback_days=365, include_frontier=False)
+
+    assert without_frontier.frontier is None
+    assert without_frontier.optimized_point is not None
+    assert without_frontier.optimized_point == pytest.approx(with_frontier.optimized_point, rel=1e-12)
+    assert not any("The efficient frontier could not be computed for this run." in w for w in without_frontier.warnings)
+
+
+def test_frontier_functions_not_called_when_include_frontier_is_false(monkeypatch):
+    monkeypatch.setattr("app.optimize_run.efficient_frontier", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("frontier was computed")))
+    monkeypatch.setattr("app.optimize_run.random_portfolios", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("frontier was computed")))
+
+    result = run_optimize({"A": 1, "B": 1}, {"A": A, "B": B}, SPY, mode="min_variance", lookback_days=365, include_frontier=False)
+
+    assert result.frontier is None
+    assert result.optimized_point is not None

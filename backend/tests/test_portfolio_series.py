@@ -4,8 +4,16 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from app.portfolio_series import build_portfolio_series, value_series
-from app.portfolio_series import backtest_series
+from app.portfolio_series import (
+    BacktestSeries,
+    Rebalance,
+    _REBALANCE_SCHEDULES,
+    _period_key,
+    backtest_series,
+    build_portfolio_series,
+    units_from_weights,
+    value_series,
+)
 
 
 d1 = date(2024, 1, 2)
@@ -19,6 +27,64 @@ def _series(values, dates=(d1, d2, d3)):
 
 def _case_a():
     return {"AAA": _series([10, 11, 12]), "BBB": _series([20, 20, 25])}
+
+
+def _loop_backtest_series(
+    weights: dict[str, float],
+    closes: dict[str, pd.Series],
+    rebalance: Rebalance = "none",
+    anchor_value: float = 100.0,
+) -> BacktestSeries:
+    """Pre-0192 reference implementation, kept as the equivalence oracle."""
+    if not weights:
+        raise ValueError("weights is empty")
+    weight_sum = sum(weights.values())
+    if weight_sum <= 0:
+        raise ValueError("weights must sum to a positive number")
+    if rebalance not in _REBALANCE_SCHEDULES:
+        raise ValueError(f"unknown rebalance schedule: {rebalance!r}")
+    for ticker in weights:
+        if ticker not in closes or closes[ticker].empty:
+            raise ValueError(f"missing closes for weighted ticker {ticker!r}")
+
+    normalised = {ticker: weight / weight_sum for ticker, weight in weights.items()}
+
+    start = max(closes[ticker].index[0] for ticker in weights)
+    prices = pd.DataFrame({ticker: closes[ticker] for ticker in weights}).sort_index()
+    prices = prices.loc[prices.index >= start].ffill()
+
+    dates = list(prices.index)
+    prices_at_start = {ticker: float(prices.iloc[0][ticker]) for ticker in weights}
+    units, _ = units_from_weights(normalised, 0.0, prices_at_start, anchor_value)
+
+    total: list[float] = []
+    by_holding: dict[str, list[float]] = {ticker: [] for ticker in weights}
+    rebalance_dates: list[date] = []
+    previous_key = _period_key(dates[0], rebalance) if rebalance != "none" else None
+
+    for index, current_date in enumerate(dates):
+        row = prices.iloc[index]
+        if index > 0 and rebalance != "none":
+            key = _period_key(current_date, rebalance)
+            if key != previous_key:
+                rebalance_dates.append(current_date)
+                value = sum(units[ticker] * float(row[ticker]) for ticker in weights)
+                units = {
+                    ticker: normalised[ticker] * value / float(row[ticker]) for ticker in weights
+                }
+            previous_key = key
+        row_values = {ticker: units[ticker] * float(row[ticker]) for ticker in weights}
+        for ticker in weights:
+            by_holding[ticker].append(row_values[ticker])
+        total.append(sum(row_values.values()))
+
+    return BacktestSeries(
+        dates=dates,
+        total=total,
+        by_holding=by_holding,
+        start=start,
+        rebalance_dates=rebalance_dates,
+    )
 
 
 def test_buy_and_hold_case_a():
@@ -204,3 +270,70 @@ def test_sum_invariant_on_random_data(rebalance):
 def test_backtest_series_errors(weights, closes, rebalance):
     with pytest.raises(ValueError):
         backtest_series(weights, closes, rebalance)
+
+
+def _equivalence_cases():
+    rng = np.random.default_rng(192)
+
+    staggered_dates = pd.bdate_range("2016-01-04", periods=2600)
+    staggered_prices = {
+        ticker: 100 * np.cumprod(1 + rng.normal(0.0003, 0.012, len(staggered_dates)))
+        for ticker in "ABCDEF"
+    }
+    staggered = {
+        ticker: pd.Series(
+            staggered_prices[ticker][400:] if ticker == "E" else staggered_prices[ticker],
+            index=staggered_dates[400:] if ticker == "E" else staggered_dates,
+            dtype=float,
+        )
+        for ticker in "ABCDE"
+    }
+    staggered["F"] = pd.Series(
+        staggered_prices["F"][np.arange(len(staggered_dates)) % 3 != 2],
+        index=staggered_dates[np.arange(len(staggered_dates)) % 3 != 2],
+        dtype=float,
+    )
+    staggered_weights = {"A": 0.3, "B": 0.2, "C": 0.15, "D": 0.15, "E": 0.1, "F": 0.1}
+
+    short_dates = pd.bdate_range("2020-01-02", periods=500)
+    shorts = {
+        ticker: pd.Series(
+            100 * np.cumprod(1 + rng.normal(0.0003, 0.012, len(short_dates))),
+            index=short_dates,
+            dtype=float,
+        )
+        for ticker in ("X", "Y")
+    }
+    shorts_weights = {"X": 1.5, "Y": -0.5}
+
+    single_dates = pd.bdate_range("2022-01-03", periods=300)
+    single = {
+        "Z": pd.Series(
+            100 * np.cumprod(1 + rng.normal(0.0003, 0.012, len(single_dates))),
+            index=single_dates,
+            dtype=float,
+        )
+    }
+
+    return [
+        pytest.param(staggered_weights, staggered, id="staggered"),
+        pytest.param(shorts_weights, shorts, id="shorts"),
+        pytest.param({"Z": 1.0}, single, id="single"),
+    ]
+
+
+@pytest.mark.parametrize("weights, closes", _equivalence_cases())
+@pytest.mark.parametrize("rebalance", ["none", "monthly", "quarterly", "annual"])
+def test_matches_loop_reference(weights, closes, rebalance):
+    actual = backtest_series(weights, closes, rebalance)
+    expected = _loop_backtest_series(weights, closes, rebalance)
+
+    assert actual.dates == expected.dates
+    assert actual.start == expected.start
+    assert actual.rebalance_dates == expected.rebalance_dates
+    assert actual.total == pytest.approx(expected.total, rel=1e-9, nan_ok=True)
+    assert list(actual.by_holding) == list(expected.by_holding)
+    for ticker in weights:
+        assert actual.by_holding[ticker] == pytest.approx(
+            expected.by_holding[ticker], rel=1e-9, nan_ok=True
+        )

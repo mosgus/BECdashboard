@@ -171,7 +171,7 @@ def _mode_row(run: OptimizeResult) -> ModeRow:
         target_weights=run.target_weights,
         traded=float(sum(abs(v) for v in run.implied_trades.values())),
         in_sample=_to_metrics(run.metrics["optimized"]),
-        point=None if run.frontier is None else run.frontier.optimized,
+        point=run.optimized_point,
         holdout_weights=None,
         holdout=None,
         holdout_error=None,
@@ -265,7 +265,7 @@ def run_compare(
     rows: dict[str, ModeRow] = {"equal_weight": _mode_row(equal_run)}
     for mode in MODES[1:]:
         try:
-            run = run_optimize(weights, closes, benchmark, mode=mode, **common)
+            run = run_optimize(weights, closes, benchmark, mode=mode, include_frontier=False, **common)
         except OptimizeInputError as exc:
             rows[mode] = _error_row(mode, str(exc))
         else:
@@ -383,7 +383,7 @@ def _run_fold(
     fit_weights = {t: weights[t] for t in eligible}
     fold_common = dict(common)
     try:
-        equal = run_optimize(fit_weights, fit_closes, None, mode="equal_weight", **fold_common)
+        equal = run_optimize(fit_weights, fit_closes, None, mode="equal_weight", include_frontier=False, **fold_common)
     except OptimizeInputError as exc:
         return unavailable(f"Fold fit: {exc}")
     if match_current:
@@ -395,7 +395,7 @@ def _run_fold(
         if mode in in_sample_failed:
             continue
         try:
-            runs[mode] = run_optimize(fit_weights, fit_closes, None, mode=mode, **fold_common)
+            runs[mode] = run_optimize(fit_weights, fit_closes, None, mode=mode, include_frontier=False, **fold_common)
         except OptimizeInputError as exc:
             errors[mode] = str(exc)
     for mode, run in list(runs.items()):

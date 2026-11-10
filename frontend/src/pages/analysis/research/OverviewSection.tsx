@@ -1,14 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { JSX } from 'react'
 import { useParams } from 'react-router-dom'
-import {
-  attributionPortfolio,
-  comparePortfolio,
-  getUniverse,
-  performancePortfolio,
-  riskPortfolio,
-} from '../../../api/client'
 import type { AttributionResponse, CompareResponse, PerformanceResponse, RiskResponse } from '../../../api/client'
+import {
+  cachedAttributionPortfolio,
+  cachedComparePortfolio,
+  cachedPerformancePortfolio,
+  cachedRiskPortfolio,
+  cachedUniverse,
+} from '../../../lib/researchRequests'
 import { HelpButton } from '../../../components/GuidePanel'
 import { Tooltip } from '../../../components/Tooltip'
 import { downloadBlob } from '../../../lib/download'
@@ -81,7 +81,7 @@ export function OverviewSection({ onOpenMemo }: { onOpenMemo: () => void }): JSX
 
   useEffect(() => {
     let cancelled = false
-    void getUniverse()
+    void cachedUniverse()
       .then((entries) => {
         if (!cancelled)
           setUniverse({ status: 'ready', lastClose: new Map(entries.map((entry) => [entry.ticker, entry.last_close])) })
@@ -102,7 +102,7 @@ export function OverviewSection({ onOpenMemo }: { onOpenMemo: () => void }): JSX
     const runRisk = async () => {
       const built = buildRiskRequest(portfolio, DEFAULT_RISK_SETTINGS, basis)
       if (!built.ok) throw new Error(built.message)
-      return riskPortfolio(built.request)
+      return cachedRiskPortfolio(built.request)
     }
     void runRisk()
       .then((response) => {
@@ -119,7 +119,7 @@ export function OverviewSection({ onOpenMemo }: { onOpenMemo: () => void }): JSX
         return performanceBuilt.request
       })
       .then((request) => {
-        void performancePortfolio(request)
+        void cachedPerformancePortfolio(request)
           .then((response) => {
             if (mountedRef.current) setPerformance({ status: 'ready', response })
           })
@@ -127,7 +127,7 @@ export function OverviewSection({ onOpenMemo }: { onOpenMemo: () => void }): JSX
             if (mountedRef.current)
               setPerformance({ status: 'error', message: errorMessage(error, 'The performance request failed.') })
           })
-        void attributionPortfolio(request)
+        void cachedAttributionPortfolio(request)
           .then((response) => {
             if (mountedRef.current) setAttribution({ status: 'ready', response })
           })
@@ -147,7 +147,7 @@ export function OverviewSection({ onOpenMemo }: { onOpenMemo: () => void }): JSX
     if (portfolio.positions.length < 2) {
       return
     } else {
-      void comparePortfolio(buildCompareRequest(portfolio, DEFAULT_COMPARE_SETTINGS, basis))
+      void cachedComparePortfolio(buildCompareRequest(portfolio, DEFAULT_COMPARE_SETTINGS, basis))
         .then((response) => {
           if (mountedRef.current) setCompare({ status: 'ready', response })
         })

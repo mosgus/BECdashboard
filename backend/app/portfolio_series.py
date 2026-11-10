@@ -111,31 +111,52 @@ def backtest_series(
     prices_at_start = {ticker: float(prices.iloc[0][ticker]) for ticker in weights}
     units, _ = units_from_weights(normalised, 0.0, prices_at_start, anchor_value)
 
-    total: list[float] = []
-    by_holding: dict[str, list[float]] = {ticker: [] for ticker in weights}
-    rebalance_dates: list[date] = []
-    previous_key = _period_key(dates[0], rebalance) if rebalance != "none" else None
+    import numpy as np
 
-    for index, current_date in enumerate(dates):
-        row = prices.iloc[index]
-        if index > 0 and rebalance != "none":
-            key = _period_key(current_date, rebalance)
-            if key != previous_key:
-                rebalance_dates.append(current_date)
-                value = sum(units[ticker] * float(row[ticker]) for ticker in weights)
-                units = {
-                    ticker: normalised[ticker] * value / float(row[ticker]) for ticker in weights
-                }
-            previous_key = key
-        row_values = {ticker: units[ticker] * float(row[ticker]) for ticker in weights}
-        for ticker in weights:
-            by_holding[ticker].append(row_values[ticker])
-        total.append(sum(row_values.values()))
+    values = prices[list(weights)].to_numpy(dtype=float)
+    units_vector = np.array([units[ticker] for ticker in weights], dtype=float)
+    holding_values = np.empty(values.shape, dtype=float)
+    total_values = np.empty(len(dates), dtype=float)
+    rebalance_dates: list[date] = []
+    if rebalance == "none":
+        rebalance_indices = []
+    else:
+        period_keys = [_period_key(current_date, rebalance) for current_date in dates]
+        rebalance_indices = [
+            index
+            for index in range(1, len(dates))
+            if period_keys[index] != period_keys[index - 1]
+        ]
+        rebalance_dates = [dates[index] for index in rebalance_indices]
+
+    segment_starts = [0, *rebalance_indices]
+    segment_ends = [*rebalance_indices, len(dates)]
+    for segment_start, segment_end in zip(segment_starts, segment_ends):
+        if segment_start > 0:
+            value = 0.0
+            for column in range(len(weights)):
+                value += units_vector[column] * float(values[segment_start, column])
+            units_vector = np.array(
+                [
+                    normalised[ticker] * value / values[segment_start, column]
+                    for column, ticker in enumerate(weights)
+                ],
+                dtype=float,
+            )
+        segment_values = values[segment_start:segment_end] * units_vector
+        holding_values[segment_start:segment_end] = segment_values
+        segment_totals = segment_values[:, 0].copy()
+        for column in range(1, len(weights)):
+            segment_totals += segment_values[:, column]
+        total_values[segment_start:segment_end] = segment_totals
 
     return BacktestSeries(
         dates=dates,
-        total=total,
-        by_holding=by_holding,
+        total=total_values.tolist(),
+        by_holding={
+            ticker: holding_values[:, column].tolist()
+            for column, ticker in enumerate(weights)
+        },
         start=start,
         rebalance_dates=rebalance_dates,
     )

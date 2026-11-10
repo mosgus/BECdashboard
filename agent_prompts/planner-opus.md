@@ -111,7 +111,12 @@ Run this check over every criterion you write, out loud, before issuing the cont
    300 depending on how it is read. Contract 0088 stalled on exactly that. **Write test data as
    literal values** — `[100.0, 101.0, 102.0, 103.0]` — not as a description of it. Prose about data is
    not a specification of data.
-8. **Could this criterion fail on correct work?** That is strictly worse than having no criterion —
+8. **Is a tolerance tighter than the noisiest step it passes through?** Contract 0192 required a
+   rewrite to reproduce `run_compare` output to relative 1e-9. The rewrite's own summation error was
+   1e-13. But one optimizer's *input* was computed from the rewritten function, and SLSQP stops at
+   ~1e-9, so its weights moved 1.2e-9 and correct work failed. Trace every compared output back
+   through each solver it touches; the tolerance can be no tighter than that solver's own.
+9. **Could this criterion fail on correct work?** That is strictly worse than having no criterion —
    it trains coders to argue with criteria. Worse, it invites a coder to change correct data to
    satisfy a wrong assertion.
 
