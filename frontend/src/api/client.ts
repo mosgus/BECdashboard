@@ -186,6 +186,11 @@ function extractDetail(text: string): string | null {
     if (parsed !== null && typeof parsed === 'object' && 'detail' in parsed) {
       const detail = (parsed as { detail: unknown }).detail
       if (typeof detail === 'string') return detail
+      // The macro upload's 429 is { detail: { message, unlocks_at } }.
+      if (detail !== null && typeof detail === 'object' && 'message' in detail) {
+        const message = (detail as { message: unknown }).message
+        if (typeof message === 'string') return message
+      }
     }
   } catch {
     // Not JSON — no detail to extract.
@@ -897,4 +902,116 @@ export interface MacroScorecardResponse {
 
 export async function getMacroScorecard(): Promise<MacroScorecardResponse> {
   return request<MacroScorecardResponse>('/macro/scorecard')
+}
+
+export interface MacroGate {
+  allowed: boolean
+  opens_window: boolean
+  window_closes_at: string | null
+  locked_until: string | null
+}
+
+export interface MacroVersion {
+  id: number
+  filename: string
+  size_bytes: number
+  data_through: string | null
+  uploaded_by: string
+  uploaded_at: string
+  reverted_by: string | null
+  reverted_at: string | null
+  live: boolean
+}
+
+export interface MacroSlot {
+  id: string
+  label: string
+  source: string
+  filename: string
+  market: string | null
+  versions: MacroVersion[]
+  gate: MacroGate
+  can_revert: boolean
+}
+
+export interface MacroBuild {
+  status: string
+  started_at: string
+  finished_at: string | null
+  result: string | null
+  error: string | null
+}
+
+export interface MacroDataStatus {
+  slots: MacroSlot[]
+  slots_filled: number
+  serving: 'uploads' | 'snapshot_file'
+  snapshot_built_at: string | null
+  last_build: MacroBuild | null
+  prices: { tickers: number; newest_fetched_at: string | null }
+}
+
+export class MacroUploadError extends ApiError {
+  /** ISO time the slot opens again; set for a 429 only. */
+  readonly unlocksAt: string | null
+
+  constructor(status: number, message: string, unlocksAt: string | null) {
+    super(status, message)
+    this.name = 'MacroUploadError'
+    this.unlocksAt = unlocksAt
+  }
+}
+
+function unlocksAtOf(text: string): string | null {
+  try {
+    const parsed: unknown = JSON.parse(text)
+    if (parsed !== null && typeof parsed === 'object' && 'detail' in parsed) {
+      const detail = (parsed as { detail: unknown }).detail
+      if (detail !== null && typeof detail === 'object' && 'unlocks_at' in detail) {
+        const unlocksAt = (detail as { unlocks_at: unknown }).unlocks_at
+        if (typeof unlocksAt === 'string') return unlocksAt
+      }
+    }
+  } catch {
+    // Not JSON — no unlock time.
+  }
+  return null
+}
+
+export async function getMacroData(): Promise<MacroDataStatus> {
+  return request<MacroDataStatus>('/macro/data')
+}
+
+/** The upload is the raw file as the request body (the backend has no multipart parser). Never
+ * retried: see request() for why a POST is not. */
+export async function uploadMacroSlot(slotId: string, file: File, uploadedBy: string): Promise<MacroSlot> {
+  const baseUrl = import.meta.env.VITE_API_URL
+  if (!baseUrl) {
+    throw new Error('VITE_API_URL environment variable is not set')
+  }
+  const query = new URLSearchParams({ uploaded_by: uploadedBy, filename: file.name })
+  const response = await fetch(`${baseUrl}/macro/slots/${encodeURIComponent(slotId)}?${query}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/octet-stream' },
+    body: file,
+  })
+  const text = await response.text()
+  if (!response.ok) {
+    const message = extractDetail(text) ?? `The upload failed (status ${response.status}).`
+    throw new MacroUploadError(response.status, message, response.status === 429 ? unlocksAtOf(text) : null)
+  }
+  return JSON.parse(text) as MacroSlot
+}
+
+export async function revertMacroSlot(slotId: string, revertedBy: string): Promise<MacroSlot> {
+  const query = new URLSearchParams({ reverted_by: revertedBy })
+  return request<MacroSlot>(`/macro/slots/${encodeURIComponent(slotId)}/revert?${query}`, { method: 'POST' })
+}
+
+export function macroTemplateUrl(slotId: string): string {
+  return `${import.meta.env.VITE_API_URL}/macro/templates/${encodeURIComponent(slotId)}`
+}
+
+export function macroTemplatesZipUrl(): string {
+  return `${import.meta.env.VITE_API_URL}/macro/templates.zip`
 }

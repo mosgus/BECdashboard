@@ -1,10 +1,12 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import type { JSX } from 'react'
 import { ApiError, getMacroScorecard } from '../api/client'
 import type { MacroScorecardResponse } from '../api/client'
+import { MacroDataDialog } from '../components/MacroDataDialog'
 import { MacroFundamentals } from '../components/MacroFundamentals'
 import { MacroQuadrant } from '../components/MacroQuadrant'
 import { MacroScorecard } from '../components/MacroScorecard'
+import { Tooltip } from '../components/Tooltip'
 import { cachedLoader } from '../lib/macroStore'
 import '../styles/macro.css'
 
@@ -26,6 +28,7 @@ export function MacroPage(): JSX.Element {
   const [state, setState] = useState<State>({ status: 'loading' })
   const [groupKey, setGroupKey] = useState<string | null>(null)
   const [tab, setTab] = useState<Tab>('equity')
+  const [dataOpen, setDataOpen] = useState(false)
 
   useEffect(() => {
     loadMacroScorecard()
@@ -36,6 +39,14 @@ export function MacroPage(): JSX.Element {
           message: err instanceof ApiError ? err.message : 'Failed to load the macro scorecard.',
         })
       })
+  }, [])
+
+  // A new snapshot was built while the Data dialog was open. Bypasses the load-once cache; the server
+  // answers 304 when nothing changed. A failure keeps the data already on screen.
+  const reloadScorecard = useCallback(() => {
+    getMacroScorecard()
+      .then((data) => setState({ status: 'ready', data }))
+      .catch(() => {})
   }, [])
 
   // The snapshot carries licensed vendor data (FactSet, Bloomberg, S&P Global); the scorecard
@@ -54,11 +65,22 @@ export function MacroPage(): JSX.Element {
   return (
     <div className="min-h-screen bg-background text-foreground">
       <main className="viz-root max-w-[1120px] mx-auto px-4 sm:px-6 pt-10 pb-20">
-        <div className="mb-7">
-          <h1 className="text-[1.875rem] font-bold tracking-tight text-brand-primary">Macro</h1>
-          <p className="text-[0.9375rem] font-light text-[var(--color-muted)] mt-1.5">
-            Macro analysis of the broader economy & financial markets.
-          </p>
+        <div className="flex items-end justify-between gap-6 flex-wrap mb-7">
+          <div>
+            <h1 className="text-[1.875rem] font-bold tracking-tight text-brand-primary">Macro</h1>
+            <p className="text-[0.9375rem] font-light text-[var(--color-muted)] mt-1.5">
+              Macro analysis of the broader economy & financial markets.
+            </p>
+          </div>
+          <Tooltip label="Download sample data and upload new files to update this page">
+            <button
+              type="button"
+              onClick={() => setDataOpen(true)}
+              className="text-sm font-medium px-4 py-2 rounded-[var(--radius-btn)] bg-brand-surface border border-brand-border text-[var(--color-muted)] hover:bg-brand-border hover:text-foreground"
+            >
+              Data
+            </button>
+          </Tooltip>
         </div>
 
         {state.status === 'loading' && <p className="text-sm text-[var(--color-muted)]">Loading…</p>}
@@ -98,6 +120,7 @@ export function MacroPage(): JSX.Element {
           </>
         )}
       </main>
+      <MacroDataDialog open={dataOpen} onClose={() => setDataOpen(false)} onSnapshotChanged={reloadScorecard} />
     </div>
   )
 }

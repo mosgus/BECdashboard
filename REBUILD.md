@@ -2203,8 +2203,16 @@ risk-free rate to the 3-month T-bill and limits portfolios to holdable tickers.
       
       Routes must not ship before 0205.
     - **0205 and 0206 accepted, 2026-11-25.** The 0205 coder closed a further hole: follow-up runs re-check the failure memo. **0207** adds the routes: `GET /macro/data`; a raw-body `POST /macro/slots/{id}`; `POST /macro/slots/{id}/revert`; and templates as single files or a zip named `*_sample.xlsx`. Its human check is the first production end-to-end run: migrate, deploy, seed prices, then upload with `contracts/tools/macro_upload_all.sh`.
-    - **0207 accepted, 2026-11-25.** In the planner's in-process end-to-end run, the 15 real files were uploaded over HTTP, rebuilt with the date frozen at 11-09, and the served `/macro/scorecard` was **IDENTICAL** to the 11-09 file. **Production end-to-end is pending:** Gunnar migrates, deploys, seeds prices and runs the upload script. It is the first time this runs on Postgres and in the Render subprocess. **The Data dialog contract waits for that result**, so the UI isn't built on a backend that fails on Postgres.
-    - **Next:** the Data dialog, then the resumable price downloader. The seeded prices run through 11-09, so breadth ages until the downloader exists.
+    - **0207 accepted, 2026-11-25.** In the planner's in-process end-to-end run, the 15 real files were uploaded over HTTP, rebuilt with the date frozen at 11-09, and the served `/macro/scorecard` was **IDENTICAL** to the 11-09 file. **Production end-to-end is pending:** Gunnar migrates, deploys, seeds prices and runs the upload script. It is the first time this runs on Postgres and in the Render subprocess. The Data dialog was at first held for that result. **Gunnar chose not to wait (2026-11-25)**, because the dialog depends only on 0207's fixed API shapes, so it was issued as **0208**:
+      - one dialog, with no backdrop close (the 0198 reasoning, which drag-and-drop makes stronger);
+      - a Sample data zip link;
+      - a persisted "Your name";
+      - 15 drop zones grouped Estimates / Macro / Holdings;
+      - a two-step revert, per-row history and 15 s polling;
+      - the page reloads when `snapshot_built_at` changes;
+      - the lock rules are only displayed from the API's `gate`, never recomputed. `contracts/tools/smoke-render.mjs` gained `SMOKE_PATH`.
+    - **0208 accepted, 2026-11-25.** The planner's render check ran against a throwaway-SQLite backend. A real upload through the dialog's file input succeeded, and a wrong-market file showed its error under the row.
+    - **Next:** the resumable price downloader. The seeded prices run through 11-09, so breadth ages until the downloader exists.
 - **Research tab speed: three fixes, contracts 0191–0193** (planner diagnosis, 2026-11-09). The slow "Computing the score…", "Comparing 8 optimizers…" and "Checking the portfolio…" messages all wait on the same `POST /portfolio/compare`.
   - **Cause 1, the request is repeated.** Overview, Portfolio and Memo each sent it with the same `DEFAULT_COMPARE_SETTINGS`, on every mount, and Overview and Memo each sent their own risk request. **0191** shares results between those three sections: an in-memory cache keyed by the exact request, with a 10-minute TTL (`lib/requestCache.ts`, `lib/researchRequests.ts`). It deliberately doesn't cover the other tabs or the server.
   - **Cause 2, each comparison is expensive.** It runs 40 `run_optimize` calls (8 modes × in-sample + 4 folds). On a 10-holding, 12-year synthetic portfolio it took 3.8 s locally:

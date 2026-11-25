@@ -6,6 +6,7 @@
 // An empty ROOT TEXT means the page rendered blank. SMOKE_WAIT_MS=10000 waits longer after the sub-tab click (slow API).
 // SMOKE_CLICKS="COVID crash|Run Scenario" then clicks those buttons in order (text contains the label).
 // SMOKE_EVAL='<js expression>' prints the expression's value at the end.
+// SMOKE_PATH=/macro opens that path instead of a portfolio tab (the fake portfolio is still seeded).
 import { spawn } from 'node:child_process'
 
 const tab = process.argv[2] ?? 'outlook'
@@ -75,7 +76,8 @@ try {
   await send('Runtime.evaluate', {
     expression: `localStorage.setItem('bec-portfolios', ${JSON.stringify(JSON.stringify([portfolio]))})`,
   })
-  await send('Page.navigate', { url: `http://localhost:5173/portfolios/smoke/${tab}` })
+  // SMOKE_PATH=/macro (any app path) overrides the portfolio tab; added 2026-11-25 for the Macro Data dialog.
+  await send('Page.navigate', { url: `http://localhost:5173${process.env.SMOKE_PATH ?? `/portfolios/smoke/${tab}`}` })
   await sleep(5000)
   if (subTab !== undefined) {
     const clicked = await send('Runtime.evaluate', {
@@ -103,7 +105,7 @@ try {
   console.log('PAGE TEXT:', JSON.stringify(body.result.value))
   // SMOKE_EVAL='<js expression>' prints that expression's value too (e.g. SVG tick labels innerText misses).
   if (process.env.SMOKE_EVAL) {
-    const extra = await send('Runtime.evaluate', { expression: process.env.SMOKE_EVAL, returnByValue: true })
+    const extra = await send('Runtime.evaluate', { expression: process.env.SMOKE_EVAL, returnByValue: true, awaitPromise: true })
     console.log('EVAL:', JSON.stringify(extra.result.value ?? extra.result.description))
   }
   ws.close()
