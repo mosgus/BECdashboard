@@ -206,12 +206,8 @@ export function NewPortfolioDialog({ universe, onCancel, onCreate, presetEdit }:
   }
 
   return (
-    <div
-      className="fixed inset-0 bg-overlay flex items-center justify-center px-4 z-[110]"
-      onClick={(event) => {
-        if (event.target === event.currentTarget) onCancel()
-      }}
-    >
+    {/* This dialog holds a form; a drag-select that ends outside it would otherwise discard the form. */}
+    <div className="fixed inset-0 bg-overlay flex items-center justify-center px-4 z-[110]">
       <div
         role="dialog"
         aria-modal="true"

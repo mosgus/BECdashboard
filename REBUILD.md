@@ -114,6 +114,12 @@ Three consequences worth keeping:
   named `--color-modal-overlay` rather than `--color-overlay` precisely so the `@theme inline`
   mapping is not `--color-overlay: var(--color-overlay)`, which is a self-reference that resolves to
   nothing.
+- **`NewPortfolioDialog` does not close on a backdrop click (contract 0198, 2026-11-25, Gunnar).**
+  It holds a whole portfolio or preset form. A drag-select that starts in a field and is released
+  outside the dialog fires `click` on the backdrop, the common ancestor, which closed it and
+  discarded the form. It now closes only through Cancel, Escape, or a completed action. The other
+  dialogs keep backdrop-close for now. Several of them have inputs and the same drag-select hole,
+  so revisit if that bites.
 - **The pre-paint script in `index.html` duplicates `lib/theme.ts` on purpose.** A module import
   cannot run before first paint, so deduplicating it reintroduces a white flash on every dark-mode
   load. Its `try/catch` is required: `localStorage` throws outright in some privacy modes, and an
