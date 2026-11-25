@@ -1171,6 +1171,7 @@ multiplying it, and the upserts are idempotent. Fix is a module-level non-blocki
 start script in the repo — the build and start commands live only in the Render dashboard, so nothing
 in version control proves `alembic upgrade head` runs on deploy. Verify before shipping any contract
 that adds a table; a missing one surfaces as a 500 from the new endpoint, not as a deploy failure.
+**Confirmed 2026-11-25: migrations are applied by hand.** Render's build command is only `pip install`, and the local `backend/.env` points at the production database. So running `alembic upgrade head` locally is what migrates production. That is how the presets and FF3 tables were created. Code that reads a new table, run before that command, gets a 500 on `UndefinedTable`: production was at `0010` while 0204's code expected `0013`. **After any contract that adds a migration, Gunnar runs `.venv/bin/alembic upgrade head` from `backend/` before deploying, or before running locally.** Contract 0206 makes the Macro read path fall back to the file when its table is missing.
 To check a new migration's SQL without touching any database, run `(cd backend && env -u DATABASE_URL .venv/bin/alembic upgrade <prev>:<new> --sql)`.
 Setting `DATABASE_URL` to a dummy value trips the conflict guard against `backend/.env`. `--sql` never
 connects; it only reads `.env` to pick the dialect (found by contract 0156).
@@ -2154,10 +2155,56 @@ risk-free rate to the 3-month T-bill and limits portfolios to holdable tickers.
     - **Constituent prices:** a slow background yfinance download, option (b). It starts **only** from a button, which then can't be pressed again for 1–3 days.
     - **Where:** an "Upload data" button at the top of the Macro page opens a dialog. It has one row per required file, each with its own upload button, plus one row with the price-download button. Each row shows who signed off and when.
   - **Still open, deliberately:**
-    - ~~**Cooldown vs. fixing a bad upload.**~~ **Decided (Gunnar, 2026-11-09): version history plus a signed revert.** Every slot keeps its previous versions. "Revert to previous" is signed with a name like an upload and logged as "Y reverted …". **Revert is never blocked by a cooldown.** A cooldown that locks bad data in place was rejected. Exempting "your own" re-upload was not chosen, because a typed name can't prove who you are. Still open: the cooldown length for new uploads (planner suggests 24 h per slot) and how many versions to keep (planner suggests 5).
+    - ~~**Cooldown vs. fixing a bad upload.**~~ **Decided (Gunnar, 2026-11-09): version history plus a signed revert.** Every slot keeps its previous versions. "Revert to previous" is signed with a name like an upload and logged as "Y reverted …". **Revert is never blocked by a cooldown.** A cooldown that locks bad data in place was rejected. Exempting "your own" re-upload was not chosen, because a typed name can't prove who you are. ~~Still open: cooldown length and versions kept.~~ **Decided (Gunnar, 2026-11-25): a correction window, then a cooldown, with 5 versions kept.**
+      - *Why not a flat 24 h:* revert fixes "wrong data is live" but not "the right data can't go live". A valid but wrong upload (last week's export, or CY1 in the CY2 slot, which no parser can detect) would leave the correct file locked out for a day.
+      - *Why not no limit:* the sample templates make well-formed fake data trivial to upload. Without a limit, a vandal re-uploads after every revert.
+      - **The rule, per slot.** An upload made while the slot is unlocked **opens a window** at time `T`. Further uploads are allowed until `T + 1 h`. After that the slot is locked until `T + 24 h`. Uploads inside the window **do not extend it**, because extending it would let a vandal upload forever. Revert is always allowed and never touches `T`.
+      - **Versions.** Keep the newest 5, **but never evict the newest version uploaded before the current window opened**. Without that exception, five uploads inside one window would push the last good version out of reach of revert.
+      - **Rebuilds:** one at a time. Uploads or reverts that arrive during a build schedule exactly one more build, so a burst of corrections costs at most two builds.
     - **Data date vs. upload date.** The planner recommends each row also show the latest date inside the file ("data through"), with freshness judged against each slot's expected cadence: weekly for CY1/CY2, monthly for Bloomberg and PMIs, about quarterly for the holdings files.
     - **The price download must survive a restart.** A Render deploy kills a long-running job, so the download needs per-ticker progress in the database and has to resume where it stopped. The cooldown should start when the download completes, not when it starts, so a failed run can be retried.
-    - **Licensing:** the snapshot is FactSet / Bloomberg / S&P Global-derived data. The scorecard README says to keep it out of public repos and behind a login. The site has no login; the page only sets `noindex`.
+    - ~~**Licensing**~~ **Closed (Gunnar, 2026-11-25): he accepts the risk and does not want it raised again.** The templates decision is unaffected, because uploaders only need the format. Original note: the snapshot is FactSet / Bloomberg / S&P Global-derived data. The scorecard README says to keep it out of public repos and behind a login. The site has no login; the page only sets `noindex`.
+  - **Data dialog and pipeline order (Gunnar, 2026-11-25).** Gunnar asked for a **Data** button with a "Sample data" download and drag-and-drop upload fields. He chose:
+    - **Sample data = format templates.** Each template has the real sheet names, header rows and columns, but synthetic values. It is generated by `macro_inputs.template_workbook`. The real exports are never served. The admin passkey was not an option: it is `london`, in the client bundle. *Why:* serving the raw files would hand licensed FactSet, Bloomberg and S&P Global data to anyone with the URL. That is a far bigger exposure than showing scores derived from it, and the uploader only needs the format.
+    - **One Data dialog, not a dialog that opens a second one.** It has the template download on top, then one drop zone per slot. Each slot shows its sign-off and version history and has a revert control.
+    - **Pipeline first.** No upload UI until the backend reproduces today's snapshot exactly. Otherwise uploads would appear to do nothing.
+  - **The port is held to exact equality, and that is safe** (planner, 2026-11-25):
+    - The original `scorecard.py`, re-run offline with today frozen at 2026-11-09, reproduces `macro_scorecard.json` with zero differing values on both pandas 2.2.3 and the backend's pandas 3.0.5 / numpy 2.5.3.
+    - `contracts/tools/macro_port_check.py parse|econ|full` compares the port to the snapshot. It needs the licensed files, which exist only on Gunnar's machine, so it is a planner-run tool, not a test. CI tests run on the templates.
+    - The original wrapped as a port passes the tool. A one-character change is reported at the exact cell.
+    - The original build takes 8.8 s and peaks at 342 MB with matplotlib, or 7.2 s and 232 MB as a port-shaped call. Watch memory on Render's 512 MB.
+    - With no constituent prices, the original degrades cleanly: Price Breadth is n/a, the breadth chart is empty, and the output has no NaN. That is the first server build's state before any price download.
+  - **Sequence.** 0199–0201 were **accepted on 2026-11-25**: `econ` and `full` are IDENTICAL, 8.4 s, and the process peaks at 174 MB. Follow-ups for the storage and rebuild contracts are in `contracts/done/0199-*.report.md` and `0201-*.report.md`. They cover the duplicated missing-series list, a forward-dated `data_through`, running the build in a subprocess for memory, and NaN fixtures.
+    - **0199:** the 15 slots (`cy1`, `cy2`, `macro`, `pmis`, `cons_<etf>` ×11), their parsers and the templates. Adds `openpyxl`. Uploads to the wrong constituents slot are rejected by a country-code check.
+    - **0200:** port of the economic scorecard.
+    - **0201:** port of the equity scorecard, quadrant and charts, plus `build_snapshot`.
+    - **Then, not yet written:**
+      - upload storage, with versions, sign-off and revert;
+      - a rebuild-and-publish job. It must serialise with `allow_nan=False`, because a NaN would break the browser's `JSON.parse`. The real snapshot has none, but an odd upload could produce one;
+      - a resumable constituent-price download of about 1,800 tickers, stored as data rather than pickle. It may be seeded once from `prices_cache.pkl`, which holds Yahoo data, not licensed data;
+      - the Data dialog.
+    - Until all 15 slots are filled, the page keeps serving `hard_data/macro_scorecard.json`.
+    - **Issued 2026-11-25:**
+      - **0202:** the `macro_uploads` store: versions, sign-off, correction window, revert.
+      - **0203:** `macro_price_series` (one row per ticker, JSON lists, not pickle), plus a one-time seed from `prices_cache.pkl` that Gunnar runs.
+      - **0204:** the rebuild job and snapshot serving:
+        - the build runs in a **subprocess** for memory isolation;
+        - builds are coalesced, so a burst costs at most two;
+        - each `GET /macro/scorecard` heals a stale snapshot by comparing input keys;
+        - `allow_nan=False` fails a build rather than the browser;
+        - `hard_data` stays as the fallback.
+      
+      `contracts/tools/macro_port_check.py full-db` proves the database round trip of files and prices is lossless. The planner confirmed beforehand that the per-ticker JSON layout gives zero differences.
+    - **0202–0204 accepted, 2026-11-25.** Every check was re-run, and `full-db` is IDENTICAL. **0205** fixes the defects the audits found:
+      - **The opener could be evicted, erasing the lock.** This was the planner's spec error, which the coder caught. *Rule learned:* retention must keep every row that derived state reads.
+      - **A parse ran under the global lock.**
+      - **Self-heal retried a failing build on every page view.** Now there is a 1 h failure memo per key.
+      - **Non-finite closes reached storage.**
+      
+      Routes must not ship before 0205.
+    - **0205 and 0206 accepted, 2026-11-25.** The 0205 coder closed a further hole: follow-up runs re-check the failure memo. **0207** adds the routes: `GET /macro/data`; a raw-body `POST /macro/slots/{id}`; `POST /macro/slots/{id}/revert`; and templates as single files or a zip named `*_sample.xlsx`. Its human check is the first production end-to-end run: migrate, deploy, seed prices, then upload with `contracts/tools/macro_upload_all.sh`.
+    - **0207 accepted, 2026-11-25.** In the planner's in-process end-to-end run, the 15 real files were uploaded over HTTP, rebuilt with the date frozen at 11-09, and the served `/macro/scorecard` was **IDENTICAL** to the 11-09 file. **Production end-to-end is pending:** Gunnar migrates, deploys, seeds prices and runs the upload script. It is the first time this runs on Postgres and in the Render subprocess. **The Data dialog contract waits for that result**, so the UI isn't built on a backend that fails on Postgres.
+    - **Next:** the Data dialog, then the resumable price downloader. The seeded prices run through 11-09, so breadth ages until the downloader exists.
 - **Research tab speed: three fixes, contracts 0191–0193** (planner diagnosis, 2026-11-09). The slow "Computing the score…", "Comparing 8 optimizers…" and "Checking the portfolio…" messages all wait on the same `POST /portfolio/compare`.
   - **Cause 1, the request is repeated.** Overview, Portfolio and Memo each sent it with the same `DEFAULT_COMPARE_SETTINGS`, on every mount, and Overview and Memo each sent their own risk request. **0191** shares results between those three sections: an in-memory cache keyed by the exact request, with a 10-minute TTL (`lib/requestCache.ts`, `lib/researchRequests.ts`). It deliberately doesn't cover the other tabs or the server.
   - **Cause 2, each comparison is expensive.** It runs 40 `run_optimize` calls (8 modes × in-sample + 4 folds). On a 10-holding, 12-year synthetic portfolio it took 3.8 s locally:

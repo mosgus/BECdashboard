@@ -1,6 +1,6 @@
 from datetime import date as date_, datetime
 
-from sqlalchemy import BigInteger, Boolean, Date, DateTime, Float, Index, Integer, JSON, String, Text, func
+from sqlalchemy import BigInteger, Boolean, Date, DateTime, Float, Index, Integer, JSON, LargeBinary, String, Text, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -180,3 +180,49 @@ class FF3Factor(Base):
     smb: Mapped[float] = mapped_column(Float, nullable=False)
     hml: Mapped[float] = mapped_column(Float, nullable=False)
     rf: Mapped[float] = mapped_column(Float, nullable=False)
+
+
+class MacroUpload(Base):
+    """One validated upload of a Macro input slot (contract 0202), kept as a signed version. Rows are
+    never edited except to mark a revert, and are deleted only by app/macro_store.py's eviction.
+    `opens_window` marks the upload that started the slot's correction window."""
+
+    __tablename__ = "macro_uploads"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    slot_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    filename: Mapped[str] = mapped_column(String, nullable=False)
+    content: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    data_through: Mapped[date_ | None] = mapped_column(Date)
+    uploaded_by: Mapped[str] = mapped_column(String, nullable=False)
+    uploaded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    opens_window: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    reverted_by: Mapped[str | None] = mapped_column(String)
+    reverted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class MacroPriceSeries(Base):
+    """One constituent ticker's close prices for the Macro scorecard (contract 0203). `days` are integer
+    days since 1970-01-01, ascending; `closes` is the same length and holds no NaN. One row per ticker
+    because the ticker is the unit of download and of resume. See app/macro_prices.py."""
+
+    __tablename__ = "macro_price_series"
+
+    ticker: Mapped[str] = mapped_column(String, primary_key=True)
+    days: Mapped[list] = mapped_column(JSON, nullable=False)
+    closes: Mapped[list] = mapped_column(JSON, nullable=False)
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class MacroSnapshot(Base):
+    """A built Macro page payload (contract 0204). `body` is the exact JSON bytes the API serves, and
+    `inputs_key` names the live uploads and price version it was built from, so a differing current key
+    means the snapshot is stale. app/macro_build.py keeps the newest few."""
+
+    __tablename__ = "macro_snapshots"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    built_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    inputs_key: Mapped[str] = mapped_column(String, nullable=False)
+    body: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)

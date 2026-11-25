@@ -830,3 +830,55 @@ class AttributionResponse(BaseModel):
     contributions: AttributionContributionsOut
     source: str
     warnings: list[str]
+
+
+class MacroGate(BaseModel):
+    allowed: bool
+    opens_window: bool
+    window_closes_at: datetime | None
+    locked_until: datetime | None
+
+
+class MacroVersion(BaseModel):
+    id: int
+    filename: str
+    size_bytes: int
+    data_through: date | None
+    uploaded_by: str
+    uploaded_at: datetime
+    reverted_by: str | None
+    reverted_at: datetime | None
+    live: bool
+
+
+class MacroSlot(BaseModel):
+    id: str
+    label: str
+    source: str
+    filename: str  # the conventional export name
+    market: str | None
+    versions: list[MacroVersion]  # newest first
+    gate: MacroGate
+    can_revert: bool
+
+
+class MacroBuild(BaseModel):
+    status: str
+    started_at: datetime
+    finished_at: datetime | None
+    result: str | None
+    error: str | None
+
+
+class MacroPrices(BaseModel):
+    tickers: int
+    newest_fetched_at: datetime | None
+
+
+class MacroDataStatus(BaseModel):
+    slots: list[MacroSlot]  # SLOTS order
+    slots_filled: int  # slots with a live version
+    serving: str  # "uploads" when a stored snapshot exists, else "snapshot_file"
+    snapshot_built_at: datetime | None
+    last_build: MacroBuild | None
+    prices: MacroPrices
