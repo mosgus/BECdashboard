@@ -278,9 +278,18 @@ def refresh_quotes_endpoint() -> dict:
 
 
 @router.get("/sweep_status", response_model=SweepStatus)
-def get_sweep_status() -> dict:
+def get_sweep_status(background_tasks: BackgroundTasks) -> dict:
+    """Report sweep activity and schedule a due sweep.
+
+    A due but unclaimed window reports active while the background task is starting. Scheduling
+    here ensures a status poll can start that sweep even when no new strip request is coming;
+    run_auto_refresh_if_due safely returns when the window is already claimed or a sweep holds
+    the lock."""
     _require_database()
-    return {"active": is_sweep_active(datetime.now(ZoneInfo("America/New_York")))}
+    now_utc = datetime.now(timezone.utc)
+    now_et = datetime.now(ZoneInfo("America/New_York"))
+    background_tasks.add_task(run_auto_refresh_if_due, now_utc, now_et)
+    return {"active": is_sweep_active(now_et)}
 
 
 @router.get("/{ticker}", response_model=UniverseDetail)

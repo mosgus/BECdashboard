@@ -1372,6 +1372,27 @@ fresh while the table did not.
   clock-dependent on an empty database, which is why tests assert `isinstance(..., bool)` rather
   than `False`.
 
+**The sweep is watched app-wide and shown in the header (contracts 0196/0197, 2026-11-25, Gunnar
+asked).** Navigating away mid-sweep was always safe: the sweep is a server-side background task.
+What broke on navigation was the *watching*:
+- the scheduled sweep never cleared `sharedRequests`, so portfolio tabs could serve pre-sweep results
+  for the 10-minute TTL;
+- a forced refresh from `/ops` lost its cache clear if you left the page;
+- the spinner existed only on `/universe`.
+
+The fix is one module-level `sweepStore` that checks on every route change and clears the shared
+cache when a watched sweep ends. It shows as a spinner in the **sticky header**, not a per-page
+banner, so it never shifts layout. Open analysis pages are **not** re-fetched when a sweep ends:
+the next page opened is fresh, and the one on screen stays as it was. A sweep usually adds one
+day's bar, and numbers jumping mid-read is worse than one tab being a day behind.
+
+`GET /universe/sweep_status` now also schedules `run_auto_refresh_if_due`. Without that, the "due
+and unclaimed" term reported a sweep that never comes in a long-lived SPA session, because only a
+full page load fetches the strip. That spinner then ran for the full 10-minute timeout, a bug the
+Universe page already had. A side effect is that a status poll can see `_LOCK` held for the few
+milliseconds another request's no-op check owns it, which shows the spinner for one poll interval.
+That is rare and harmless, and the strip has had the same behaviour since 0036.
+
 **Weight → Shares keeps share counts that already exist (contract 0124).** Contract 0059 cleared shares on that switch so the composer would never invent a share count from a weight. That aim stands. But a CSV carrying both weights and shares seeds weight mode with real share counts, and clearing them hid the user's own data. The switch now keeps every row's existing `shares` and never creates one. Cash dollars are derived — `positionsValue × c / (100 − c)` at current prices — only when every row has shares and a usable price, because an empty shares-mode cash field means $0 and would silently drop the file's cash weight. Otherwise cash stays blank for the user to fill.
 
 **Optimize can deploy cash without a re-run (contract 0126).** The optimizer fits invested holdings only, so its target weights are a mix, not an allocation. A "Cash to deploy" slider (0–100% of current cash) sets cash after to `c × (1 − p)` and scales every holding to `fraction × (100 − c′)`, keeping the Optimized proportions. The backtest and metrics are unaffected because they never saw cash. The Weights table and CSV now show shares of the **whole** portfolio with a Cash row in the table. This also fixed a silent loss: `target_pct` used to be invested-only and summed to 100, so re-importing an export of a portfolio holding cash set cash to 0. The export deliberately has no CASH row; the importer derives cash as `100 − Σ target_pct`. CAPM's Apply and export are unchanged.
@@ -2148,6 +2169,15 @@ risk-free rate to the 3-month T-bill and limits portfolios to holdable tickers.
     - **0194** widens 0191's cache to every portfolio tab. It is cleared by a ticker add or delete, and when a forced refresh finishes.
     - **0195** adds `app.cache.get_adj_closes`, an in-process closes cache. It stays exact because every bar write goes through `cache.store()`, deletes call `evict()`, and the service is one uvicorn process. A 1 h TTL covers writes from outside the server. Before issuing it, the planner prototyped it against the full suite (893 passed).
   - **Hosting deferred (Gunnar, 2026-11-09)** until after the code work. The options are Render's paid plan (no sleep, ~5× the CPU) or an external `/health` ping (no sleep only). The free tier's sleep and 0.1 CPU are now the largest remaining costs.
+  - **Measured after deploying 0194/0195** (live, quiet server, 8 tickers, 2026-11-10 03:10 UTC):
+    - Risk: 1.9 s on the first request (cache miss), then 0.19–0.27 s.
+    - Performance 0.70 s, attribution 0.37 s (were 2.0–2.6 s).
+    - Compare 12.3 s (was 14.5–14.8 s).
+    - Overview's four requests together: 13.5 s (was 21 s).
+    
+    `run_risk` itself takes 8 ms locally, so the earlier ~2 s floor was database loading, as diagnosed. The compare cost is now pure CPU: 0.4 s locally against ~12 s on 0.1 CPU. The remaining options are exact optimizer gradients (code, perhaps halving it) or hosting (no sleep, ~5× CPU).
+    
+    A run minutes after the deploy measured 3.7–5.5 s for risk. The cause is unexplained; the likely explanation is that the freshly deployed instance was still warming up.
   - **Rejected:** parallel folds (Render has a fraction of a CPU) and a server-side result cache (needs careful invalidation as prices update daily). Revisit only if these three aren't enough.
 
 ## Open questions (not decided)

@@ -4,6 +4,7 @@ import { ApiError, forceUniverseRefresh, getOpsStatus } from '../api/client'
 import type { OpsStatus } from '../api/client'
 import { clearSharedRequests } from '../lib/sharedRequests'
 import { relativeTime } from '../lib/relativeTime'
+import { sweepStore } from '../lib/sweepStore'
 import { watchSweep } from '../lib/sweepWatch'
 import { Tooltip } from './Tooltip'
 
@@ -70,6 +71,7 @@ export function SystemHealthCard({ onSweepFinished }: { onSweepFinished?: () => 
   function beginWatching(): void {
     setForceError(null)
     setWatching(true)
+    sweepStore.check()
     cancelWatch.current?.()
     cancelWatch.current = watchSweep({
       poll: getOpsStatus,

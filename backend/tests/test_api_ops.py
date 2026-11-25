@@ -157,8 +157,40 @@ def test_force_universe_refresh_is_unavailable_without_a_database(client):
     assert _LOCK.locked() is False
 
 
-def test_sweep_status_route_returns_a_boolean_active_value(db_mode, client):
+def test_sweep_status_route_returns_a_boolean_active_value(db_mode, client, monkeypatch):
+    monkeypatch.setattr("app.routers.universe.run_auto_refresh_if_due", lambda *_args: None)
+
     response = client.get("/universe/sweep_status")
 
     assert response.status_code == 200
     assert isinstance(response.json()["active"], bool)
+
+
+def test_sweep_status_schedules_the_auto_refresh(db_mode, client, monkeypatch):
+    called = []
+
+    def fake_run(*args):
+        called.append(args)
+
+    monkeypatch.setattr("app.routers.universe.run_auto_refresh_if_due", fake_run)
+
+    response = client.get("/universe/sweep_status")
+
+    assert response.status_code == 200
+    assert len(called) == 1
+    assert len(called[0]) == 2
+    assert all(isinstance(value, datetime) and value.tzinfo is not None for value in called[0])
+
+
+def test_sweep_status_without_a_database_schedules_nothing(client, monkeypatch):
+    called = []
+
+    def fake_run(*args):
+        called.append(args)
+
+    monkeypatch.setattr("app.routers.universe.run_auto_refresh_if_due", fake_run)
+
+    response = client.get("/universe/sweep_status")
+
+    assert response.status_code == 503
+    assert called == []

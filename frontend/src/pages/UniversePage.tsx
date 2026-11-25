@@ -5,11 +5,11 @@ import { UniverseTable } from '../components/UniverseTable'
 import { FilterDialog } from '../components/FilterDialog'
 import { DownloadIcon } from '../components/DownloadIcon'
 import { Tooltip } from '../components/Tooltip'
-import { ApiError, getSweepStatus, getUniverse } from '../api/client'
+import { ApiError, getUniverse } from '../api/client'
 import type { UniverseEntry } from '../api/client'
 import { activeFilterCount, applyFilters, EMPTY_FILTERS } from '../lib/filters'
 import type { FilterState } from '../lib/filters'
-import { watchSweep } from '../lib/sweepWatch'
+import { sweepStore } from '../lib/sweepStore'
 
 type State =
   | { status: 'loading' }
@@ -29,7 +29,6 @@ const CARD = 'bg-brand-surface border border-brand-border rounded-[var(--radius-
 export function UniversePage(): JSX.Element {
   const messages = ['Loading universe…', 'Loading takes ~60s…', 'Still loading…']
   const [state, setState] = useState<State>({ status: 'loading' })
-  const [sweeping, setSweeping] = useState(false)
   const requestSeq = useRef(0)
   const [messageIndex, setMessageIndex] = useState(0)
   const [filters, setFilters] = useState<FilterState>(EMPTY_FILTERS)
@@ -78,23 +77,10 @@ export function UniversePage(): JSX.Element {
   }, [])
 
   useEffect(() => {
-    let unmounted = false
-    const cancel = watchSweep({
-      poll: getSweepStatus,
-      isActive: (s) => s.active,
-      onUpdate: (s) => setSweeping(s.active),
-      onFinished: (_s, polls) => {
-        setSweeping(false)
-        if (polls > 1 && !unmounted) reloadSilently()
-      },
-      onTimeout: () => setSweeping(false),
-      intervalMs: 10000,
-      timeoutMs: 600000,
-    })
+    const unsubscribe = sweepStore.onEnded(reloadSilently)
     return () => {
-      unmounted = true
       requestSeq.current += 1
-      cancel()
+      unsubscribe()
     }
   }, [])
 
@@ -125,18 +111,6 @@ export function UniversePage(): JSX.Element {
             <p className="text-[0.9375rem] font-light text-[var(--color-muted)] mt-1.5">
               Securities tracked for analysis. Data is shared and persists across sessions.
             </p>
-            {sweeping && (
-              <p
-                role="status"
-                className="flex items-center gap-2 text-xs text-[var(--color-muted)] mt-1"
-              >
-                <span
-                  aria-hidden="true"
-                  className="inline-block h-3.5 w-3.5 shrink-0 rounded-full border-2 border-current border-t-transparent opacity-70 motion-safe:animate-spin"
-                />
-                Updating universe data — the table will refresh when it finishes.
-              </p>
-            )}
           </div>
           {/* The form normally lives in the controls row below, but that row only renders once
               the universe has entries — without this fallback an empty universe would have no

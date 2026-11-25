@@ -2,6 +2,7 @@ import type { JSX } from 'react'
 import { Link } from 'react-router-dom'
 import { BackendStatus } from './BackendStatus'
 import { NavItem } from './NavItem'
+import { SweepIndicator } from './SweepIndicator'
 
 export function Header(): JSX.Element {
   return (
@@ -23,6 +24,7 @@ export function Header(): JSX.Element {
             <NavItem label="Macro" to="/macro" />
             <NavItem label="Settings & Ops" icon title="Settings & Ops" to="/ops" />
           </nav>
+          <SweepIndicator />
           <BackendStatus />
         </div>
       </div>
