@@ -1,6 +1,6 @@
 # Contract 0198 — The portfolio/preset dialog ignores clicks outside it
 
-**Status:** in-progress <!-- open | in-progress | reported | accepted | rejected | abandoned -->
+**Status:** reported <!-- open | in-progress | reported | accepted | rejected | abandoned -->
 **Assigned to:** haiku <!-- haiku | sonnet -->
 **Author:** planner (opus)
 
