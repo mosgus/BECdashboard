@@ -71,6 +71,28 @@ function saveName(name: string): void {
   }
 }
 
+// lucide-react "upload" icon (ISC licensed), the counterpart of DownloadIcon. Kept here because only this dialog uses it.
+function UploadIcon(): JSX.Element {
+  return (
+    <svg
+      aria-hidden="true"
+      width={18}
+      height={18}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="shrink-0"
+    >
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+      <polyline points="17 8 12 3 7 8" />
+      <line x1="12" y1="3" x2="12" y2="15" />
+    </svg>
+  )
+}
+
 function Spinner(): JSX.Element {
   return (
     <span
@@ -404,7 +426,7 @@ function SlotRow({ slot, state, onFiles, onRevert }: SlotRowProps): JSX.Element 
       }}
       onDragLeave={() => setDragOver(false)}
       onDrop={handleDrop}
-      className={`flex-1 text-center text-xs px-3 py-3 rounded-[var(--radius-btn)] border border-dashed ${
+      className={`flex-1 flex items-center justify-center gap-2 text-center text-xs px-3 py-3 rounded-[var(--radius-btn)] border border-dashed ${
         disabled
           ? 'border-brand-border text-[var(--color-muted)] opacity-60 cursor-not-allowed'
           : dragOver
@@ -412,7 +434,8 @@ function SlotRow({ slot, state, onFiles, onRevert }: SlotRowProps): JSX.Element 
             : 'border-brand-border text-[var(--color-muted)] hover:bg-brand-border hover:text-foreground cursor-pointer'
       }`}
     >
-      {locked ? 'Locked' : 'Drop .xlsx here or click to choose'}
+      {!locked && <UploadIcon />}
+      <span>{locked ? 'Locked' : 'Drop .xlsx here'}</span>
       <input
         ref={input}
         type="file"
